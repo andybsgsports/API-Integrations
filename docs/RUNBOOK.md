@@ -19,16 +19,29 @@
 0 6-20 * * *  cd /opt/sanmar-netsuite && .venv/bin/sanmar-sync sync-inventory >> /var/log/sanmar/inv.log 2>&1
 ```
 
+## Sandbox → production promotion
+
+The integration is locked to sandbox by two gates (see README "Sandbox-first
+safety"): `SYNC_DRY_RUN` and the production guardrail. Promote only after
+sandbox sign-off:
+
+1. **Sandbox**: `NETSUITE_ACCOUNT_ID` = a `_SB1` realm,
+   `NETSUITE_ALLOW_PRODUCTION_WRITES=false`. All testing happens here.
+2. **Production**: switch `NETSUITE_ACCOUNT_ID` to the live realm **and** set
+   `NETSUITE_ALLOW_PRODUCTION_WRITES=true`. Missing either gate, the client
+   refuses to connect — by design.
+
 ## First-time go-live checklist
 
 1. `NETSUITE_SETUP.md` steps 1–9 complete in **sandbox**.
-2. `.env` filled; `SYNC_DRY_RUN=true`.
+2. `.env` filled; `SYNC_DRY_RUN=true`; `NETSUITE_ACCOUNT_ID` = sandbox `_SB1`.
 3. `sanmar-sync download` — confirm files land in `downloads/`.
 4. `sanmar-sync sync-catalog` (dry run) — review the logged payloads.
 5. `export-csv` → CSV import the matrix items into sandbox.
-6. `SYNC_DRY_RUN=false SYNC_MAX_RECORDS=2 sanmar-sync sync-catalog` — verify 2 items.
+6. `SYNC_DRY_RUN=false SYNC_MAX_RECORDS=2 sanmar-sync sync-catalog` — verify 2
+   items in **sandbox** (guardrail allows it because the realm is `_SB1`).
 7. Remove the cap; run `all`. Validate prices, images, availability on a few SKUs.
-8. Repeat against **production** account id + tokens.
+8. Sign off, then promote per "Sandbox → production promotion" above.
 9. Schedule the jobs.
 
 ## Resetting the delta cache

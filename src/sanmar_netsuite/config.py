@@ -123,7 +123,18 @@ class NetSuiteConfig:
     price_level_base: str
     price_level_case: str
     price_level_msrp: str
+    allow_production_writes: bool = False
     fields: NetSuiteFieldMap = field(default_factory=NetSuiteFieldMap.from_env)
+
+    @property
+    def is_sandbox(self) -> bool:
+        """True when the account id targets a NetSuite sandbox/release-preview.
+
+        Sandbox realms look like ``1234567_SB1`` (REST host ``1234567-sb1``);
+        release-preview is ``_RP``. Anything else is treated as production.
+        """
+        ident = f"{self.account_id} {self.rest_base}".lower()
+        return any(token in ident for token in ("_sb", "-sb", "_rp", "-rp"))
 
     @classmethod
     def from_env(cls) -> NetSuiteConfig:
@@ -149,6 +160,7 @@ class NetSuiteConfig:
             price_level_base=_get("NETSUITE_PRICE_LEVEL_BASE", "1"),
             price_level_case=_get("NETSUITE_PRICE_LEVEL_CASE"),
             price_level_msrp=_get("NETSUITE_PRICE_LEVEL_MSRP"),
+            allow_production_writes=_get_bool("NETSUITE_ALLOW_PRODUCTION_WRITES", False),
             fields=NetSuiteFieldMap.from_env(),
         )
 
