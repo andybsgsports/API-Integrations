@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sanmar-netsuite"
+version = "0.1.0"
+description = "Sync SanMar product catalog, images, pricing, and inventory into NetSuite as matrix inventory items."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Badger Sporting Goods" }]
+dependencies = [
+    "paramiko>=3.4",          # SanMar SFTP
+    "requests>=2.31",         # NetSuite SuiteTalk REST
+    "requests-oauthlib>=1.3", # NetSuite TBA (OAuth 1.0a) signing
+    "python-dotenv>=1.0",     # local .env loading
+    "pydantic>=2.6",          # settings + payload validation
+    "tenacity>=8.2",          # retry/backoff for network calls
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    "types-requests",
+    "types-paramiko",
+]
+
+[project.scripts]
+sanmar-sync = "sanmar_netsuite.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sanmar_netsuite = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+ignore_missing_imports = true
+packages = ["sanmar_netsuite"]
