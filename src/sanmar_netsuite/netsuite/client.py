@@ -29,6 +29,24 @@ from ..config import NetSuiteConfig
 log = logging.getLogger(__name__)
 
 
+def _guard_production(config: NetSuiteConfig) -> None:
+    """Refuse to talk to a production NetSuite account unless explicitly allowed.
+
+    Sandbox-first safety: constructing a client against a non-sandbox realm
+    raises unless ``NETSUITE_ALLOW_PRODUCTION_WRITES=true`` is set. This makes it
+    impossible to accidentally point a run at production during testing.
+    """
+    if config.is_sandbox or config.allow_production_writes:
+        return
+    raise RuntimeError(
+        f"Refusing to connect to a non-sandbox NetSuite account "
+        f"(NETSUITE_ACCOUNT_ID={config.account_id!r}). This integration is "
+        "locked to sandbox during testing. Use a sandbox realm (e.g. "
+        "'1234567_SB1'), or set NETSUITE_ALLOW_PRODUCTION_WRITES=true to "
+        "deliberately enable production access."
+    )
+
+
 def _internal_id_from_location(location: str) -> str:
     """Extract the trailing internal id from a REST ``Location`` header URL."""
     if not location:
@@ -58,6 +76,7 @@ class NetSuiteClient:
             raise RuntimeError(
                 "NETSUITE_ACCOUNT_ID (or NETSUITE_REST_BASE) is not configured."
             )
+        _guard_production(config)
         self._config = config
         self._timeout = timeout
         self._session = requests.Session()

@@ -121,6 +121,22 @@ mypy
 
 Tests run entirely offline against fixtures in `tests/fixtures/`.
 
+## Sandbox-first safety
+
+Two independent locks keep this from touching live data while you test:
+
+1. **`SYNC_DRY_RUN=true`** (default) — parses, transforms, and logs payloads but
+   makes no NetSuite calls at all.
+2. **Production guardrail** — even with dry-run off, constructing a NetSuite
+   client against a non-sandbox account **raises** unless
+   `NETSUITE_ALLOW_PRODUCTION_WRITES=true`. Point `NETSUITE_ACCOUNT_ID` at a
+   sandbox realm (e.g. `1234567_SB1`) for all testing; flip the flag only after
+   sandbox sign-off.
+
+So the path to go live is deliberate: validate in dry-run → run against the
+**sandbox** account → review records → then (and only then) set the production
+account id and `NETSUITE_ALLOW_PRODUCTION_WRITES=true`.
+
 ## Security notes
 
 - Secrets live only in `.env` (git-ignored). Never commit real credentials.
