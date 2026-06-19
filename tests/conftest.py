@@ -15,3 +15,8 @@ def sdl_n_path() -> Path:
 @pytest.fixture
 def dip_path() -> Path:
     return FIXTURES / "sample_dip.txt"
+
+
+@pytest.fixture
+def ss_products_path() -> Path:
+    return FIXTURES / "ss" / "sample_products.json"

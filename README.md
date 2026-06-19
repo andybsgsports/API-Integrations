@@ -1,11 +1,28 @@
-# SanMar → NetSuite Integration
+# API Integrations → NetSuite
+
+Home for Badger Sporting Goods' supplier-to-NetSuite integrations.
+
+| Integration | Source | Transport | CLI | Status |
+|-------------|--------|-----------|-----|--------|
+| **SanMar** | SanMar account #298728 | SFTP (port 2200) — daily/hourly files | `sanmar-sync` | Ready, awaiting SFTP password + sandbox NetSuite creds |
+| **S&S Activewear** | S&S account #07548 | REST (`api.ssactivewear.com/v2`) — HTTP Basic | `ss-sync` | Ready, awaiting network-egress allowlist for live test |
+
+Both integrations share the same NetSuite REST client, the same sandbox-first
+safety pattern (`SYNC_DRY_RUN` + production guard), and use distinct
+external-id namespaces (`SANMAR-…` vs `SS-…`) so they don't collide on the
+same NetSuite account.
+
+> See [`docs/SS_ACTIVEWEAR.md`](docs/SS_ACTIVEWEAR.md) for the S&S setup.
+> The rest of this README documents the SanMar integration.
+
+---
+
+## SanMar → NetSuite
 
 Syncs the SanMar product catalog, images, pricing, and inventory availability
-into NetSuite as **matrix inventory items**.
-
-Built for Badger Sporting Goods (SanMar account **#298728**). Pulls SanMar's
-daily/hourly data files over SFTP, transforms them, and upserts into NetSuite
-via the SuiteTalk REST API — skipping anything unchanged since the last run.
+into NetSuite as **matrix inventory items**. Pulls SanMar's daily/hourly data
+files over SFTP, transforms them, and upserts into NetSuite via the SuiteTalk
+REST API — skipping anything unchanged since the last run.
 
 > **Scope:** inbound product data only — catalog, images, pricing, inventory.
 > Outbound purchase-order submission (`submitPO` / PromoStandards `SendPO`) is

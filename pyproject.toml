@@ -31,12 +31,14 @@ dev = [
 
 [project.scripts]
 sanmar-sync = "sanmar_netsuite.cli:main"
+ss-sync = "ss_activewear_netsuite.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 sanmar_netsuite = ["py.typed"]
+ss_activewear_netsuite = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -54,4 +56,4 @@ select = ["E", "F", "I", "UP", "B", "W"]
 python_version = "3.10"
 warn_unused_ignores = true
 ignore_missing_imports = true
-packages = ["sanmar_netsuite"]
+packages = ["sanmar_netsuite", "ss_activewear_netsuite"]
