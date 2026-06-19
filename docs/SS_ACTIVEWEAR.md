@@ -80,6 +80,17 @@ ss-sync sync-inventory  # update qty available + per-warehouse breakdown
 ss-sync all
 ```
 
+### Catalog pull strategy
+
+S&S throttles the *unfiltered* `GET /Products` (it returns `503` with a
+`RateLimit` error directing you to "use the Get Product filter options").
+So `ss-sync download` never pulls `/Products` unfiltered: it lists every
+style via `/Styles` (returned in a single un-paged response) and pulls
+products in batched `?styleid=` requests. Nothing extra to configure — just
+run `download`. Note the filtered Products response carries pricing, GTIN,
+images, and a total `qty`, but **not** the per-warehouse breakdown (that
+comes from the `/Inventory` endpoint, used by `sync-inventory`).
+
 `SYNC_DRY_RUN=true` (default) makes every "sync-*" command log payloads
 without calling NetSuite. The production guardrail (refuses to write to
 non-sandbox NetSuite realms unless `NETSUITE_ALLOW_PRODUCTION_WRITES=true`)
