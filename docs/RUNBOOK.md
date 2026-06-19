@@ -75,6 +75,15 @@ the retry/backoff will exhaust — the job exits non-zero and the next scheduled
 run recovers automatically once SanMar is back. No manual action needed unless
 failures persist across multiple windows.
 
+## SanMar API change log
+
+Tracked here so future maintainers know which announcements were evaluated
+against this integration.
+
+| Date | Ref# | Change | Impact on this integration |
+|------|------|--------|----------------------------|
+| 2026-06-05 | 457621 / 417453 | `getProductInfoByBrand` & `getProductInfoByCategory` become async-only; results delivered as `Type_BrandName_Date.csv` / `Type_CategoryName_Date.csv` on FTP. New `MAP_PRICE` column on `getProductBulkInfo`/`getProductDeltaInfo`/`getProductInfoByCategory`/`getProductInfoByBrand` CSVs; new `<mapPrice>` element on `getProductInfoByStyleColorSize` XML. | **None.** This integration uses the daily SFTP feed (`SanMar_SDL_N.csv`, `SanMar_EPDD.csv`, `sanmar_dip.txt`), not any of the impacted on-demand APIs. MAP is already parsed from `SanMar_SDL_N.csv` (`MAPPRICING` column) and mapped to `custitem_sanmar_map`. |
+
 ## Logs
 
 Logs go to stderr with `LEVEL name :: message`. Set `LOG_LEVEL=DEBUG` to see the

@@ -143,5 +143,7 @@ account id and `NETSUITE_ALLOW_PRODUCTION_WRITES=true`.
 - SanMar **SFTP** creds (customer number + FTP password) are distinct from the
   **sanmar.com** web-services login. Retrieve the SFTP password from the
   one-time Bitwarden Send link in onboarding and store it in your secret manager.
+- First time configuring NetSuite? See `docs/NETSUITE_FIRST_TIMER.md` for a
+  click-by-click walkthrough that fills in the `.env` values step by step.
 - Pin `SANMAR_SFTP_HOST_KEY` in production to prevent MITM on the SFTP session.
 - NetSuite auth uses Token-Based Auth (OAuth 1.0a, HMAC-SHA256) — no passwords.
