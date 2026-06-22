@@ -58,10 +58,12 @@ def test_class_maps_from_category() -> None:
 
 def test_accounts_and_tax_default_and_override(tmp_path: Path) -> None:
     rows = _read(write_matrix_csv(parse_styles(FIXTURE), tmp_path / "a.csv"))
-    assert DEFAULT_INCOME_ACCOUNT == "SALES OF MERCHANDISE"
+    # Accounts are referenced by number so NetSuite's CSV import resolves them.
+    assert DEFAULT_INCOME_ACCOUNT == "4100"
     assert all(r["Income Account"] == DEFAULT_INCOME_ACCOUNT for r in rows)
+    assert all(r["COGS Account"] == "5100" and r["Asset Account"] == "1200" for r in rows)
     assert all(r["Tax Schedule"] == DEFAULT_TAX_SCHEDULE == "Taxable" for r in rows)
     rows2 = _read(
-        write_matrix_csv(parse_styles(FIXTURE), tmp_path / "b.csv", income_account="4100")
+        write_matrix_csv(parse_styles(FIXTURE), tmp_path / "b.csv", income_account="4150")
     )
-    assert all(r["Income Account"] == "4100" for r in rows2)
+    assert all(r["Income Account"] == "4150" for r in rows2)

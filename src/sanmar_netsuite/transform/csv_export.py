@@ -50,16 +50,17 @@ CATEGORY_TO_CLASS = {
 }
 
 # Accounts/tax are configurable (see SyncConfig); the rest are BSG-standard
-# defaults taken from their live item records.
-DEFAULT_INCOME_ACCOUNT = "SALES OF MERCHANDISE"
-DEFAULT_COGS_ACCOUNT = "COST OF MERCHANDISE SOLD"
-DEFAULT_ASSET_ACCOUNT = "INVENTORY"
+# defaults taken from their live item records. Accounts are referenced by
+# NUMBER because NetSuite's CSV import resolves account names inconsistently.
+DEFAULT_INCOME_ACCOUNT = "4100"  # SALES OF MERCHANDISE
+DEFAULT_COGS_ACCOUNT = "5100"  # COST OF MERCHANDISE SOLD
+DEFAULT_ASSET_ACCOUNT = "1200"  # INVENTORY
 DEFAULT_TAX_SCHEDULE = "Taxable"
 DEFAULT_SUBSIDIARY = "Parent Company : Badger Sporting Goods Company"
 DEFAULT_DEPARTMENT = "Apparel"
 DEFAULT_LOCATION = "Badger Sporting Goods"
 DEFAULT_COSTING_METHOD = "Average"
-DEFAULT_VENDOR = "SanMar"
+DEFAULT_VENDOR = "Sanmar Corp"  # exact NetSuite vendor entity name
 
 CHILD_MATRIX_TYPE = "Child Matrix Item"
 
