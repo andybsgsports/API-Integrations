@@ -21,6 +21,7 @@ from pathlib import Path
 
 from ..models import StyleRecord
 from .catalog import _primary_image_url  # reuse the primary-image picker
+from .sizes import normalize_size
 
 CSV_COLUMNS = [
     "External ID",  # SANMAR-<unique_key>
@@ -55,18 +56,19 @@ def _row(sku, style: StyleRecord) -> dict[str, str]:
 
     color_img = style.images_by_color.get(sku.color_name)
     image_url = color_img.primary_url() if color_img else _primary_image_url(style)
+    size = normalize_size(sku.size)
     return {
         "External ID": child_external_id(sku.unique_key),
         "Parent External ID": parent_external_id(sku.style),
-        "Item Name": f"{sku.style}:{sku.mainframe_color or sku.color_name}:{sku.size}",
+        "Item Name": f"{sku.style}:{sku.mainframe_color or sku.color_name}:{size}",
         "Parent Item Name": sku.style,
-        "Display Name": f"{style.title} - {sku.color_name} - {sku.size}"[:60],
+        "Display Name": f"{style.title} - {sku.color_name} - {size}"[:60],
         "Description": sku.description or style.description,
         "Brand": style.brand,
         "Category": style.category,
         "Subcategory": style.subcategory,
         "Color": sku.color_name,
-        "Size": sku.size,
+        "Size": size,
         "Mainframe Color": sku.mainframe_color,
         "SanMar Unique Key": sku.unique_key,
         "SanMar Inventory Key": sku.inventory_key,
