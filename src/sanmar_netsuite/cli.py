@@ -135,6 +135,24 @@ def cmd_export_csv(args: argparse.Namespace, config: AppConfig) -> int:
     return 0
 
 
+def cmd_ensure_matrix_options(args: argparse.Namespace, config: AppConfig) -> int:
+    """Create (or, in dry-run, preview) any missing matrix color/size values.
+
+    Reads the live matrix lists, so it needs NetSuite credentials even when
+    previewing. Writes only when ``SYNC_DRY_RUN=false``.
+    """
+    from .netsuite.client import NetSuiteClient
+    from .netsuite.matrix_options import ensure_matrix_options
+    from .sanmar.parsers import parse_styles
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    client = NetSuiteClient(config.netsuite)
+    report = ensure_matrix_options(client, styles, allow_create=not config.sync.dry_run)
+    print(report.summary())
+    return 0
+
+
 def cmd_all(args: argparse.Namespace, config: AppConfig) -> int:
     from .sync.catalog_sync import sync_catalog
     from .sync.inventory_sync import sync_inventory
@@ -197,6 +215,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
     p.add_argument("--out", default="data/matrix_items.csv", help="Output CSV path")
     p.set_defaults(func=cmd_export_csv)
+
+    p = sub.add_parser(
+        "ensure-matrix-options",
+        help="Create any missing matrix color/size list values (preview unless "
+        "SYNC_DRY_RUN=false)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.set_defaults(func=cmd_ensure_matrix_options)
 
     p = sub.add_parser("all", help="Download + catalog + pricing + inventory")
     p.add_argument("--catalog-file", default=None, help="Path to SDL_N/EPDD CSV")
