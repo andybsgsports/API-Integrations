@@ -50,12 +50,12 @@ CATEGORY_TO_CLASS = {
 }
 
 # Accounts/tax are configurable (see SyncConfig); the rest are BSG-standard
-# defaults taken from their live item records. Accounts are referenced as
-# "<number> <name>" — NetSuite's CSV import resolves neither the bare number
-# nor the bare name on its own.
-DEFAULT_INCOME_ACCOUNT = "4100 SALES OF MERCHANDISE"
-DEFAULT_COGS_ACCOUNT = "5100 COST OF MERCHANDISE SOLD"
-DEFAULT_ASSET_ACCOUNT = "1200 INVENTORY"
+# defaults taken from their live item records. Accounts are referenced by
+# NUMBER — BSG's import map resolves account numbers (verified against a
+# successful import).
+DEFAULT_INCOME_ACCOUNT = "4100"  # SALES OF MERCHANDISE
+DEFAULT_COGS_ACCOUNT = "5100"  # COST OF MERCHANDISE SOLD
+DEFAULT_ASSET_ACCOUNT = "1200"  # INVENTORY
 DEFAULT_TAX_SCHEDULE = "Taxable"
 DEFAULT_SUBSIDIARY = "Parent Company : Badger Sporting Goods Company"
 DEFAULT_DEPARTMENT = "Apparel"
