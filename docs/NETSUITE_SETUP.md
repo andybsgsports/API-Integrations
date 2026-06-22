@@ -123,8 +123,31 @@ Then `Setup > Import/Export > Import CSV Records`:
   option fields, accounts/class/department/etc. to their fields.
 - Save the map as `SanMar Matrix Items` so you can re-run it.
 
-NetSuite nests each child under its parent style via the matrix options. After
-this load, ongoing updates flow through the REST syncs by external id.
+NetSuite nests each child under its parent style via the matrix options.
+
+**Numeric styles:** generate the CSV with `--resolve-parents` so purely-numeric
+styles (e.g. `2000`) reference the parent by internal id instead of name —
+otherwise NetSuite reads the numeric `Subitem Of` as an internal id and links to
+the wrong record:
+
+```bash
+sanmar-sync export-csv --file downloads/SanMar_SDL_N.csv --out data/matrix_items.csv --resolve-parents
+```
+
+### Post-import reconcile (income account + Base Price)
+
+The CSV import nests children but does **not** apply the income account or Base
+Price to them (children inherit the parent's accounts, and the price sublist is
+skipped). Run `reconcile-items` after the import to set them by external id:
+
+```bash
+sanmar-sync reconcile-items --file downloads/SanMar_SDL_N.csv   # preview (dry run)
+SYNC_DRY_RUN=false sanmar-sync reconcile-items --file downloads/SanMar_SDL_N.csv
+```
+
+It sets income (`SYNC_INCOME_ACCOUNT`) and Base Price (SanMar MSRP) on every
+SanMar child found, and reports any not yet imported. After this, ongoing
+updates flow through the REST syncs by external id.
 
 ## 9. Image folder (only if uploading images into NetSuite)
 

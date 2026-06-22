@@ -129,14 +129,61 @@ def cmd_export_csv(args: argparse.Namespace, config: AppConfig) -> int:
 
     path = _resolve_file(args.file, C.FILE_SDL_N, config)
     styles = parse_styles(path)
+    parent_refs: dict[str, str] = {}
+    if getattr(args, "resolve_parents", False):
+        from .netsuite.client import NetSuiteClient
+        from .netsuite.parents import numeric_styles, resolve_numeric_parent_ids
+
+        client = NetSuiteClient(config.netsuite)
+        parent_refs = resolve_numeric_parent_ids(client, styles)
+        unresolved = [s for s in numeric_styles(styles) if s not in parent_refs]
+        log.info("Resolved %d numeric-style parent id(s)", len(parent_refs))
+        if unresolved:
+            log.warning("No NetSuite parent yet for numeric styles: %s", ", ".join(unresolved))
     out = write_matrix_csv(
         styles,
         args.out,
         tax_schedule=config.sync.tax_schedule,
         income_account=config.sync.income_account,
+        parent_refs=parent_refs,
     )
     sku_count = sum(len(s.skus) for s in styles)
     print(f"Wrote {sku_count} SKU rows across {len(styles)} styles -> {out}")
+    return 0
+
+
+def _resolve_account_id(client, account_ref: str) -> str | None:
+    """Resolve an account reference ('4100' or '4100 NAME') to its internal id."""
+    from .netsuite.repository import _sql_escape
+
+    number = account_ref.split()[0] if account_ref else account_ref
+    rows = client.suiteql(f"SELECT id FROM account WHERE acctnumber = '{_sql_escape(number)}'")
+    return str(rows[0]["id"]) if rows else None
+
+
+def cmd_reconcile_items(args: argparse.Namespace, config: AppConfig) -> int:
+    """Set income account + Base Price on SanMar matrix children (post-import).
+
+    NetSuite's CSV matrix import can't apply these to children, so this reconciles
+    them by external id over REST. Writes only when ``SYNC_DRY_RUN=false``.
+    """
+    from .netsuite.client import NetSuiteClient
+    from .netsuite.reconcile import reconcile_items
+    from .netsuite.repository import ItemRepository
+    from .sanmar.parsers import parse_styles
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    client = NetSuiteClient(config.netsuite)
+    income_id = _resolve_account_id(client, config.sync.income_account)
+    if income_id is None:
+        log.error("Income account %r not found in NetSuite.", config.sync.income_account)
+        return 2
+    repo = ItemRepository(client, config.netsuite)
+    report = reconcile_items(
+        repo, styles, income_account_id=income_id, allow_write=not config.sync.dry_run
+    )
+    print(report.summary())
     return 0
 
 
@@ -231,7 +278,19 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("export-csv", help="Generate the matrix-item import CSV")
     p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
     p.add_argument("--out", default="data/matrix_items.csv", help="Output CSV path")
+    p.add_argument(
+        "--resolve-parents",
+        action="store_true",
+        help="Look up parent internal ids for numeric styles (needs NetSuite creds)",
+    )
     p.set_defaults(func=cmd_export_csv)
+
+    p = sub.add_parser(
+        "reconcile-items",
+        help="Set income account + Base Price on imported matrix children (post-import)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.set_defaults(func=cmd_reconcile_items)
 
     p = sub.add_parser(
         "ensure-matrix-options",

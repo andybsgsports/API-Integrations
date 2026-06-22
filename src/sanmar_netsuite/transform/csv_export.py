@@ -125,18 +125,22 @@ def _row(
     cogs_account: str,
     asset_account: str,
     tax_schedule: str,
+    parent_refs: dict[str, str],
 ) -> dict[str, str]:
     from ..netsuite.repository import child_external_id
 
     size = normalize_size(sku.size)
     cost = _num(sku.piece_price)
+    # Numeric styles are referenced by parent internal id (see netsuite.parents);
+    # everything else by the style name.
+    subitem_of = parent_refs.get(sku.style, sku.style)
     return {
         "External ID": child_external_id(sku.unique_key),
         "Item Name/Number": _child_item_name(sku.style, sku.color_name, size),
         "Display Name/Code": style.title[:60],
         "Vendor Name/Code": sku.style,
         "Parent/Child Matrix Item": CHILD_MATRIX_TYPE,
-        "Subitem Of": sku.style,
+        "Subitem Of": subitem_of,
         "Matrix Attribute 1 - Size": size,
         "Matrix Attribute 2 - Color": sku.color_name,
         "UPC Code": sku.gtin,
@@ -171,14 +175,18 @@ def write_matrix_csv(
     income_account: str = DEFAULT_INCOME_ACCOUNT,
     cogs_account: str = DEFAULT_COGS_ACCOUNT,
     asset_account: str = DEFAULT_ASSET_ACCOUNT,
+    parent_refs: dict[str, str] | None = None,
 ) -> Path:
     """Write a matrix child-item import CSV for all SKUs across ``styles``.
 
     Each row is a child matrix item linked to its parent style via ``Subitem Of``
-    in BSG's import-template format. Accounts and tax schedule are written
-    verbatim; the parent matrix items must already exist with the SKUs'
-    colors/sizes in their grids.
+    in BSG's import-template format. ``parent_refs`` maps a style name to the
+    value to use for ``Subitem Of`` (used to reference numeric styles by parent
+    internal id); styles absent from it are referenced by name. Accounts and tax
+    schedule are written verbatim; the parent matrix items must already exist
+    with the SKUs' colors/sizes in their grids.
     """
+    refs = parent_refs or {}
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8", newline="") as fh:
@@ -194,6 +202,7 @@ def write_matrix_csv(
                         cogs_account=cogs_account,
                         asset_account=asset_account,
                         tax_schedule=tax_schedule,
+                        parent_refs=refs,
                     )
                 )
     return out_path

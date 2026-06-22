@@ -53,6 +53,18 @@ def test_vendor_code_is_style_and_base_price_is_msrp(tmp_path: Path) -> None:
     assert k420 and all(r["Base Price"] == "18.00" for r in k420)
 
 
+def test_numeric_style_uses_parent_internal_id_ref(tmp_path: Path) -> None:
+    # Numeric styles (e.g. 2000) must reference the parent by internal id, while
+    # alphanumeric styles stay referenced by name.
+    rows = _read(
+        write_matrix_csv(parse_styles(FIXTURE), tmp_path / "m.csv", parent_refs={"2000": "100102"})
+    )
+    two_thousand = [r for r in rows if r["Vendor Name/Code"] == "2000"]
+    assert two_thousand and all(r["Subitem Of"] == "100102" for r in two_thousand)
+    k420 = [r for r in rows if r["Vendor Name/Code"] == "K420"]
+    assert k420 and all(r["Subitem Of"] == "K420" for r in k420)
+
+
 def test_class_maps_from_category() -> None:
     assert class_for_category("Knit Shirts") == "Tops : Polos"
     assert class_for_category("Tee Shirts") == "Tops : Tees"
