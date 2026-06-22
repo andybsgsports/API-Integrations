@@ -27,9 +27,40 @@ def resolve_numeric_parent_ids(client, styles: Iterable[StyleRecord]) -> dict[st
     Styles whose parent does not exist yet are simply absent from the result
     (their children can't be nested until the parent is created anyway).
     """
-    wanted = numeric_styles(styles)
-    if not wanted:
+    return _resolve_parent_ids(client, numeric_styles(styles))
+
+
+def resolve_parent_ids(client, styles: Iterable[StyleRecord]) -> dict[str, str]:
+    """Map every style to its existing parent matrix item's internal id.
+
+    Used for merge-aware exports: referencing all parents by internal id (and
+    mapping ``Subitem Of`` by internal id at import) sidesteps the numeric-style
+    collision uniformly.
+    """
+    return _resolve_parent_ids(client, sorted({s.style for s in styles}))
+
+
+def _resolve_parent_ids(client, names: list[str]) -> dict[str, str]:
+    if not names:
         return {}
-    inlist = ",".join(f"'{_sql_escape(s)}'" for s in wanted)
+    inlist = ",".join(f"'{_sql_escape(s)}'" for s in names)
     rows = client.suiteql(f"SELECT id, itemid FROM item WHERE itemid IN ({inlist})")
-    return {str(r["itemid"]): str(r["id"]) for r in rows if str(r["itemid"]) in set(wanted)}
+    wanted = set(names)
+    return {str(r["itemid"]): str(r["id"]) for r in rows if str(r["itemid"]) in wanted}
+
+
+def existing_child_combos(client, parent_id: str) -> set[tuple[str, str]]:
+    """The set of (color id, size id) combinations already under a parent.
+
+    Reads the matrix option values with a plain SELECT (filtering on the custom
+    field is unreliable in SuiteQL, but selecting it is fine).
+    """
+    rows = client.suiteql(
+        "SELECT custitem_bsg_color AS color, custitem_bsg_size AS size "
+        f"FROM item WHERE parent = {int(parent_id)}"
+    )
+    return {
+        (str(r["color"]), str(r["size"]))
+        for r in rows
+        if r.get("color") and r.get("size")
+    }

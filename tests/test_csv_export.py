@@ -70,6 +70,15 @@ def test_numeric_style_uses_parent_internal_id_ref(tmp_path: Path) -> None:
     assert k420 and all(r["Subitem Of"] == "K420" for r in k420)
 
 
+def test_skip_external_ids_omits_those_rows(tmp_path: Path) -> None:
+    from sanmar_netsuite.netsuite.repository import child_external_id
+
+    styles = parse_styles(FIXTURE)
+    skip_one = next(child_external_id(sku.unique_key) for s in styles for sku in s.skus)
+    rows = _read(write_matrix_csv(styles, tmp_path / "m.csv", skip_external_ids={skip_one}))
+    assert rows and all(r["External ID"] != skip_one for r in rows)
+
+
 def test_class_maps_from_category() -> None:
     assert class_for_category("Knit Shirts") == "Tops : Polos"
     assert class_for_category("Tee Shirts") == "Tops : Tees"

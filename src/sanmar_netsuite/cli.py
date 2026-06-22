@@ -130,25 +130,28 @@ def cmd_export_csv(args: argparse.Namespace, config: AppConfig) -> int:
     path = _resolve_file(args.file, C.FILE_SDL_N, config)
     styles = parse_styles(path)
     parent_refs: dict[str, str] = {}
-    if getattr(args, "resolve_parents", False):
+    skip: set[str] = set()
+    if getattr(args, "merge", False):
         from .netsuite.client import NetSuiteClient
-        from .netsuite.parents import numeric_styles, resolve_numeric_parent_ids
+        from .netsuite.merge import prepare_merge
 
         client = NetSuiteClient(config.netsuite)
-        parent_refs = resolve_numeric_parent_ids(client, styles)
-        unresolved = [s for s in numeric_styles(styles) if s not in parent_refs]
-        log.info("Resolved %d numeric-style parent id(s)", len(parent_refs))
-        if unresolved:
-            log.warning("No NetSuite parent yet for numeric styles: %s", ", ".join(unresolved))
+        parent_refs, skip = prepare_merge(client, styles)
+        log.info(
+            "Merge mode: %d parent id(s) resolved, %d existing combo(s) skipped",
+            len(parent_refs),
+            len(skip),
+        )
     out = write_matrix_csv(
         styles,
         args.out,
         tax_schedule=config.sync.tax_schedule,
         income_account=config.sync.income_account,
         parent_refs=parent_refs,
+        skip_external_ids=skip,
     )
-    sku_count = sum(len(s.skus) for s in styles)
-    print(f"Wrote {sku_count} SKU rows across {len(styles)} styles -> {out}")
+    total = sum(len(s.skus) for s in styles)
+    print(f"Wrote {total - len(skip)} of {total} SKU rows ({len(skip)} skipped) -> {out}")
     return 0
 
 
@@ -279,9 +282,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
     p.add_argument("--out", default="data/matrix_items.csv", help="Output CSV path")
     p.add_argument(
-        "--resolve-parents",
+        "--merge",
         action="store_true",
-        help="Look up parent internal ids for numeric styles (needs NetSuite creds)",
+        help="Merge-aware export: reference parents by internal id and skip "
+        "existing color/size combos (needs NetSuite creds)",
     )
     p.set_defaults(func=cmd_export_csv)
 

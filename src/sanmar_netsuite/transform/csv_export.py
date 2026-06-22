@@ -190,17 +190,20 @@ def write_matrix_csv(
     cogs_account: str = DEFAULT_COGS_ACCOUNT,
     asset_account: str = DEFAULT_ASSET_ACCOUNT,
     parent_refs: dict[str, str] | None = None,
+    skip_external_ids: set[str] | None = None,
 ) -> Path:
     """Write a matrix child-item import CSV for all SKUs across ``styles``.
 
     Each row is a child matrix item linked to its parent style via ``Subitem Of``
     in BSG's import-template format. ``parent_refs`` maps a style name to the
-    value to use for ``Subitem Of`` (used to reference numeric styles by parent
-    internal id); styles absent from it are referenced by name. Accounts and tax
-    schedule are written verbatim; the parent matrix items must already exist
-    with the SKUs' colors/sizes in their grids.
+    value to use for ``Subitem Of`` (used to reference parents by internal id);
+    styles absent from it are referenced by name. ``skip_external_ids`` are
+    children whose combo already exists in NetSuite and are left out.
     """
     refs = parent_refs or {}
+    skip = skip_external_ids or set()
+    from ..netsuite.repository import child_external_id
+
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8", newline="") as fh:
@@ -208,6 +211,8 @@ def write_matrix_csv(
         writer.writeheader()
         for style in styles:
             for sku in style.skus:
+                if child_external_id(sku.unique_key) in skip:
+                    continue
                 writer.writerow(
                     _row(
                         sku,

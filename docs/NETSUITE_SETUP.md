@@ -125,14 +125,19 @@ Then `Setup > Import/Export > Import CSV Records`:
 
 NetSuite nests each child under its parent style via the matrix options.
 
-**Numeric styles:** generate the CSV with `--resolve-parents` so purely-numeric
-styles (e.g. `2000`) reference the parent by internal id instead of name —
-otherwise NetSuite reads the numeric `Subitem Of` as an internal id and links to
-the wrong record:
+**Merging into existing parents:** generate the CSV with `--merge`. It reads the
+live catalog and (a) references every parent by **internal id** in `Subitem Of`
+— so purely-numeric styles like `2000` resolve correctly instead of colliding
+with an internal id — and (b) **skips color/size combos that already exist**, so
+the import only adds genuinely new children (no "already exists" / "missing
+price(s)" noise):
 
 ```bash
-sanmar-sync export-csv --file downloads/SanMar_SDL_N.csv --out data/matrix_items.csv --resolve-parents
+sanmar-sync export-csv --file downloads/SanMar_SDL_N.csv --out data/matrix_items.csv --merge
 ```
+
+Because `Subitem Of` then holds internal ids, set that column's reference in the
+Import Assistant to match by **Internal ID**.
 
 ### Post-import reconcile (income account + Base Price)
 
