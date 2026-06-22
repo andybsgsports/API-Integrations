@@ -171,6 +171,7 @@ class SyncConfig:
     max_records: int
     dry_run: bool
     log_level: str
+    tax_schedule: str
 
     @classmethod
     def from_env(cls) -> SyncConfig:
@@ -179,6 +180,7 @@ class SyncConfig:
             max_records=_get_int("SYNC_MAX_RECORDS", 0),
             dry_run=_get_bool("SYNC_DRY_RUN", True),
             log_level=_get("LOG_LEVEL", "INFO"),
+            tax_schedule=_get("SYNC_TAX_SCHEDULE", "Taxable"),
         )
 
 

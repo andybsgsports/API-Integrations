@@ -43,6 +43,7 @@ def _app_config(tmp_path) -> AppConfig:
             max_records=0,
             dry_run=True,
             log_level="INFO",
+            tax_schedule="Taxable",
         ),
     )
 
@@ -89,6 +90,7 @@ def test_max_records_limit(tmp_path, sdl_n_path):
             max_records=1,
             dry_run=True,
             log_level="INFO",
+            tax_schedule="Taxable",
         ),
     )
     result = sync_catalog(sdl_n_path, config)

@@ -104,8 +104,10 @@ Then `Setup > Import/Export > Import CSV Records`:
 - Import Type: **Items**, Record Type: **Inventory Item**.
 - Data Handling: **Add or Update**.
 - Map columns: `External ID` → External ID, `Parent External ID`/`Parent Item
-  Name` → the matrix parent, `Color`/`Size` → the matrix option fields, prices
-  and `custitem_*` columns to their fields.
+  Name` → the matrix parent, `Color`/`Size` → the matrix option fields,
+  `Tax Schedule` → Tax Schedule (required on inventory items; the CSV carries
+  the `SYNC_TAX_SCHEDULE` value, default `Taxable`), prices and `custitem_*`
+  columns to their fields.
 - Save the map as `SanMar Matrix Items` so you can re-run it.
 
 NetSuite creates the parent items automatically from the parent reference and

@@ -23,6 +23,11 @@ from ..models import StyleRecord
 from .catalog import _primary_image_url  # reuse the primary-image picker
 from .sizes import normalize_size
 
+# NetSuite requires a Tax Schedule on inventory items. SanMar apparel is a
+# taxable good, so every row carries the account's taxable schedule by default;
+# override per account with SYNC_TAX_SCHEDULE.
+DEFAULT_TAX_SCHEDULE = "Taxable"
+
 CSV_COLUMNS = [
     "External ID",  # SANMAR-<unique_key>
     "Parent External ID",  # SANMAR-<style>
@@ -47,11 +52,12 @@ CSV_COLUMNS = [
     "MAP",
     "Weight (lb)",
     "Product Status",
+    "Tax Schedule",  # required by NetSuite for inventory items
     "Image URL",
 ]
 
 
-def _row(sku, style: StyleRecord) -> dict[str, str]:
+def _row(sku, style: StyleRecord, tax_schedule: str) -> dict[str, str]:
     from ..netsuite.repository import child_external_id, parent_external_id
 
     color_img = style.images_by_color.get(sku.color_name)
@@ -81,6 +87,7 @@ def _row(sku, style: StyleRecord) -> dict[str, str]:
         "MAP": _num(sku.map_price),
         "Weight (lb)": _num(sku.piece_weight),
         "Product Status": sku.product_status,
+        "Tax Schedule": tax_schedule,
         "Image URL": image_url,
     }
 
@@ -89,8 +96,17 @@ def _num(value) -> str:
     return "" if value is None else str(value)
 
 
-def write_matrix_csv(styles: Iterable[StyleRecord], out_path: str | Path) -> Path:
-    """Write a matrix-item import CSV for all SKUs across ``styles``."""
+def write_matrix_csv(
+    styles: Iterable[StyleRecord],
+    out_path: str | Path,
+    *,
+    tax_schedule: str = DEFAULT_TAX_SCHEDULE,
+) -> Path:
+    """Write a matrix-item import CSV for all SKUs across ``styles``.
+
+    ``tax_schedule`` is written verbatim into the required NetSuite Tax Schedule
+    column for every row (defaults to the account's taxable schedule).
+    """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -99,6 +115,6 @@ def write_matrix_csv(styles: Iterable[StyleRecord], out_path: str | Path) -> Pat
         writer.writeheader()
         for style in styles:
             for sku in style.skus:
-                writer.writerow(_row(sku, style))
+                writer.writerow(_row(sku, style, tax_schedule))
                 count += 1
     return out_path

@@ -129,7 +129,7 @@ def cmd_export_csv(args: argparse.Namespace, config: AppConfig) -> int:
 
     path = _resolve_file(args.file, C.FILE_SDL_N, config)
     styles = parse_styles(path)
-    out = write_matrix_csv(styles, args.out)
+    out = write_matrix_csv(styles, args.out, tax_schedule=config.sync.tax_schedule)
     sku_count = sum(len(s.skus) for s in styles)
     print(f"Wrote {sku_count} SKU rows across {len(styles)} styles -> {out}")
     return 0
