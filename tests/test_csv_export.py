@@ -44,18 +44,14 @@ def test_display_name_is_title_without_color_or_size(tmp_path: Path) -> None:
         assert r["Matrix Attribute 1 - Size"] not in r["Display Name/Code"]
 
 
-def test_vendor_code_is_style_and_base_price_is_msrp(tmp_path: Path) -> None:
+def test_vendor_code_is_style(tmp_path: Path) -> None:
     rows = _read(write_matrix_csv(parse_styles(FIXTURE), tmp_path / "m.csv"))
     # Vendor Name/Code is the style (== Subitem Of), not the unique child name.
     assert all(r["Vendor Name/Code"] == r["Subitem Of"] for r in rows)
-    # K420 sample MSRP is 18.00; the Base Price line reflects MSRP, not piece price.
-    k420 = [r for r in rows if r["Subitem Of"] == "K420"]
-    assert k420 and all(r["Price"] == "18.00" for r in k420)
-    # ...and the fixed pricing-line fields are filled.
-    assert all(
-        r["Price Level"] == "Base Price" and r["Currency"] == "US Dollar" and r["Quantity"] == "1"
-        for r in k420
-    )
+    # Pricing sublist columns are absent — prices are applied post-import by reconcile-items.
+    assert "Price" not in rows[0]
+    assert "Price Level" not in rows[0]
+    assert "Currency" not in rows[0]
 
 
 def test_numeric_style_uses_parent_internal_id_ref(tmp_path: Path) -> None:

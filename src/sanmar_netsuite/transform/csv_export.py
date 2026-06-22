@@ -63,12 +63,6 @@ DEFAULT_LOCATION = "Badger Sporting Goods"
 DEFAULT_COSTING_METHOD = "Average"
 DEFAULT_VENDOR = "Sanmar Corp"  # exact NetSuite vendor entity name
 
-# Base Price is imported as a pricing-sublist line, not a single field. These are
-# fixed for every SanMar item; the amount is the SanMar MSRP.
-DEFAULT_PRICE_LEVEL = "Base Price"
-DEFAULT_CURRENCY = "US Dollar"
-DEFAULT_PRICE_QUANTITY = "1"
-
 CHILD_MATRIX_TYPE = "Child Matrix Item"
 
 # BSG matrix import-template columns, in order.
@@ -96,11 +90,9 @@ CSV_COLUMNS = [
     "Purchase Price",  # SanMar's piece price (our cost)
     "Vendor 1 Name",
     "Vendor 1 Purchase Price",
-    # Base Price pricing-sublist line (retail = SanMar MSRP)
-    "Price Level",
-    "Currency",
-    "Quantity",
-    "Price",
+    # Pricing sublist columns intentionally omitted: NetSuite's matrix child
+    # importer rejects them with "Please enter missing price(s)" regardless of
+    # format. Prices are applied after import by `reconcile-items` via REST.
     "Weight",
     "COGS Account",
     "Income Account",
@@ -168,11 +160,6 @@ def _row(
         "Purchase Price": cost,
         "Vendor 1 Name": DEFAULT_VENDOR,
         "Vendor 1 Purchase Price": cost,
-        # Base Price line — only emitted when there's an MSRP to price at.
-        "Price Level": DEFAULT_PRICE_LEVEL if sku.msrp is not None else "",
-        "Currency": DEFAULT_CURRENCY if sku.msrp is not None else "",
-        "Quantity": DEFAULT_PRICE_QUANTITY if sku.msrp is not None else "",
-        "Price": _num(sku.msrp),
         "Weight": _num(sku.piece_weight),
         "COGS Account": cogs_account,
         "Income Account": income_account,

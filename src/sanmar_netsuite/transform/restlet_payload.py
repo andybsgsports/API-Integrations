@@ -20,13 +20,14 @@ from ..models import SkuRecord, StyleRecord
 from ..netsuite.repository import child_external_id
 from .csv_export import (
     DEFAULT_COSTING_METHOD,
-    DEFAULT_CURRENCY,
     DEFAULT_DEPARTMENT,
     DEFAULT_LOCATION,
     DEFAULT_SUBSIDIARY,
     class_for_category,
 )
 from .sizes import normalize_size
+
+DEFAULT_CURRENCY = "US Dollar"
 
 # NetSuite's costingmethod field takes a code, not the display label the CSV uses.
 _COSTING_CODE = {"average": "AVG", "lifo": "LIFO", "fifo": "FIFO", "standard": "STD"}
