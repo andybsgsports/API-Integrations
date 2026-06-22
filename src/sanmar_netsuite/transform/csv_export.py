@@ -50,11 +50,12 @@ CATEGORY_TO_CLASS = {
 }
 
 # Accounts/tax are configurable (see SyncConfig); the rest are BSG-standard
-# defaults taken from their live item records. Accounts are referenced by
-# NUMBER because NetSuite's CSV import resolves account names inconsistently.
-DEFAULT_INCOME_ACCOUNT = "4100"  # SALES OF MERCHANDISE
-DEFAULT_COGS_ACCOUNT = "5100"  # COST OF MERCHANDISE SOLD
-DEFAULT_ASSET_ACCOUNT = "1200"  # INVENTORY
+# defaults taken from their live item records. Accounts are referenced as
+# "<number> <name>" — NetSuite's CSV import resolves neither the bare number
+# nor the bare name on its own.
+DEFAULT_INCOME_ACCOUNT = "4100 SALES OF MERCHANDISE"
+DEFAULT_COGS_ACCOUNT = "5100 COST OF MERCHANDISE SOLD"
+DEFAULT_ASSET_ACCOUNT = "1200 INVENTORY"
 DEFAULT_TAX_SCHEDULE = "Taxable"
 DEFAULT_SUBSIDIARY = "Parent Company : Badger Sporting Goods Company"
 DEFAULT_DEPARTMENT = "Apparel"
@@ -67,7 +68,7 @@ CHILD_MATRIX_TYPE = "Child Matrix Item"
 # BSG matrix import-template columns, in order.
 CSV_COLUMNS = [
     "External ID",
-    "Item Name/Number",  # the parent style (NetSuite differentiates by attributes)
+    "Item Name/Number",  # unique child name: style-color-size (must be unique)
     "Display Name/Code",  # product title only — no color/size
     "Vendor Name/Code",  # the vendor's code for the item = the style
     "Parent/Child Matrix Item",
@@ -103,6 +104,15 @@ def class_for_category(category: str) -> str:
     return CATEGORY_TO_CLASS.get((category or "").strip().lower(), "")
 
 
+def _child_item_name(style: str, color: str, size: str) -> str:
+    """The child sub-item's own (unique) Item Name/Number, e.g. ``K420-Black-Small``.
+
+    Each child needs a unique name; sharing the parent style across rows triggers
+    NetSuite uniqueness errors after the first child imports.
+    """
+    return f"{style}-{color}-{size}"
+
+
 def _num(value: Decimal | int | None) -> str:
     return "" if value is None else str(value)
 
@@ -122,7 +132,7 @@ def _row(
     cost = _num(sku.piece_price)
     return {
         "External ID": child_external_id(sku.unique_key),
-        "Item Name/Number": sku.style,
+        "Item Name/Number": _child_item_name(sku.style, sku.color_name, size),
         "Display Name/Code": style.title[:60],
         "Vendor Name/Code": sku.style,
         "Parent/Child Matrix Item": CHILD_MATRIX_TYPE,
