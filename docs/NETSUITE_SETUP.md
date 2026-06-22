@@ -99,20 +99,32 @@ these option fields.
 sanmar-sync export-csv --file downloads/SanMar_SDL_N.csv --out data/matrix_items.csv
 ```
 
+The export writes **one child-matrix row per SKU** in BSG's matrix
+import-template format. Each row carries `Parent/Child Matrix Item` =
+`Child Matrix Item` and `Subitem Of` = the style, so NetSuite nests them under
+the parent instead of creating standalone items. Column conventions match BSG's
+live items: `Vendor Name/Code` = style, `Display Name/Code` = product title,
+`Base Price` = SanMar MSRP, accounts by name (`SALES OF MERCHANDISE` /
+`COST OF MERCHANDISE SOLD` / `INVENTORY`), `Class` mapped from SanMar category
+(`Knit Shirts` → `Tops : Polos`, etc.), `Department` = `Apparel`. Income
+account and tax schedule come from `SYNC_INCOME_ACCOUNT` / `SYNC_TAX_SCHEDULE`.
+
+**Prerequisite:** the parent matrix item must already exist and list each SKU's
+color/size in its grid. The REST API *cannot* create matrix children (the matrix
+option fields are read-only), so this load goes through the Import Assistant.
+
 Then `Setup > Import/Export > Import CSV Records`:
 
 - Import Type: **Items**, Record Type: **Inventory Item**.
 - Data Handling: **Add or Update**.
-- Map columns: `External ID` → External ID, `Parent External ID`/`Parent Item
-  Name` → the matrix parent, `Color`/`Size` → the matrix option fields,
-  `Tax Schedule` → Tax Schedule (required on inventory items; the CSV carries
-  the `SYNC_TAX_SCHEDULE` value, default `Taxable`), prices and `custitem_*`
-  columns to their fields.
+- Map columns straight across (the headers match BSG's matrix template):
+  `Parent/Child Matrix Item` → Matrix Type, `Subitem Of` → Subitem Of,
+  `Matrix Attribute 1 - Size` / `Matrix Attribute 2 - Color` → the matrix
+  option fields, accounts/class/department/etc. to their fields.
 - Save the map as `SanMar Matrix Items` so you can re-run it.
 
-NetSuite creates the parent items automatically from the parent reference and
-links each child via its matrix options. After this load, ongoing updates flow
-through the REST syncs.
+NetSuite nests each child under its parent style via the matrix options. After
+this load, ongoing updates flow through the REST syncs by external id.
 
 ## 9. Image folder (only if uploading images into NetSuite)
 

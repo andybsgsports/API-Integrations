@@ -1,20 +1,21 @@
-"""Generate a NetSuite CSV-import file for the matrix-item load.
+"""Generate a NetSuite CSV-import file for the matrix child-item load.
 
-Creating matrix parent/child structure is far more reliable through NetSuite's
-**CSV Import Assistant** than the REST record API — the REST API cannot create
-true matrix children at all (the matrix option fields are read-only/derived;
-NetSuite only generates children through the UI or this import).
+Matrix structure must be created through NetSuite's **CSV Import Assistant** —
+the REST API cannot create true matrix children (the matrix option fields are
+read-only/derived). This module emits one row per SanMar SKU in BSG's matrix
+import-template format: each row is a *child* matrix item linked to its parent
+style, with the columns and conventions taken from BSG's live items.
 
-Per NetSuite's matrix-import rules, every child row must carry:
+Per NetSuite's matrix-import rules, every child row carries:
 
-* ``Matrix Type`` = ``Child Matrix Item``
-* ``Subitem of`` = the parent matrix item's name (the style)
-* ``Color`` / ``Size`` values that match the matrix custom lists
+* ``Parent/Child Matrix Item`` = ``Child Matrix Item``
+* ``Subitem Of`` = the parent matrix item's name (the style)
+* ``Matrix Attribute 1 - Size`` / ``Matrix Attribute 2 - Color`` matching the
+  matrix custom lists
 
-and the parent matrix item must already list those colors/sizes in its grid
-(handled beforehand by :mod:`sanmar_netsuite.netsuite.matrix_grid`). After this
-load, the REST syncs (:mod:`sanmar_netsuite.sync`) keep prices, availability,
-status, and images current by external id.
+The parent matrix item must already exist and list those colors/sizes in its
+grid. After this load, the REST syncs keep prices, availability, and status
+current by external id.
 
 Import setup notes live in ``docs/NETSUITE_SETUP.md``.
 """
@@ -23,97 +24,132 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Iterable
+from decimal import Decimal
 from pathlib import Path
 
 from ..models import StyleRecord
-from .catalog import _primary_image_url  # reuse the primary-image picker
 from .sizes import normalize_size
 
-# NetSuite requires a Tax Schedule on inventory items. SanMar apparel is a
-# taxable good, so every row carries the account's taxable schedule by default;
-# override per account with SYNC_TAX_SCHEDULE.
-DEFAULT_TAX_SCHEDULE = "Taxable"
+# SanMar category (lowercased) -> NetSuite Class ("Parent : Child"). Anything
+# not listed maps to an empty Class (left for manual assignment in NetSuite).
+CATEGORY_TO_CLASS = {
+    "tee shirts": "Tops : Tees",
+    "t-shirts": "Tops : Tees",
+    "knit shirts": "Tops : Polos",
+    "polos/knits": "Tops : Polos",
+    "sweatshirts/fleece": "Tops : Sweatshirts",
+    "sweatshirts": "Tops : Sweatshirts",
+    "outerwear": "Outerwear : Jackets",
+    "activewear": "Tops",
+    "woven shirts": "Tops",
+    "caps": "Uniforms : Headwear",
+    "headwear": "Uniforms : Headwear",
+    "bags": "Bags",
+    "pants": "Bottoms : Pants",
+    "shorts": "Bottoms : Shorts",
+}
 
-# Income account for the items. SanMar items are merchandise, so they post to
-# the merchandise-sales account by default; override with SYNC_INCOME_ACCOUNT.
+# Accounts/tax are configurable (see SyncConfig); the rest are BSG-standard
+# defaults taken from their live item records.
 DEFAULT_INCOME_ACCOUNT = "SALES OF MERCHANDISE"
+DEFAULT_COGS_ACCOUNT = "COST OF MERCHANDISE SOLD"
+DEFAULT_ASSET_ACCOUNT = "INVENTORY"
+DEFAULT_TAX_SCHEDULE = "Taxable"
+DEFAULT_SUBSIDIARY = "Parent Company : Badger Sporting Goods Company"
+DEFAULT_DEPARTMENT = "Apparel"
+DEFAULT_LOCATION = "Badger Sporting Goods"
+DEFAULT_COSTING_METHOD = "Average"
+DEFAULT_VENDOR = "SanMar"
 
-# NetSuite matrix-type value that marks each row as a child of its parent style.
 CHILD_MATRIX_TYPE = "Child Matrix Item"
 
+# BSG matrix import-template columns, in order.
 CSV_COLUMNS = [
-    "External ID",  # SANMAR-<unique_key>
-    "Matrix Type",  # "Child Matrix Item" — tells NetSuite to nest, not orphan
-    "Item Name",  # the child's own name (style-color-size)
-    "Subitem of",  # parent matrix item name (the style) — the nesting link
-    "Display Name",
+    "External ID",
+    "Item Name/Number",  # the parent style (NetSuite differentiates by attributes)
+    "Display Name/Code",  # product title only — no color/size
+    "Vendor Name/Code",  # the vendor's code for the item = the style
+    "Parent/Child Matrix Item",
+    "Subitem Of",  # parent matrix item name (the style) — the nesting link
+    "Matrix Attribute 1 - Size",
+    "Matrix Attribute 2 - Color",
+    "UPC Code",
     "Description",
-    "Brand",
-    "Category",
-    "Subcategory",
-    "Color",  # matrix option — must match the color custom list
-    "Size",  # matrix option — must match the size custom list
-    "Mainframe Color",
-    "SanMar Unique Key",
-    "SanMar Inventory Key",
-    "SanMar Size Index",
-    "GTIN/UPC",
-    "Base Price",  # piece price
-    "Case Price",
-    "Case Size",
-    "MSRP",
-    "MAP",
-    "Weight (lb)",
-    "Product Status",
-    "Tax Schedule",  # required by NetSuite for inventory items
+    "Units Type",
+    "Stock Units",
+    "Purchase Units",
+    "Sale Units",
+    "Subsidiary",
+    "Include Children",
+    "Department",
+    "Class",
+    "Location",
+    "Costing Method",
+    "Purchase Price",  # SanMar's piece price (our cost)
+    "Vendor 1 Name",
+    "Vendor 1 Purchase Price",
+    "Base Price",  # retail = SanMar MSRP
+    "Weight",
+    "COGS Account",
     "Income Account",
-    "Image URL",
+    "Asset Account",
+    "Tax Schedule",
 ]
 
 
-def _child_item_name(style: str, color: str, size: str) -> str:
-    """The child sub-item's own Item Name/Number, e.g. ``K420-Classic Navy-Small``."""
-    return f"{style}-{color}-{size}"
+def class_for_category(category: str) -> str:
+    """Map a SanMar category to a NetSuite Class path, or '' if unmapped."""
+    return CATEGORY_TO_CLASS.get((category or "").strip().lower(), "")
 
 
-def _row(sku, style: StyleRecord, *, tax_schedule: str, income_account: str) -> dict[str, str]:
+def _num(value: Decimal | int | None) -> str:
+    return "" if value is None else str(value)
+
+
+def _row(
+    sku,
+    style: StyleRecord,
+    *,
+    income_account: str,
+    cogs_account: str,
+    asset_account: str,
+    tax_schedule: str,
+) -> dict[str, str]:
     from ..netsuite.repository import child_external_id
 
-    color_img = style.images_by_color.get(sku.color_name)
-    image_url = color_img.primary_url() if color_img else _primary_image_url(style)
     size = normalize_size(sku.size)
+    cost = _num(sku.piece_price)
     return {
         "External ID": child_external_id(sku.unique_key),
-        "Matrix Type": CHILD_MATRIX_TYPE,
-        "Item Name": _child_item_name(sku.style, sku.color_name, size),
-        "Subitem of": sku.style,
-        "Display Name": f"{style.title} - {sku.color_name} - {size}"[:60],
+        "Item Name/Number": sku.style,
+        "Display Name/Code": style.title[:60],
+        "Vendor Name/Code": sku.style,
+        "Parent/Child Matrix Item": CHILD_MATRIX_TYPE,
+        "Subitem Of": sku.style,
+        "Matrix Attribute 1 - Size": size,
+        "Matrix Attribute 2 - Color": sku.color_name,
+        "UPC Code": sku.gtin,
         "Description": sku.description or style.description,
-        "Brand": style.brand,
-        "Category": style.category,
-        "Subcategory": style.subcategory,
-        "Color": sku.color_name,
-        "Size": size,
-        "Mainframe Color": sku.mainframe_color,
-        "SanMar Unique Key": sku.unique_key,
-        "SanMar Inventory Key": sku.inventory_key,
-        "SanMar Size Index": sku.size_index,
-        "GTIN/UPC": sku.gtin,
-        "Base Price": _num(sku.piece_price),
-        "Case Price": _num(sku.case_price),
-        "Case Size": str(sku.case_size) if sku.case_size is not None else "",
-        "MSRP": _num(sku.msrp),
-        "MAP": _num(sku.map_price),
-        "Weight (lb)": _num(sku.piece_weight),
-        "Product Status": sku.product_status,
-        "Tax Schedule": tax_schedule,
+        "Units Type": "Each",
+        "Stock Units": "Eaches",
+        "Purchase Units": "Eaches",
+        "Sale Units": "Eaches",
+        "Subsidiary": DEFAULT_SUBSIDIARY,
+        "Include Children": "TRUE",
+        "Department": DEFAULT_DEPARTMENT,
+        "Class": class_for_category(style.category),
+        "Location": DEFAULT_LOCATION,
+        "Costing Method": DEFAULT_COSTING_METHOD,
+        "Purchase Price": cost,
+        "Vendor 1 Name": DEFAULT_VENDOR,
+        "Vendor 1 Purchase Price": cost,
+        "Base Price": _num(sku.msrp),
+        "Weight": _num(sku.piece_weight),
+        "COGS Account": cogs_account,
         "Income Account": income_account,
-        "Image URL": image_url,
+        "Asset Account": asset_account,
+        "Tax Schedule": tax_schedule,
     }
-
-
-def _num(value) -> str:
-    return "" if value is None else str(value)
 
 
 def write_matrix_csv(
@@ -122,23 +158,31 @@ def write_matrix_csv(
     *,
     tax_schedule: str = DEFAULT_TAX_SCHEDULE,
     income_account: str = DEFAULT_INCOME_ACCOUNT,
+    cogs_account: str = DEFAULT_COGS_ACCOUNT,
+    asset_account: str = DEFAULT_ASSET_ACCOUNT,
 ) -> Path:
     """Write a matrix child-item import CSV for all SKUs across ``styles``.
 
-    Each row is a child matrix item (``Matrix Type`` = "Child Matrix Item")
-    linked to its parent style via ``Subitem of``. ``tax_schedule`` and
-    ``income_account`` are written verbatim into every row.
+    Each row is a child matrix item linked to its parent style via ``Subitem Of``
+    in BSG's import-template format. Accounts and tax schedule are written
+    verbatim; the parent matrix items must already exist with the SKUs'
+    colors/sizes in their grids.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
     with out_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for style in styles:
             for sku in style.skus:
                 writer.writerow(
-                    _row(sku, style, tax_schedule=tax_schedule, income_account=income_account)
+                    _row(
+                        sku,
+                        style,
+                        income_account=income_account,
+                        cogs_account=cogs_account,
+                        asset_account=asset_account,
+                        tax_schedule=tax_schedule,
+                    )
                 )
-                count += 1
     return out_path

@@ -172,6 +172,7 @@ class SyncConfig:
     dry_run: bool
     log_level: str
     tax_schedule: str
+    income_account: str
 
     @classmethod
     def from_env(cls) -> SyncConfig:
@@ -181,6 +182,7 @@ class SyncConfig:
             dry_run=_get_bool("SYNC_DRY_RUN", True),
             log_level=_get("LOG_LEVEL", "INFO"),
             tax_schedule=_get("SYNC_TAX_SCHEDULE", "Taxable"),
+            income_account=_get("SYNC_INCOME_ACCOUNT", "SALES OF MERCHANDISE"),
         )
 
 
