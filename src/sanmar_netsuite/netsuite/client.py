@@ -70,6 +70,7 @@ class _RetryableHTTP(RuntimeError):
 class NetSuiteClient:
     RECORD_PATH = "/services/rest/record/v1"
     QUERY_PATH = "/services/rest/query/v1"
+    RESTLET_PATH = "/app/site/hosting/restlet.nl"
 
     def __init__(self, config: NetSuiteConfig, *, timeout: int = 60) -> None:
         if not config.rest_base:
@@ -172,6 +173,29 @@ class NetSuiteClient:
         if resp.status_code not in (200, 201, 204):
             self._json_or_error(resp)  # raises
         return _internal_id_from_location(resp.headers.get("Location", "")) or external_id
+
+    # ── RESTlet ──────────────────────────────────────────────────────────────
+    def call_restlet(
+        self, script_id: str, deploy_id: str, body: Any, *, method: str = "POST"
+    ) -> dict[str, Any]:
+        """POST a JSON body to a deployed RESTlet, returning its JSON response.
+
+        The RESTlet lives on the ``restlets`` host (not the SuiteTalk REST host)
+        and is addressed by ``script``/``deploy`` query params, which TBA signs
+        as part of the request. Used to create matrix children — the one item
+        operation the record API and CSV importer can't do reliably.
+        """
+        if not self._config.restlet_base:
+            raise RuntimeError("NETSUITE_RESTLET_BASE (or account id) is not configured.")
+        if not script_id or not deploy_id:
+            raise RuntimeError(
+                "RESTlet script/deploy ids are not configured. Set "
+                "NETSUITE_MATRIX_SCRIPT_ID and NETSUITE_MATRIX_DEPLOY_ID (see "
+                "docs/RESTLET_DEPLOY.md)."
+            )
+        params = urlencode({"script": script_id, "deploy": deploy_id})
+        url = f"{self._config.restlet_base}{self.RESTLET_PATH}?{params}"
+        return self._json_or_error(self._request(method, url, json_body=body))
 
     # ── SuiteQL ──────────────────────────────────────────────────────────────
     def suiteql(self, query: str, *, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:

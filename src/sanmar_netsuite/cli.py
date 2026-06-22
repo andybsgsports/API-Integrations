@@ -190,6 +190,65 @@ def cmd_reconcile_items(args: argparse.Namespace, config: AppConfig) -> int:
     return 0
 
 
+def cmd_push_children(args: argparse.Namespace, config: AppConfig) -> int:
+    """Create matrix children via the BSG RESTlet (handles numeric-style parents).
+
+    The RESTlet resolves the parent by name in SuiteScript, so numeric styles
+    like ``2000`` link correctly — unlike the CSV importer. In dry-run it prints
+    the JSON payload(s) without calling NetSuite; with ``SYNC_DRY_RUN=false`` it
+    POSTs them and prints each child's created/updated/error result. Use
+    ``--style 2000 --limit 1`` to fire a single child as a smoke test.
+    """
+    import json
+
+    from .sanmar.parsers import parse_styles
+    from .transform.csv_export import DEFAULT_ASSET_ACCOUNT, DEFAULT_COGS_ACCOUNT
+    from .transform.restlet_payload import iter_child_payloads
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    payloads = list(
+        iter_child_payloads(
+            styles,
+            income_account=config.sync.income_account,
+            cogs_account=DEFAULT_COGS_ACCOUNT,
+            asset_account=DEFAULT_ASSET_ACCOUNT,
+            tax_schedule=config.sync.tax_schedule,
+            style_filter=args.style,
+            limit=args.limit,
+        )
+    )
+    if not payloads:
+        log.error("No SKUs matched (style=%r). Nothing to push.", args.style)
+        return 2
+
+    if config.sync.dry_run:
+        log.info("DRY RUN: would POST %d child item(s) to the matrix RESTlet:", len(payloads))
+        print(json.dumps({"items": payloads}, indent=2))
+        return 0
+
+    from .netsuite.client import NetSuiteClient
+
+    client = NetSuiteClient(config.netsuite)
+    response = client.call_restlet(
+        config.netsuite.matrix_script_id,
+        config.netsuite.matrix_deploy_id,
+        {"items": payloads},
+    )
+    results = response.get("results", [])
+    errors = 0
+    for r in results:
+        status = r.get("status")
+        if status == "error":
+            errors += 1
+        print(
+            f"{r.get('externalId', '?'):<24} {status:<8} "
+            f"{('id=' + str(r['id'])) if r.get('id') else r.get('message', '')}"
+        )
+    print(f"\n{len(results)} item(s): {len(results) - errors} ok, {errors} error(s).")
+    return 1 if errors else 0
+
+
 def cmd_ensure_matrix_options(args: argparse.Namespace, config: AppConfig) -> int:
     """Create (or, in dry-run, preview) any missing matrix color/size values.
 
@@ -295,6 +354,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
     p.set_defaults(func=cmd_reconcile_items)
+
+    p = sub.add_parser(
+        "push-children",
+        help="Create matrix children via the RESTlet (works for numeric-style "
+        "parents; preview unless SYNC_DRY_RUN=false)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.add_argument("--style", default=None, help="Only push children of this style (e.g. 2000)")
+    p.add_argument(
+        "--limit", type=int, default=0, help="Cap the number of children pushed (0 = no cap)"
+    )
+    p.set_defaults(func=cmd_push_children)
 
     p = sub.add_parser(
         "ensure-matrix-options",
