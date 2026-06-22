@@ -141,14 +141,26 @@ def cmd_ensure_matrix_options(args: argparse.Namespace, config: AppConfig) -> in
     Reads the live matrix lists, so it needs NetSuite credentials even when
     previewing. Writes only when ``SYNC_DRY_RUN=false``.
     """
-    from .netsuite.client import NetSuiteClient
+    from .netsuite.client import NetSuiteClient, NetSuiteError
     from .netsuite.matrix_options import ensure_matrix_options
     from .sanmar.parsers import parse_styles
 
     path = _resolve_file(args.file, C.FILE_SDL_N, config)
     styles = parse_styles(path)
     client = NetSuiteClient(config.netsuite)
-    report = ensure_matrix_options(client, styles, allow_create=not config.sync.dry_run)
+    try:
+        report = ensure_matrix_options(client, styles, allow_create=not config.sync.dry_run)
+    except NetSuiteError as exc:
+        if exc.status == 403:
+            log.error(
+                "NetSuite refused the write (403 INSUFFICIENT_PERMISSION). The "
+                "integration role needs the 'Custom Lists' permission at Full level to "
+                "add matrix color/size values. Ask a NetSuite admin to grant it "
+                "(Setup > Users/Roles > Manage Roles > [integration role] > Permissions "
+                "> Setup tab > add 'Custom Lists' = Full), then re-run this command."
+            )
+            return 2
+        raise
     print(report.summary())
     return 0
 
