@@ -1,0 +1,57 @@
+name: SanMar Nightly Sync
+
+on:
+  schedule:
+    # 09:00 UTC = 2am PST / 1am PDT — after SanMar's nightly files land (6am PST).
+    - cron: "0 9 * * *"
+  workflow_dispatch: {} # manual "Run workflow" button, for testing
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          NETSUITE_SANMAR_VENDOR_ID=${{ secrets.NETSUITE_SANMAR_VENDOR_ID }}
+          NETSUITE_SUBSIDIARY_ID=${{ secrets.NETSUITE_SUBSIDIARY_ID }}
+          NETSUITE_INCOME_ACCOUNT_ID=${{ secrets.NETSUITE_INCOME_ACCOUNT_ID }}
+          NETSUITE_ASSET_ACCOUNT_ID=${{ secrets.NETSUITE_ASSET_ACCOUNT_ID }}
+          NETSUITE_COGS_ACCOUNT_ID=${{ secrets.NETSUITE_COGS_ACCOUNT_ID }}
+          SYNC_INCOME_ACCOUNT=${{ secrets.SYNC_INCOME_ACCOUNT }}
+          SYNC_TAX_SCHEDULE=${{ secrets.SYNC_TAX_SCHEDULE }}
+          SYNC_DRY_RUN=${{ secrets.SYNC_DRY_RUN }}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=${{ secrets.NETSUITE_ALLOW_PRODUCTION_WRITES }}
+          EOF
+
+      - name: Run sync
+        run: sanmar-sync all
+
+      - name: Upload downloaded files (debug aid, 7-day retention)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanmar-sync-downloads-${{ github.run_id }}
+          path: downloads/
+          retention-days: 7
+          if-no-files-found: ignore
