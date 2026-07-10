@@ -1,0 +1,23 @@
+name: DC OneSource (Under Armour) Auth Probe
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".dcos-trigger"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install requests
+        run: pip install requests
+      - name: Probe PromoStandards auth (read-only, no secrets printed)
+        env:
+          DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
+          DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+        run: python scripts/dcos_probe.py
