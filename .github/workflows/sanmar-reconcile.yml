@@ -39,6 +39,9 @@ jobs:
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF
 
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+
       - name: Run reconciliation report (read-only)
         env:
           RECONCILE_STYLE_LIMIT: ${{ github.event.inputs.style_limit }}
