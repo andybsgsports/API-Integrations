@@ -1,61 +1,32 @@
-name: Momentec OpenAPI spec fetch
+name: Momentec discovery fetch
 
-# One-shot discovery: pull the OpenAPI spec behind momentecbrands.com/api
-# (public Swagger UI) and commit it to docs/ so the client can be built
-# against the real schemas. Read-only against Momentec; no credentials.
 on:
   workflow_dispatch: {}
   push:
     branches: ["claude/festive-carson-oj4y8n"]
     paths: [".momentec-trigger"]
 
-permissions:
-  contents: write
-
 jobs:
   fetch-spec:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Locate and download the OpenAPI spec
+      - name: Fetch Momentec product-data page and API page (read-only)
         run: |
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36"
-          mkdir -p docs
-          curl -sSL -A "$UA" "https://www.momentecbrands.com/api" -o api.html || true
-          echo "=== script srcs ==="
-          grep -oE 'src="[^"]+"' api.html | sort -u | head -30 || true
-          echo "=== strings mentioning swagger/openapi/oas/json ==="
-          grep -oiE '"[^"]*(swagger|openapi|oas|\.json)[^"]*"' api.html | sort -u | head -40 || true
-          CAND=$(grep -oiE '"[^"]*(swagger|openapi|oas)[^"]*\.(json|yaml)[^"]*"' api.html | tr -d '"' | sort -u)
-          for rel in $CAND; do
-            for base in "https://www.momentecbrands.com" "https://api.momentecbrands.com"; do
-              case "$rel" in http*) u="$rel";; /*) u="$base$rel";; *) u="$base/$rel";; esac
-              echo "trying: $u"
-              if curl -sSL -A "$UA" --max-time 30 "$u" -o spec.json 2>/dev/null \
-                 && python3 -c "import json;d=json.load(open('spec.json'));assert 'openapi' in d or 'swagger' in d" 2>/dev/null; then
-                cp spec.json docs/momentec_openapi.json && echo "SPEC FOUND: $u"
-                break 2
-              fi
-            done
+          for u in \
+            "https://resources.momentecbrands.com/en_us/product-data-BkpahHBvlx" \
+            "https://resources.momentecbrands.com/en_us/api-and-edi-H1vRsrHDex"; do
+            echo "===================== $u ====================="
+            curl -sSL -A "$UA" --max-time 40 "$u" -o page.html || { echo "(fetch failed)"; continue; }
+            python3 - <<'PY'
+          import re, html
+          raw = open('page.html', encoding='utf-8', errors='replace').read()
+          txt = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', raw, flags=re.S|re.I)
+          txt = html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', txt)))
+          print("--- PAGE TEXT ---"); print(txt[:6000])
+          print("--- LINKS (feeds/api/csv/ftp/json) ---")
+          for l in dict.fromkeys(re.findall(r'href="([^"]+)"', raw)):
+              if any(k in l.lower() for k in ('feed','csv','ftp','api','json','data','xls')):
+                  print(l)
+          PY
           done
-          if [ -f docs/momentec_openapi.json ]; then
-            python3 -c "
-          import json
-          d = json.load(open('docs/momentec_openapi.json'))
-          print('title:', d.get('info', {}).get('title'))
-          print('security schemes:', list((d.get('components') or {}).get('securitySchemes', {}).keys()))
-          [print(' ', p, '->', ', '.join(o.keys())) for p, o in sorted(d.get('paths', {}).items())]
-          "
-          else
-            echo "NO SPEC YET — diagnostics above show what the page references (report-only, not failing)"
-          fi
-
-      - name: Commit spec back to this branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/momentec_openapi.json
-          git commit -m "Add Momentec OpenAPI spec (fetched by CI) [skip ci]" \
-            || { echo "nothing to commit"; exit 0; }
-          git push origin HEAD:${{ github.ref_name }}
