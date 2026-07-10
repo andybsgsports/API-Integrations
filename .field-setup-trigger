@@ -1,0 +1,2 @@
+# run 1 — audit + create missing fields (user granted field-create permission)
+FIELD_CREATE=true

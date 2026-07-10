@@ -1,0 +1,60 @@
+name: NetSuite Custom Field Setup (sandbox)
+
+on:
+  workflow_dispatch:
+    inputs:
+      field_create:
+        description: "true = create missing fields; false = audit only"
+        required: false
+        default: "false"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".field-setup-trigger"]
+
+jobs:
+  fields:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+
+      - name: Resolve FIELD_CREATE
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v=$(grep -E '^FIELD_CREATE=' .field-setup-trigger | tail -1 | cut -d= -f2 | tr -d ' \r')
+          else
+            v="${{ github.event.inputs.field_create }}"
+          fi
+          [ "$v" = "true" ] || v="false"
+          echo "FIELD_CREATE=$v" >> "$GITHUB_ENV"
+          echo "FIELD_CREATE=$v"
+
+      - name: Audit / create custom item fields
+        env:
+          FIELD_CREATE: ${{ env.FIELD_CREATE }}
+        run: python scripts/ns_field_setup.py
