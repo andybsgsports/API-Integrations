@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import os
 import secrets
 import time
 from xml.sax.saxutils import escape
@@ -51,6 +52,8 @@ def _passport(cfg) -> str:
 
 
 def add_field(cfg, scriptid: str, label: str, ftype: str) -> tuple[bool, str]:
+    # NetSuite prepends "custitem" to the submitted id; send the remainder.
+    sid_suffix = scriptid.removeprefix("custitem")
     url_account = cfg.account_id.replace("_", "-").lower()
     url = f"https://{url_account}.suitetalk.api.netsuite.com/services/NetSuitePort_{VERSION}"
     envelope = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -64,7 +67,7 @@ def add_field(cfg, scriptid: str, label: str, ftype: str) -> tuple[bool, str]:
   </soapenv:Header>
   <soapenv:Body>
     <platformMsgs:add>
-      <platformMsgs:record xsi:type="setupCustom:ItemCustomField" scriptId="{scriptid}">
+      <platformMsgs:record xsi:type="setupCustom:ItemCustomField" scriptId="{sid_suffix}">
         <setupCustom:label>{escape(label)}</setupCustom:label>
         <setupCustom:storeValue>true</setupCustom:storeValue>
         <setupCustom:appliesToInventory>true</setupCustom:appliesToInventory>
@@ -80,14 +83,46 @@ def add_field(cfg, scriptid: str, label: str, ftype: str) -> tuple[bool, str]:
         timeout=60,
     )
     text = resp.text
-    ok = "<platformCore:isSuccess>true</platformCore:isSuccess>" in text or (
-        "isSuccess" in text and ">true<" in text and resp.status_code == 200
-    )
+    ok = 'isSuccess="true"' in text and resp.status_code == 200
     return ok, text
+
+
+def delete_field(cfg, internal_id: str) -> tuple[bool, str]:
+    url_account = cfg.account_id.replace("_", "-").lower()
+    url = f"https://{url_account}.suitetalk.api.netsuite.com/services/NetSuitePort_{VERSION}"
+    envelope = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:platformMsgs="urn:messages_{VERSION}.platform.webservices.netsuite.com"
+    xmlns:platformCore="urn:core_{VERSION}.platform.webservices.netsuite.com">
+  <soapenv:Header>{_passport(cfg)}
+  </soapenv:Header>
+  <soapenv:Body>
+    <platformMsgs:delete>
+      <platformMsgs:baseRef xsi:type="platformCore:CustomizationRef"
+          internalId="{internal_id}" type="itemCustomField"/>
+    </platformMsgs:delete>
+  </soapenv:Body>
+</soapenv:Envelope>"""
+    resp = requests.post(
+        url,
+        data=envelope.encode(),
+        headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": "delete"},
+        timeout=60,
+    )
+    return 'isSuccess="true"' in resp.text, resp.text
 
 
 def main() -> int:
     cfg = get_config().netsuite
+    for did in (os.environ.get("SOAP_DELETE_IDS") or "").split(","):
+        did = did.strip()
+        if did:
+            ok, text = delete_field(cfg, did)
+            print(f"delete internalId {did}: {'OK' if ok else 'FAILED'}")
+            if not ok:
+                print(text[:800])
     todo = [(sid, label, ftype) for sid, label, ftype, _ in FIELDS]
 
     # Probe with the first field; print the raw fault if the schema is off.
