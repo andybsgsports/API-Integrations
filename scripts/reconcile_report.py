@@ -2,9 +2,9 @@
 
 Downloads the SanMar SDL_N catalog, matches every SKU to an existing NetSuite
 item by Vendor Name/Code (style) + color + size, and reports the match rate.
-Makes **no writes** — it only reads NetSuite via SuiteQL and writes a local
-mapping CSV (uploaded as a workflow artifact) so we can plan the UPC /
-external-id back-fill.
+Makes **no writes** — it only reads NetSuite via SuiteQL and writes local
+CSVs (uploaded as workflow artifacts) so we can plan the UPC / external-id
+back-fill and the color-list full-name renames.
 
 Env knobs: ``RECONCILE_STYLE_LIMIT`` (0 = all styles; small N for a quick sample).
 """
@@ -52,6 +52,17 @@ def main() -> int:
                  r.gtin, r.ns_id or "", r.method]
             )
     print(f"\nWrote mapping -> {out} ({len(report.rows)} rows)")
+
+    if report.color_renames:
+        plan = Path("data/color_rename_plan.csv")
+        with plan.open("w", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["color_value_id", "current_name", "new_full_name"])
+            for vid, (cur, new) in sorted(report.color_renames.items()):
+                w.writerow([vid, cur, new])
+        print(f"Wrote color rename plan -> {plan} ({len(report.color_renames)} values)")
+        for vid, (cur, new) in list(sorted(report.color_renames.items()))[:10]:
+            print(f"  {vid}: '{cur}' -> '{new}'")
 
     if report.unmatched:
         print("\nSample unmatched SKUs (style | full color (mainframe) | size):")
