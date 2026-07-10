@@ -185,15 +185,55 @@ class SsClient:
             raise SsApiError(resp.status_code, str(message), detail)
         return resp.json() if resp.content else None
 
-    # ── list endpoints (page transparently) ──────────────────────────────────
+    # ── list endpoints (filtered, to dodge the unfiltered-Products throttle) ──
+    # S&S throttles the unfiltered ``GET /Products`` pull (503 with a
+    # ``RateLimit`` error directing callers to "use the Get Product filter
+    # options"). So the full catalog is assembled style-by-style: enumerate
+    # ``/Styles``, then pull products for batches of styleIDs via the filtered
+    # ``?styleid=`` (comma-delimited) query, which S&S serves without throttling.
+    #: How many styleIDs to request per filtered ``/Products`` call.
+    STYLE_BATCH_SIZE = 100
+
     def iter_products(self, *, style_id: str | None = None) -> Iterator[SsProduct]:
-        """Stream products. If ``style_id`` is given, scope to that style."""
-        path = f"/Products/{style_id}" if style_id else "/Products"
-        yield from self._iter_paged(path, product_from_payload)
+        """Stream products via S&S's *filtered* Get Products endpoint.
+
+        With ``style_id`` set, fetch just that one style. Otherwise enumerate
+        every style and pull products in batched ``?styleid=`` requests. The
+        unfiltered ``/Products`` pull is throttled by S&S and is never used.
+        """
+        if style_id is not None:
+            yield from self._products_for_styles([str(style_id)])
+            return
+        batch: list[str] = []
+        for style in self.iter_styles():
+            if not style.style_id:
+                continue
+            batch.append(style.style_id)
+            if len(batch) >= self.STYLE_BATCH_SIZE:
+                yield from self._products_for_styles(batch)
+                batch = []
+        if batch:
+            yield from self._products_for_styles(batch)
+
+    def _products_for_styles(self, style_ids: list[str]) -> Iterator[SsProduct]:
+        """One filtered Get Products call for a batch of styleIDs."""
+        data = self._get("/Products", params={"styleid": ",".join(style_ids)})
+        yield from self._parse_rows(data, product_from_payload)
 
     def iter_styles(self) -> Iterator[SsStyle]:
-        """Stream styles."""
-        yield from self._iter_paged("/Styles", style_from_payload)
+        """Stream styles. ``/Styles`` returns the whole list in a single
+        response (it ignores pageSize/pageNumber), so we fetch it once."""
+        data = self._get("/Styles")
+        yield from self._parse_rows(data, style_from_payload)
+
+    @staticmethod
+    def _parse_rows(data: Any, parser: Any) -> Iterator[Any]:
+        """Yield parsed rows from a JSON array (or ``{"items": [...]}``) body."""
+        if data is None:
+            return
+        rows = data if isinstance(data, list) else data.get("items") or []
+        for row in rows:
+            yield parser(row)
 
     def get_product(self, sku: str) -> SsProduct | None:
         data = self._get(f"/Products/{sku}")
@@ -210,23 +250,3 @@ class SsClient:
         if isinstance(data, list):
             return product_from_payload(data[0]) if data else None
         return product_from_payload(data)
-
-    def _iter_paged(
-        self, path: str, parser: Any
-    ) -> Iterator[Any]:
-        """Page through a list endpoint. S&S returns a JSON array per page."""
-        page = 1
-        size = self._config.page_size
-        while True:
-            params = {"pageSize": size, "pageNumber": page}
-            data = self._get(path, params=params)
-            if data is None:
-                return
-            rows = data if isinstance(data, list) else data.get("items") or []
-            if not rows:
-                return
-            for row in rows:
-                yield parser(row)
-            if len(rows) < size:
-                return
-            page += 1

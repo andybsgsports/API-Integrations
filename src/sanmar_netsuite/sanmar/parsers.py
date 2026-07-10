@@ -7,8 +7,9 @@ Three file formats are handled:
   MAP, GTIN, product status, and image URLs. ``SanMar_EPDD.csv`` shares this
   schema and adds a ``QTY`` (all-warehouse) column, so the same reader handles
   both. (EPDD duplicates unique keys across category/subcategory — deduped here.)
-* ``sanmar_dip.txt`` — pipe-delimited, no header, one row per warehouse per
-  SKU. Carries per-warehouse availability and live sale pricing.
+* ``sanmar_dip.txt`` — pipe-delimited, one row per warehouse per SKU. SanMar's
+  live export leads with a column-header line, which is skipped. Carries
+  per-warehouse availability and live sale pricing.
 
 Parsing is driven by the documented field names/indices in
 :mod:`sanmar_netsuite.sanmar.constants`. Readers are tolerant of header
@@ -247,7 +248,8 @@ def parse_inventory(path: str | Path) -> list[InventoryRecord]:
 
     The file has one row per warehouse, so rows are grouped by ``unique_key``
     and warehouse quantities are aggregated. Pricing/sale fields are taken from
-    the first row seen for each SKU.
+    the first row seen for each SKU. SanMar's live export begins with a
+    column-header line, which is skipped.
     """
     path = Path(path)
     builders: dict[str, _InventoryBuilder] = {}

@@ -2,9 +2,9 @@
 
 Downloads the SanMar SDL_N catalog, matches every SKU to an existing NetSuite
 item by Vendor Name/Code (style) + color + size, and reports the match rate.
-Makes **no writes** — it only reads NetSuite via SuiteQL and writes a local
-mapping CSV (uploaded as a workflow artifact) so we can plan the UPC /
-external-id back-fill.
+Makes **no writes** — it only reads NetSuite via SuiteQL and writes local
+CSVs (uploaded as workflow artifacts) so we can plan the UPC / external-id
+back-fill and the color-list full-name renames.
 
 Env knobs: ``RECONCILE_STYLE_LIMIT`` (0 = all styles; small N for a quick sample).
 """
