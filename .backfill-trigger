@@ -1,0 +1,5 @@
+# Back-fill run parameters (read by sanmar-backfill.yml on push)
+DRY_RUN=true
+STYLE_LIMIT=0
+MAX_ITEMS=0
+SET_EXTERNAL_IDS=false

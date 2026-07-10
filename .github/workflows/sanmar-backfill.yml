@@ -19,12 +19,40 @@ on:
         description: "Also re-key external ids to SANMAR-<key> (overwrites migrated ids!)"
         required: false
         default: "false"
+  # Bumping .backfill-trigger runs the back-fill with the parameters read from
+  # that file's KEY=VALUE lines (DRY_RUN / STYLE_LIMIT / MAX_ITEMS /
+  # SET_EXTERNAL_IDS) — an alternative to the Run-workflow button for
+  # environments that can push but not dispatch. Scoped to the dev branch +
+  # sentinel file so ordinary pushes never trigger it.
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".backfill-trigger"]
 
 jobs:
   backfill:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve run parameters (inputs, or .backfill-trigger on push)
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            get() { grep -E "^$1=" .backfill-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
+            DRY_RUN=$(get DRY_RUN); STYLE_LIMIT=$(get STYLE_LIMIT)
+            MAX_ITEMS=$(get MAX_ITEMS); SET_EXTERNAL_IDS=$(get SET_EXTERNAL_IDS)
+          else
+            DRY_RUN="${{ github.event.inputs.dry_run }}"
+            STYLE_LIMIT="${{ github.event.inputs.style_limit }}"
+            MAX_ITEMS="${{ github.event.inputs.max_items }}"
+            SET_EXTERNAL_IDS="${{ github.event.inputs.set_external_ids }}"
+          fi
+          # Fail safe: only an explicit "false" turns dry-run off.
+          [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          echo "DRY_RUN=$DRY_RUN"            >> "$GITHUB_ENV"
+          echo "STYLE_LIMIT=${STYLE_LIMIT:-200}" >> "$GITHUB_ENV"
+          echo "MAX_ITEMS=${MAX_ITEMS:-25}"  >> "$GITHUB_ENV"
+          echo "SET_EXTERNAL_IDS=${SET_EXTERNAL_IDS:-false}" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$DRY_RUN style_limit=${STYLE_LIMIT:-200} max_items=${MAX_ITEMS:-25} set_external_ids=${SET_EXTERNAL_IDS:-false}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -47,7 +75,7 @@ jobs:
           NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
           NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
           NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
-          SYNC_DRY_RUN=${{ github.event.inputs.dry_run }}
+          SYNC_DRY_RUN=${DRY_RUN}
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF
 
@@ -56,7 +84,7 @@ jobs:
 
       - name: Run key back-fill
         env:
-          RECONCILE_STYLE_LIMIT: ${{ github.event.inputs.style_limit }}
-          BACKFILL_MAX_ITEMS: ${{ github.event.inputs.max_items }}
-          BACKFILL_SET_EXTERNAL_IDS: ${{ github.event.inputs.set_external_ids }}
+          RECONCILE_STYLE_LIMIT: ${{ env.STYLE_LIMIT }}
+          BACKFILL_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          BACKFILL_SET_EXTERNAL_IDS: ${{ env.SET_EXTERNAL_IDS }}
         run: python scripts/backfill_keys.py
