@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
 
@@ -61,6 +62,21 @@ def test_parse_inventory_aggregates_warehouses(dip_path):
     whse = {w.warehouse_no: w.quantity for w in black_s.warehouses}
     assert whse == {"1": 120, "3": 45}
     assert black_s.warehouses[0].warehouse_label == "Seattle, WA"
+
+
+def test_parse_inventory_skips_header_row(dip_path, tmp_path):
+    # SanMar's live dip export includes a column-header line (col 5 == "whse_no").
+    # It must be skipped, not parsed as data — otherwise int("whse_no") crashes.
+    header = "|".join("whse_no" if i == 5 else f"col{i}" for i in range(19))
+    body = Path(dip_path).read_text(encoding="utf-8-sig")
+    dip = tmp_path / "dip_with_header.txt"
+    dip.write_text(header + "\n" + body, encoding="utf-8")
+
+    records = {r.unique_key: r for r in parse_inventory(dip)}
+    # Real data still parsed, and no bogus "whse_no" warehouse leaked in.
+    assert records["920331"].total_qty == 165
+    all_whses = {w.warehouse_no for r in records.values() for w in r.warehouses}
+    assert "whse_no" not in all_whses
 
 
 def test_parse_inventory_sale_pricing(dip_path):

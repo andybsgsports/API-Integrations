@@ -257,6 +257,12 @@ def parse_inventory(path: str | Path) -> list[InventoryRecord]:
         for fields in reader:
             if len(fields) < C.DIP_MIN_COLUMNS:
                 continue
+            # Skip the column-header row SanMar includes on line 1 of the dip
+            # export (and any malformed row): a real data row's warehouse number
+            # is numeric, whereas the header carries the literal "whse_no".
+            whse_no = _clean(fields[C.DIP_WHSE_NO])
+            if whse_no and not whse_no.isdigit():
+                continue
             unique_key = _clean(fields[C.DIP_UNIQUE_KEY])
             if not unique_key:
                 # Fall back to inventory_key+size_index if unique_key is blank.
@@ -293,9 +299,9 @@ class _InventoryBuilder:
 
     def add_warehouse(self, fields: list[str]) -> None:
         whse = _clean(fields[C.DIP_WHSE_NO])
-        qty = _int(fields[C.DIP_QUANTITY]) or 0
-        if not whse:
+        if not whse or not whse.isdigit():
             return
+        qty = _int(fields[C.DIP_QUANTITY]) or 0
         self._warehouses[whse] = self._warehouses.get(whse, 0) + qty
 
     def build(self) -> InventoryRecord:
