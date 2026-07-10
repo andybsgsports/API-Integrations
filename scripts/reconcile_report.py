@@ -53,6 +53,17 @@ def main() -> int:
             )
     print(f"\nWrote mapping -> {out} ({len(report.rows)} rows)")
 
+    if report.color_renames:
+        plan = Path("data/color_rename_plan.csv")
+        with plan.open("w", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["color_value_id", "current_name", "new_full_name"])
+            for vid, (cur, new) in sorted(report.color_renames.items()):
+                w.writerow([vid, cur, new])
+        print(f"Wrote color rename plan -> {plan} ({len(report.color_renames)} values)")
+        for vid, (cur, new) in list(sorted(report.color_renames.items()))[:10]:
+            print(f"  {vid}: '{cur}' -> '{new}'")
+
     if report.unmatched:
         print("\nSample unmatched SKUs (style | full color (mainframe) | size):")
         for r in report.unmatched[:15]:
