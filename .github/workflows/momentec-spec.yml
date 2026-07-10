@@ -23,38 +23,33 @@ jobs:
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36"
           mkdir -p docs
           curl -sSL -A "$UA" "https://www.momentecbrands.com/api" -o api.html || true
-          echo "--- spec URL candidates found in page ---"
-          grep -oE '"[^"]*\.(json|yaml)[^"]*"|url:\s*"[^"]+"' api.html | sort -u | head -20 || true
-          CANDIDATES=$(grep -oE 'https?://[^"'"'"' ]+\.(json|yaml)' api.html | sort -u)
-          CANDIDATES="$CANDIDATES
-          https://www.momentecbrands.com/api/openapi.json
-          https://www.momentecbrands.com/api/swagger.json
-          https://api.momentecbrands.com/openapi.json
-          https://api.momentecbrands.com/swagger/v2/swagger.json
-          https://api.momentecbrands.com/swagger.json"
-          for u in $CANDIDATES; do
-            u=$(echo "$u" | tr -d ' ')
-            [ -z "$u" ] && continue
-            echo "trying: $u"
-            if curl -sSL -A "$UA" --max-time 30 "$u" -o spec.json 2>/dev/null \
-               && python3 -c "import json;d=json.load(open('spec.json'));assert 'openapi' in d or 'swagger' in d" 2>/dev/null; then
-              cp spec.json docs/momentec_openapi.json
-              echo "SPEC FOUND: $u"
-              python3 - <<'PY'
+          echo "=== script srcs ==="
+          grep -oE 'src="[^"]+"' api.html | sort -u | head -30 || true
+          echo "=== strings mentioning swagger/openapi/oas/json ==="
+          grep -oiE '"[^"]*(swagger|openapi|oas|\.json)[^"]*"' api.html | sort -u | head -40 || true
+          CAND=$(grep -oiE '"[^"]*(swagger|openapi|oas)[^"]*\.(json|yaml)[^"]*"' api.html | tr -d '"' | sort -u)
+          for rel in $CAND; do
+            for base in "https://www.momentecbrands.com" "https://api.momentecbrands.com"; do
+              case "$rel" in http*) u="$rel";; /*) u="$base$rel";; *) u="$base/$rel";; esac
+              echo "trying: $u"
+              if curl -sSL -A "$UA" --max-time 30 "$u" -o spec.json 2>/dev/null \
+                 && python3 -c "import json;d=json.load(open('spec.json'));assert 'openapi' in d or 'swagger' in d" 2>/dev/null; then
+                cp spec.json docs/momentec_openapi.json && echo "SPEC FOUND: $u"
+                break 2
+              fi
+            done
+          done
+          if [ -f docs/momentec_openapi.json ]; then
+            python3 -c "
           import json
           d = json.load(open('docs/momentec_openapi.json'))
           print('title:', d.get('info', {}).get('title'))
-          print('version:', d.get('info', {}).get('version'))
-          print('servers:', d.get('servers'))
-          print('security schemes:', list((d.get('components', {}) or {}).get('securitySchemes', {}).keys()))
-          print('paths:')
-          for p, ops in sorted(d.get('paths', {}).items()):
-              print(' ', p, '->', ', '.join(ops.keys()))
-          PY
-              break
-            fi
-          done
-          test -f docs/momentec_openapi.json || { echo "NO SPEC FOUND — dump of page head:"; head -c 2000 api.html; exit 1; }
+          print('security schemes:', list((d.get('components') or {}).get('securitySchemes', {}).keys()))
+          [print(' ', p, '->', ', '.join(o.keys())) for p, o in sorted(d.get('paths', {}).items())]
+          "
+          else
+            echo "NO SPEC YET — diagnostics above show what the page references (report-only, not failing)"
+          fi
 
       - name: Commit spec back to this branch
         run: |

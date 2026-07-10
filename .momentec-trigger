@@ -1,1 +1,1 @@
-run 1 — fetch Momentec OpenAPI spec
+run 2 — smarter spec discovery (scan page JS, report-only)
