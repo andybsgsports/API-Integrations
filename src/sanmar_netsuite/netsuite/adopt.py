@@ -63,6 +63,32 @@ def split_color_size(itemid: str, style: str) -> tuple[str, str] | None:
     return None
 
 
+def rename_is_safe(current: str, new: str, feed_colors: set[str]) -> bool:
+    """Only rename a list value whose current name is clearly an abbreviation.
+
+    The color list is shared across every vendor and renames cascade to every
+    item using the value, so refuse when the current name:
+
+    * already equals the SanMar name up to case/whitespace (nothing to fix);
+    * is itself a real SanMar color (``Black`` -> ``Black/ Black`` would
+      mislabel every plain-black item — that match came from the mainframe
+      name, not an abbreviation);
+    * contains a space (multi-word names are real colors, often another
+      vendor's, that the initials heuristic collides with: ``Team Grey`` vs
+      ``Teal Green``, ``Royal Cardinal`` vs ``Royal Caribe``).
+    """
+    cur = current.strip()
+    if not cur or not new.strip():
+        return False
+    if cur.replace(" ", "").casefold() == new.replace(" ", "").casefold():
+        return False
+    if cur.casefold() in feed_colors:
+        return False
+    if " " in cur:
+        return False
+    return True
+
+
 def heuristic_abbrev(full_color: str) -> str:
     """BSG-style abbreviation guess: first two letters of each word, joined.
 
@@ -220,6 +246,15 @@ def match_existing(
 
     options = OptionMaps(client)
 
+    # Every full color SanMar uses, for the rename guard: a list value whose
+    # current name is one of these is a real color, not an abbreviation.
+    feed_colors = {
+        sku.color_name.strip().casefold()
+        for style in style_list
+        for sku in style.skus
+        if sku.color_name and sku.color_name.strip()
+    }
+
     for style in style_list:
         rows = _fetch_style_items(client, style.style)
 
@@ -280,9 +315,11 @@ def match_existing(
                         # Name isn't the full color yet; propose the rename.
                         cur_name, _ = options.color_info.get(color_id, ("", ""))
                         if (
-                            sku.color_name.strip()
-                            and cur_name.strip().lower()
+                            cur_name.strip().lower()
                             != sku.color_name.strip().lower()
+                            and rename_is_safe(
+                                cur_name, sku.color_name, feed_colors
+                            )
                         ):
                             report.color_renames[color_id] = (
                                 cur_name,
