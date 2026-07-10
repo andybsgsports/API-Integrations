@@ -58,3 +58,12 @@ jobs:
         env:
           FIELD_CREATE: ${{ env.FIELD_CREATE }}
         run: python scripts/ns_field_setup.py
+
+      - name: Create fields via SOAP (when SOAP_CREATE=true)
+        run: |
+          v=$(grep -E '^SOAP_CREATE=' .field-setup-trigger 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \r')
+          if [ "$v" = "true" ]; then
+            python scripts/ns_field_create_soap.py
+          else
+            echo "SOAP_CREATE not set - skipping"
+          fi
