@@ -249,6 +249,52 @@ def cmd_push_children(args: argparse.Namespace, config: AppConfig) -> int:
     return 1 if errors else 0
 
 
+def cmd_reconcile_report(args: argparse.Namespace, config: AppConfig) -> int:
+    """Read-only: match feed SKUs to existing NetSuite items (no writes).
+
+    Matches by Vendor Name/Code (style) + color + size, so a later back-fill can
+    stamp the UPC + SANMAR external id onto the items that already exist. Prints
+    a match-rate summary and writes a per-SKU mapping CSV.
+    """
+    import csv
+
+    from .netsuite.adopt import match_existing
+    from .netsuite.client import NetSuiteClient
+    from .sanmar.parsers import parse_styles
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    client = NetSuiteClient(config.netsuite)
+    report = match_existing(client, styles, style_limit=args.style_limit)
+
+    print(report.summary())
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(
+            ["unique_key", "style", "color_name", "mainframe_color", "size",
+             "gtin", "ns_id", "method"]
+        )
+        for r in report.rows:
+            w.writerow(
+                [r.unique_key, r.style, r.color_name, r.mainframe_color, r.size,
+                 r.gtin, r.ns_id or "", r.method]
+            )
+    print(f"Wrote mapping -> {out} ({len(report.rows)} rows)")
+
+    if report.unmatched:
+        print("\nSample unmatched SKUs (style | color | size):")
+        for r in report.unmatched[:10]:
+            print(f"  {r.style} | {r.color_name} ({r.mainframe_color}) | {r.size}")
+    if report.dup_parents:
+        print("\nStyles with duplicate parents (first 10):")
+        for style, ids in list(report.dup_parents.items())[:10]:
+            print(f"  {style}: ids {ids}")
+    return 0
+
+
 def cmd_ensure_matrix_options(args: argparse.Namespace, config: AppConfig) -> int:
     """Create (or, in dry-run, preview) any missing matrix color/size values.
 
@@ -366,6 +412,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, default=0, help="Cap the number of children pushed (0 = no cap)"
     )
     p.set_defaults(func=cmd_push_children)
+
+    p = sub.add_parser(
+        "reconcile-report",
+        help="Read-only: match feed SKUs to existing NetSuite items by "
+        "vendor code + color + size (for the UPC/external-id back-fill)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.add_argument("--out", default="data/reconcile_report.csv", help="Mapping CSV output path")
+    p.add_argument(
+        "--style-limit", type=int, default=0,
+        help="Only check the first N styles (quick sample; 0 = all)",
+    )
+    p.set_defaults(func=cmd_reconcile_report)
 
     p = sub.add_parser(
         "ensure-matrix-options",
