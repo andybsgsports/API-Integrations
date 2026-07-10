@@ -11,7 +11,10 @@ requires-python = ">=3.10"
 license = { text = "Proprietary" }
 authors = [{ name = "Badger Sporting Goods" }]
 dependencies = [
-    "paramiko>=3.4",          # SanMar SFTP
+    # SanMar SFTP. Capped below 4.0: paramiko 4.0 dropped the ssh-rsa/ssh-dss
+    # host-key algorithms and 5.0 removed them, but SanMar's server only offers
+    # ssh-rsa (key exchange fails with "no acceptable host key" otherwise).
+    "paramiko>=3.4,<4",
     "requests>=2.31",         # NetSuite SuiteTalk REST
     "requests-oauthlib>=1.3", # NetSuite TBA (OAuth 1.0a) signing
     "python-dotenv>=1.0",     # local .env loading
