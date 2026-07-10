@@ -11,6 +11,13 @@ on:
         description: "Commit the review CSVs (rename plan + matched items) back to this branch"
         required: false
         default: "false"
+  # Bumping .reconcile-trigger runs a full-catalog reconcile and commits the
+  # review CSVs back to the branch (a path we can fetch when the artifact store
+  # is unreachable). Scoped to the dev branch + sentinel file so ordinary
+  # pushes never trigger it.
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".reconcile-trigger"]
 
 permissions:
   contents: write
@@ -54,8 +61,15 @@ jobs:
           RECONCILE_STYLE_LIMIT: ${{ github.event.inputs.style_limit }}
         run: python scripts/reconcile_report.py
 
+      - name: Print color rename plan (retrievable from the job log)
+        if: always()
+        run: |
+          echo "===== BEGIN color_rename_plan.csv ====="
+          cat data/color_rename_plan.csv || echo "(no rename plan)"
+          echo "===== END color_rename_plan.csv ====="
+
       - name: Commit review CSVs back to this branch
-        if: ${{ github.event.inputs.commit_review_csvs == 'true' }}
+        if: ${{ github.event.inputs.commit_review_csvs == 'true' || github.event_name == 'push' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
