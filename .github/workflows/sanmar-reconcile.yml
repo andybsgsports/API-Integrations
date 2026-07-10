@@ -1,0 +1,54 @@
+name: SanMar Reconcile Report (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      style_limit:
+        description: "Only check the first N styles (0 = all; try 200 for a quick sample)"
+        required: false
+        default: "200"
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF
+
+      - name: Run reconciliation report (read-only)
+        env:
+          RECONCILE_STYLE_LIMIT: ${{ github.event.inputs.style_limit }}
+        run: python scripts/reconcile_report.py
+
+      - name: Upload reconciliation mapping CSV
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reconcile-report-${{ github.run_id }}
+          path: data/reconcile_report.csv
+          retention-days: 14
+          if-no-files-found: ignore
