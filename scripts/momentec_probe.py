@@ -57,7 +57,10 @@ def main() -> int:
             )
             hits += len({str(r["upccode"]) for r in rows})
         pct = 100.0 * hits / len(probe) if probe else 0.0
-        print(f"\nbarcodes already on an existing NetSuite item: {hits:,}/{len(probe):,} ({pct:.1f}%)")
+        print(
+            f"\nbarcodes already on an existing NetSuite item: "
+            f"{hits:,}/{len(probe):,} ({pct:.1f}%)"
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"\n(NetSuite coverage skipped: {exc})")
     return 0
