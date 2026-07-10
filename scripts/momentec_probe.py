@@ -61,6 +61,25 @@ def main() -> int:
             f"\nbarcodes already on an existing NetSuite item: "
             f"{hits:,}/{len(probe):,} ({pct:.1f}%)"
         )
+
+        # Style -> Vendor Name/Code coverage (the SanMar-style adopt lever).
+        # Use the Item_SKU prefix as the canonical style token.
+        style_tokens = sorted(
+            {k.item_sku.split(".")[0] for s in styles for k in s.skus if k.item_sku}
+        )
+        shits = 0
+        for i in range(0, len(style_tokens), 300):
+            chunk = style_tokens[i : i + 300]
+            in_list = ", ".join(f"'{_sql_escape(v)}'" for v in chunk)
+            rows = client.suiteql(
+                f"SELECT DISTINCT vendorname FROM item WHERE vendorname IN ({in_list})"
+            )
+            shits += len(rows)
+        spct = 100.0 * shits / len(style_tokens) if style_tokens else 0.0
+        print(
+            f"styles present as a Vendor Name/Code on existing items: "
+            f"{shits:,}/{len(style_tokens):,} ({spct:.1f}%)"
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"\n(NetSuite coverage skipped: {exc})")
     return 0
