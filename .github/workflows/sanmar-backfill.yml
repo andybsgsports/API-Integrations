@@ -40,11 +40,13 @@ jobs:
             get() { grep -E "^$1=" .backfill-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
             DRY_RUN=$(get DRY_RUN); STYLE_LIMIT=$(get STYLE_LIMIT)
             MAX_ITEMS=$(get MAX_ITEMS); SET_EXTERNAL_IDS=$(get SET_EXTERNAL_IDS)
+            RENAME_COLORS=$(get RENAME_COLORS)
           else
             DRY_RUN="${{ github.event.inputs.dry_run }}"
             STYLE_LIMIT="${{ github.event.inputs.style_limit }}"
             MAX_ITEMS="${{ github.event.inputs.max_items }}"
             SET_EXTERNAL_IDS="${{ github.event.inputs.set_external_ids }}"
+            RENAME_COLORS="true"
           fi
           # Fail safe: only an explicit "false" turns dry-run off.
           [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
@@ -52,7 +54,8 @@ jobs:
           echo "STYLE_LIMIT=${STYLE_LIMIT:-200}" >> "$GITHUB_ENV"
           echo "MAX_ITEMS=${MAX_ITEMS:-25}"  >> "$GITHUB_ENV"
           echo "SET_EXTERNAL_IDS=${SET_EXTERNAL_IDS:-false}" >> "$GITHUB_ENV"
-          echo "Resolved: dry_run=$DRY_RUN style_limit=${STYLE_LIMIT:-200} max_items=${MAX_ITEMS:-25} set_external_ids=${SET_EXTERNAL_IDS:-false}"
+          echo "RENAME_COLORS=${RENAME_COLORS:-true}" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$DRY_RUN style_limit=${STYLE_LIMIT:-200} max_items=${MAX_ITEMS:-25} set_external_ids=${SET_EXTERNAL_IDS:-false} rename_colors=${RENAME_COLORS:-true}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -87,4 +90,5 @@ jobs:
           RECONCILE_STYLE_LIMIT: ${{ env.STYLE_LIMIT }}
           BACKFILL_MAX_ITEMS: ${{ env.MAX_ITEMS }}
           BACKFILL_SET_EXTERNAL_IDS: ${{ env.SET_EXTERNAL_IDS }}
+          BACKFILL_RENAME_COLORS: ${{ env.RENAME_COLORS }}
         run: python scripts/backfill_keys.py
