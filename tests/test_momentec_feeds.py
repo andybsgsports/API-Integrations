@@ -4,7 +4,10 @@ from pathlib import Path
 
 from momentec_netsuite.feeds import parse_product_data
 
-SAMPLE = Path("/root/.claude/uploads/bc8c9923-f9d7-5294-8fec-b39eba96f23b/3e8b1c81-sublimationproductdatastdall.csv")
+SAMPLE = Path(
+    "/root/.claude/uploads/bc8c9923-f9d7-5294-8fec-b39eba96f23b"
+    "/3e8b1c81-sublimationproductdatastdall.csv"
+)
 
 
 def test_parse_real_sample_feed():
