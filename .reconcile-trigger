@@ -1,1 +1,1 @@
-run 2 — full-catalog reconcile (added ns_auth_check.py, non-fatal push)
+run 3 — merged default (SFTP host-key fix + paramiko<4 pin); full-catalog reconcile
