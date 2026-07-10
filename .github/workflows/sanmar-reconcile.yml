@@ -47,11 +47,11 @@ jobs:
           RECONCILE_STYLE_LIMIT: ${{ github.event.inputs.style_limit }}
         run: python scripts/reconcile_report.py
 
-      - name: Upload reconciliation mapping CSV
+      - name: Upload reconciliation CSVs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reconcile-report-${{ github.run_id }}
-          path: data/reconcile_report.csv
+          path: data/*.csv
           retention-days: 14
           if-no-files-found: ignore
