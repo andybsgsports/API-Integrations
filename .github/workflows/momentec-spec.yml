@@ -1,0 +1,66 @@
+name: Momentec OpenAPI spec fetch
+
+# One-shot discovery: pull the OpenAPI spec behind momentecbrands.com/api
+# (public Swagger UI) and commit it to docs/ so the client can be built
+# against the real schemas. Read-only against Momentec; no credentials.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".momentec-trigger"]
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate and download the OpenAPI spec
+        run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36"
+          mkdir -p docs
+          curl -sSL -A "$UA" "https://www.momentecbrands.com/api" -o api.html || true
+          echo "--- spec URL candidates found in page ---"
+          grep -oE '"[^"]*\.(json|yaml)[^"]*"|url:\s*"[^"]+"' api.html | sort -u | head -20 || true
+          CANDIDATES=$(grep -oE 'https?://[^"'"'"' ]+\.(json|yaml)' api.html | sort -u)
+          CANDIDATES="$CANDIDATES
+          https://www.momentecbrands.com/api/openapi.json
+          https://www.momentecbrands.com/api/swagger.json
+          https://api.momentecbrands.com/openapi.json
+          https://api.momentecbrands.com/swagger/v2/swagger.json
+          https://api.momentecbrands.com/swagger.json"
+          for u in $CANDIDATES; do
+            u=$(echo "$u" | tr -d ' ')
+            [ -z "$u" ] && continue
+            echo "trying: $u"
+            if curl -sSL -A "$UA" --max-time 30 "$u" -o spec.json 2>/dev/null \
+               && python3 -c "import json;d=json.load(open('spec.json'));assert 'openapi' in d or 'swagger' in d" 2>/dev/null; then
+              cp spec.json docs/momentec_openapi.json
+              echo "SPEC FOUND: $u"
+              python3 - <<'PY'
+          import json
+          d = json.load(open('docs/momentec_openapi.json'))
+          print('title:', d.get('info', {}).get('title'))
+          print('version:', d.get('info', {}).get('version'))
+          print('servers:', d.get('servers'))
+          print('security schemes:', list((d.get('components', {}) or {}).get('securitySchemes', {}).keys()))
+          print('paths:')
+          for p, ops in sorted(d.get('paths', {}).items()):
+              print(' ', p, '->', ', '.join(ops.keys()))
+          PY
+              break
+            fi
+          done
+          test -f docs/momentec_openapi.json || { echo "NO SPEC FOUND — dump of page head:"; head -c 2000 api.html; exit 1; }
+
+      - name: Commit spec back to this branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/momentec_openapi.json
+          git commit -m "Add Momentec OpenAPI spec (fetched by CI) [skip ci]" \
+            || { echo "nothing to commit"; exit 0; }
+          git push origin HEAD:${{ github.ref_name }}
