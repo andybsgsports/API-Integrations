@@ -1,2 +1,3 @@
-# run 1 — audit + create missing fields (user granted field-create permission)
-FIELD_CREATE=true
+# run 2 — create the 45 custom fields via SOAP (permissions confirmed)
+FIELD_CREATE=false
+SOAP_CREATE=true
