@@ -66,11 +66,11 @@ class SanMarSftp:
         """
         try:
             supported = set(getattr(type(transport), "_key_info", {}))
-            offered = list(transport._preferred_keys)
+            offered = list(transport._preferred_keys)  # type: ignore[attr-defined]
             for algo in _LEGACY_HOST_KEY_ALGOS:
                 if algo in supported and algo not in offered:
                     offered.append(algo)
-            transport._preferred_keys = tuple(offered)
+            transport._preferred_keys = tuple(offered)  # type: ignore[attr-defined]
         except Exception:  # pragma: no cover - defensive against paramiko internals
             log.warning("Could not widen host-key algorithms; using paramiko defaults")
 
