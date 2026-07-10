@@ -42,6 +42,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 sanmar_netsuite = ["py.typed"]
 ss_activewear_netsuite = ["py.typed"]
+momentec_netsuite = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -59,4 +60,4 @@ select = ["E", "F", "I", "UP", "B", "W"]
 python_version = "3.10"
 warn_unused_ignores = true
 ignore_missing_imports = true
-packages = ["sanmar_netsuite", "ss_activewear_netsuite"]
+packages = ["sanmar_netsuite", "ss_activewear_netsuite", "momentec_netsuite"]
