@@ -1,1 +1,1 @@
-run 1 — full-catalog reconcile, commit review CSVs (rename plan + matched items)
+run 2 — full-catalog reconcile (added ns_auth_check.py, non-fatal push)

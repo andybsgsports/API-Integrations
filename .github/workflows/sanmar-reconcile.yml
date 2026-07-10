@@ -76,7 +76,8 @@ jobs:
           git add -f data/color_rename_plan.csv data/sanmar_matched_items.csv
           git commit -m "Reconcile review CSVs (run ${{ github.run_id }}) [skip ci]" \
             || { echo "nothing to commit"; exit 0; }
-          git push origin HEAD:${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }} \
+            || echo "push failed (token may be read-only) — CSVs still in the artifact/log"
 
       - name: Upload reconciliation CSVs
         if: always()
