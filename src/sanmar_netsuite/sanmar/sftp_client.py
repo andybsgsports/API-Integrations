@@ -20,6 +20,13 @@ from ..config import SftpConfig
 
 log = logging.getLogger(__name__)
 
+# Legacy SSH host-key algorithms SanMar's server still negotiates. paramiko 4.0+
+# dropped these from its advertised defaults (and 5.0 removed them outright),
+# which makes key exchange fail with "no acceptable host key". We pin paramiko
+# to the 3.x line (see pyproject) and additionally offer any of these the
+# installed paramiko still supports.
+_LEGACY_HOST_KEY_ALGOS = ("ssh-rsa", "ssh-dss")
+
 
 class SanMarSftp:
     """Thin wrapper around a paramiko SFTP session for SanMar downloads."""
@@ -30,6 +37,7 @@ class SanMarSftp:
     @contextmanager
     def _session(self) -> Iterator[paramiko.SFTPClient]:
         transport = paramiko.Transport((self._config.host, self._config.port))
+        self._enable_legacy_host_keys(transport)
         try:
             host_key = self._expected_host_key()
             transport.connect(
@@ -46,6 +54,25 @@ class SanMarSftp:
                 sftp.close()
         finally:
             transport.close()
+
+    @staticmethod
+    def _enable_legacy_host_keys(transport: paramiko.Transport) -> None:
+        """Advertise legacy host-key algorithms SanMar's SFTP server requires.
+
+        Appends ``ssh-rsa`` / ``ssh-dss`` (whichever the installed paramiko
+        still supports) to the set the client offers during key exchange, so
+        connecting to SanMar's older SSH server doesn't fail with "no
+        acceptable host key". A no-op when the server uses a modern host key.
+        """
+        try:
+            supported = set(getattr(type(transport), "_key_info", {}))
+            offered = list(transport._preferred_keys)  # type: ignore[attr-defined]
+            for algo in _LEGACY_HOST_KEY_ALGOS:
+                if algo in supported and algo not in offered:
+                    offered.append(algo)
+            transport._preferred_keys = tuple(offered)  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - defensive against paramiko internals
+            log.warning("Could not widen host-key algorithms; using paramiko defaults")
 
     def _expected_host_key(self) -> paramiko.PKey | None:
         """Return a pinned host key if configured, else None (trust on first use).
