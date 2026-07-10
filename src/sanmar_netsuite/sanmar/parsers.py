@@ -7,8 +7,9 @@ Three file formats are handled:
   MAP, GTIN, product status, and image URLs. ``SanMar_EPDD.csv`` shares this
   schema and adds a ``QTY`` (all-warehouse) column, so the same reader handles
   both. (EPDD duplicates unique keys across category/subcategory — deduped here.)
-* ``sanmar_dip.txt`` — pipe-delimited, no header, one row per warehouse per
-  SKU. Carries per-warehouse availability and live sale pricing.
+* ``sanmar_dip.txt`` — pipe-delimited, one row per warehouse per SKU. SanMar's
+  live export leads with a column-header line, which is skipped. Carries
+  per-warehouse availability and live sale pricing.
 
 Parsing is driven by the documented field names/indices in
 :mod:`sanmar_netsuite.sanmar.constants`. Readers are tolerant of header
@@ -247,7 +248,8 @@ def parse_inventory(path: str | Path) -> list[InventoryRecord]:
 
     The file has one row per warehouse, so rows are grouped by ``unique_key``
     and warehouse quantities are aggregated. Pricing/sale fields are taken from
-    the first row seen for each SKU.
+    the first row seen for each SKU. SanMar's live export begins with a
+    column-header line, which is skipped.
     """
     path = Path(path)
     builders: dict[str, _InventoryBuilder] = {}
@@ -256,6 +258,12 @@ def parse_inventory(path: str | Path) -> list[InventoryRecord]:
         reader = csv.reader(fh, delimiter="|")
         for fields in reader:
             if len(fields) < C.DIP_MIN_COLUMNS:
+                continue
+            # Skip the column-header row SanMar includes on line 1 of the dip
+            # export (and any malformed row): a real data row's warehouse number
+            # is numeric, whereas the header carries the literal "whse_no".
+            whse_no = _clean(fields[C.DIP_WHSE_NO])
+            if whse_no and not whse_no.isdigit():
                 continue
             unique_key = _clean(fields[C.DIP_UNIQUE_KEY])
             if not unique_key:
@@ -293,9 +301,9 @@ class _InventoryBuilder:
 
     def add_warehouse(self, fields: list[str]) -> None:
         whse = _clean(fields[C.DIP_WHSE_NO])
-        qty = _int(fields[C.DIP_QUANTITY]) or 0
-        if not whse:
+        if not whse or not whse.isdigit():
             return
+        qty = _int(fields[C.DIP_QUANTITY]) or 0
         self._warehouses[whse] = self._warehouses.get(whse, 0) + qty
 
     def build(self) -> InventoryRecord:
