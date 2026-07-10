@@ -1,0 +1,3 @@
+# run 1 — DRY RUN, full catalog: report what the field update would write
+DRY_RUN=true
+MAX_ITEMS=0
