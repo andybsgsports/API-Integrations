@@ -6,6 +6,7 @@ from sanmar_netsuite.models import SkuRecord, StyleRecord
 from sanmar_netsuite.netsuite.adopt import (
     heuristic_abbrev,
     match_existing,
+    rename_is_safe,
     split_color_size,
 )
 
@@ -94,6 +95,40 @@ def test_option_match_by_name_needs_no_rename():
     assert report.rows[0].ns_id == "30"
     assert report.rows[0].method == "option:name"
     assert report.color_renames == {}
+
+
+def test_rename_is_safe_rules():
+    feed = {"black", "black/ black", "carolina blue", "teal green"}
+    # Clean abbreviation -> full name: allowed.
+    assert rename_is_safe("Cabl", "Carolina Blue", feed)
+    # Current name IS a real SanMar color: never rename it to another color.
+    assert not rename_is_safe("Black", "Black/ Black", feed)
+    # Multi-word current names are real colors (maybe another vendor's).
+    assert not rename_is_safe("Team Grey", "Teal Green", feed)
+    assert not rename_is_safe("Royal Cardinal", "Royal Caribe", feed)
+    # Whitespace/case-only differences: nothing worth renaming.
+    assert not rename_is_safe("Black/Red", "Black/ Red", feed)
+    assert not rename_is_safe("", "Carolina Blue", feed)
+
+
+def test_real_color_never_added_to_rename_plan():
+    # "Black/ Black" matches the value named "Black" via the mainframe name;
+    # the guard must keep "Black" out of the rename plan because plain Black
+    # is itself a SanMar color elsewhere in the feed.
+    client = FakeClient(
+        colors=[{"id": "1", "name": "Black", "abbreviation": ""}],
+        sizes=[{"id": "23", "name": "Large"}],
+        items_by_style={"BG100": [
+            {"id": "70", "itemid": "BG100-Black-Large", "color": "1", "size": "23"},
+        ]},
+    )
+    styles = [
+        _style("BG100", _sku("BG100", "Black/ Black", "Black", "L", "1")),
+        _style("2000", _sku("2000", "Black", "Black", "L", "2")),
+    ]
+    report = match_existing(client, styles)
+    assert report.rows[0].ns_id == "70"  # the item match itself still works
+    assert report.color_renames == {}   # ...but no rename is proposed
 
 
 def test_name_parse_fallback_when_option_fields_absent():
