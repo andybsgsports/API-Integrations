@@ -46,8 +46,20 @@ def _s(v) -> str:
     return "" if v is None else str(v)
 
 
-def build_payloads(styles, inventory) -> dict[str, dict[str, str]]:
-    """GTIN -> field payload for every feed SKU carrying a barcode."""
+def _make_put(entry: dict[str, object]):
+    def put(field: str, value: object) -> None:
+        if value is None or str(value).strip() == "":
+            return
+        entry[field] = value
+    return put
+
+
+def build_payloads(styles, inventory) -> dict[str, dict[str, object]]:
+    """GTIN -> field payload for every feed SKU carrying a barcode.
+
+    Values are typed (numbers as numbers) and empty values are omitted —
+    NetSuite 400s on an empty string in a numeric/currency field.
+    """
     whse_by_key: dict[str, str] = {}
     total_by_key: dict[str, int] = {}
     for rec in inventory:
@@ -57,28 +69,43 @@ def build_payloads(styles, inventory) -> dict[str, dict[str, str]]:
         )
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
 
-    payloads: dict[str, dict[str, str]] = {}
+    payloads: dict[str, dict[str, object]] = {}
     for style in styles:
         for sku in style.skus:
             if not sku.gtin:
                 continue
+            entry: dict[str, object] = {}
+            put = _make_put(entry)
             qty = total_by_key.get(sku.unique_key, sku.available_qty)
-            payloads[sku.gtin] = {
-                "custitem_sanmar_unique_key": sku.unique_key,
-                "custitem_sanmar_inventory_key": sku.inventory_key,
-                "custitem_sanmar_size_index": sku.size_index,
-                "custitem_sanmar_style": sku.style,
-                "custitem_sanmar_mf_color": sku.mainframe_color,
-                "custitem_sanmar_gtin": sku.gtin,
-                "custitem_sanmar_map": _s(sku.map_price),
-                "custitem_sanmar_msrp": _s(sku.msrp),
-                "custitem_sanmar_case_price": _s(sku.case_price),
-                "custitem_sanmar_case_size": _s(sku.case_size),
-                "custitem_sanmar_status": sku.product_status,
-                "custitem_sanmar_qty_available": _s(qty),
-                "custitem_sanmar_qty_by_whse": whse_by_key.get(sku.unique_key, ""),
-            }
+            put("custitem_sanmar_unique_key", sku.unique_key)
+            put("custitem_sanmar_inventory_key", sku.inventory_key)
+            put("custitem_sanmar_size_index", sku.size_index)
+            put("custitem_sanmar_style", sku.style)
+            put("custitem_sanmar_mf_color", sku.mainframe_color)
+            put("custitem_sanmar_gtin", sku.gtin)
+            put("custitem_sanmar_map", None if sku.map_price is None else float(sku.map_price))
+            put("custitem_sanmar_msrp", None if sku.msrp is None else float(sku.msrp))
+            put(
+                "custitem_sanmar_case_price",
+                None if sku.case_price is None else float(sku.case_price),
+            )
+            put("custitem_sanmar_case_size", None if sku.case_size is None else int(sku.case_size))
+            put("custitem_sanmar_status", sku.product_status)
+            put("custitem_sanmar_qty_available", None if qty is None else int(qty))
+            put("custitem_sanmar_qty_by_whse", whse_by_key.get(sku.unique_key, ""))
+            if entry:
+                payloads[sku.gtin] = entry
     return payloads
+
+
+def _same(current: object, new: object) -> bool:
+    cs, ns_ = _s(current).strip(), str(new).strip()
+    if cs == ns_:
+        return True
+    try:
+        return float(cs) == float(ns_)
+    except ValueError:
+        return False
 
 
 def main() -> int:
@@ -107,8 +134,7 @@ def main() -> int:
             if not want:
                 continue
             body = {
-                f: v for f, v in want.items()
-                if _s(row.get(f)).strip() != _s(v).strip()
+                f: v for f, v in want.items() if not _same(row.get(f), v)
             }
             if not body:
                 unchanged += 1

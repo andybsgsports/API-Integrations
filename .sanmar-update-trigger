@@ -1,4 +1,4 @@
-# run 2 — LIVE full field update (user pre-authorized after clean dry run:
-# "Yes — go straight to live"). Sandbox; ~9,017 items; diff-aware.
+# run 3 — LIVE smoke, 25 items (typed payloads; prior run failed 400 on all
+# writes due to empty strings in numeric fields — zero items were written)
 DRY_RUN=false
-MAX_ITEMS=0
+MAX_ITEMS=25
