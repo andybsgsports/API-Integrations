@@ -82,8 +82,16 @@ sanmar-sync sync-live-pricing --file Upsert sale-aware pricing (dip feed)
 sanmar-sync sync-inventory --file    Upsert availability (dip feed)
 sanmar-sync sync-images    --file --folder ID   Upload images to File Cabinet
 sanmar-sync export-csv     --file --out         Generate matrix-item import CSV
+sanmar-sync push-children  --file [--style --limit]  Create matrix children via RESTlet
 sanmar-sync all                      Download + catalog + pricing + inventory
 ```
+
+`push-children` creates matrix child items through the BSG RESTlet
+(`suitescript/bsg_sanmar_matrix.js`) — the only path that links **numeric-style
+parents** (e.g. `2000`) correctly, since it resolves the parent by name in
+SuiteScript rather than through the CSV importer's numeric coercion. Deploy the
+script and fire a single child with `--style 2000 --limit 1`; see
+[`docs/RESTLET_DEPLOY.md`](docs/RESTLET_DEPLOY.md).
 
 Omit `--file` and the tool downloads the right file from SFTP automatically.
 Every write path honors `SYNC_DRY_RUN` (default **true**) — flip it to `false`

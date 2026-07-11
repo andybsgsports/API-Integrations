@@ -129,9 +129,199 @@ def cmd_export_csv(args: argparse.Namespace, config: AppConfig) -> int:
 
     path = _resolve_file(args.file, C.FILE_SDL_N, config)
     styles = parse_styles(path)
-    out = write_matrix_csv(styles, args.out)
-    sku_count = sum(len(s.skus) for s in styles)
-    print(f"Wrote {sku_count} SKU rows across {len(styles)} styles -> {out}")
+    parent_refs: dict[str, str] = {}
+    skip: set[str] = set()
+    if getattr(args, "merge", False):
+        from .netsuite.client import NetSuiteClient
+        from .netsuite.merge import prepare_merge
+
+        client = NetSuiteClient(config.netsuite)
+        parent_refs, skip = prepare_merge(client, styles)
+        log.info(
+            "Merge mode: %d parent id(s) resolved, %d existing combo(s) skipped",
+            len(parent_refs),
+            len(skip),
+        )
+    out = write_matrix_csv(
+        styles,
+        args.out,
+        tax_schedule=config.sync.tax_schedule,
+        income_account=config.sync.income_account,
+        parent_refs=parent_refs,
+        skip_external_ids=skip,
+    )
+    total = sum(len(s.skus) for s in styles)
+    print(f"Wrote {total - len(skip)} of {total} SKU rows ({len(skip)} skipped) -> {out}")
+    return 0
+
+
+def _resolve_account_id(client, account_ref: str) -> str | None:
+    """Resolve an account reference ('4100' or '4100 NAME') to its internal id."""
+    from .netsuite.repository import _sql_escape
+
+    number = account_ref.split()[0] if account_ref else account_ref
+    rows = client.suiteql(f"SELECT id FROM account WHERE acctnumber = '{_sql_escape(number)}'")
+    return str(rows[0]["id"]) if rows else None
+
+
+def cmd_reconcile_items(args: argparse.Namespace, config: AppConfig) -> int:
+    """Set income account + Base Price on SanMar matrix children (post-import).
+
+    NetSuite's CSV matrix import can't apply these to children, so this reconciles
+    them by external id over REST. Writes only when ``SYNC_DRY_RUN=false``.
+    """
+    from .netsuite.client import NetSuiteClient
+    from .netsuite.reconcile import reconcile_items
+    from .netsuite.repository import ItemRepository
+    from .sanmar.parsers import parse_styles
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    client = NetSuiteClient(config.netsuite)
+    income_id = _resolve_account_id(client, config.sync.income_account)
+    if income_id is None:
+        log.error("Income account %r not found in NetSuite.", config.sync.income_account)
+        return 2
+    repo = ItemRepository(client, config.netsuite)
+    report = reconcile_items(
+        repo, styles, income_account_id=income_id, allow_write=not config.sync.dry_run
+    )
+    print(report.summary())
+    return 0
+
+
+def cmd_push_children(args: argparse.Namespace, config: AppConfig) -> int:
+    """Create matrix children via the BSG RESTlet (handles numeric-style parents).
+
+    The RESTlet resolves the parent by name in SuiteScript, so numeric styles
+    like ``2000`` link correctly — unlike the CSV importer. In dry-run it prints
+    the JSON payload(s) without calling NetSuite; with ``SYNC_DRY_RUN=false`` it
+    POSTs them and prints each child's created/updated/error result. Use
+    ``--style 2000 --limit 1`` to fire a single child as a smoke test.
+    """
+    import json
+
+    from .sanmar.parsers import parse_styles
+    from .transform.csv_export import DEFAULT_ASSET_ACCOUNT, DEFAULT_COGS_ACCOUNT
+    from .transform.restlet_payload import iter_child_payloads
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    payloads = list(
+        iter_child_payloads(
+            styles,
+            income_account=config.sync.income_account,
+            cogs_account=DEFAULT_COGS_ACCOUNT,
+            asset_account=DEFAULT_ASSET_ACCOUNT,
+            tax_schedule=config.sync.tax_schedule,
+            style_filter=args.style,
+            limit=args.limit,
+        )
+    )
+    if not payloads:
+        log.error("No SKUs matched (style=%r). Nothing to push.", args.style)
+        return 2
+
+    if config.sync.dry_run:
+        log.info("DRY RUN: would POST %d child item(s) to the matrix RESTlet:", len(payloads))
+        print(json.dumps({"items": payloads}, indent=2))
+        return 0
+
+    from .netsuite.client import NetSuiteClient
+
+    client = NetSuiteClient(config.netsuite)
+    response = client.call_restlet(
+        config.netsuite.matrix_script_id,
+        config.netsuite.matrix_deploy_id,
+        {"items": payloads},
+    )
+    results = response.get("results", [])
+    errors = 0
+    for r in results:
+        status = r.get("status")
+        if status == "error":
+            errors += 1
+        print(
+            f"{r.get('externalId', '?'):<24} {status:<8} "
+            f"{('id=' + str(r['id'])) if r.get('id') else r.get('message', '')}"
+        )
+    print(f"\n{len(results)} item(s): {len(results) - errors} ok, {errors} error(s).")
+    return 1 if errors else 0
+
+
+def cmd_reconcile_report(args: argparse.Namespace, config: AppConfig) -> int:
+    """Read-only: match feed SKUs to existing NetSuite items (no writes).
+
+    Matches by Vendor Name/Code (style) + color + size, so a later back-fill can
+    stamp the UPC + SANMAR external id onto the items that already exist. Prints
+    a match-rate summary and writes a per-SKU mapping CSV.
+    """
+    import csv
+
+    from .netsuite.adopt import match_existing
+    from .netsuite.client import NetSuiteClient
+    from .sanmar.parsers import parse_styles
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    client = NetSuiteClient(config.netsuite)
+    report = match_existing(client, styles, style_limit=args.style_limit)
+
+    print(report.summary())
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(
+            ["unique_key", "style", "color_name", "mainframe_color", "size",
+             "gtin", "ns_id", "method"]
+        )
+        for r in report.rows:
+            w.writerow(
+                [r.unique_key, r.style, r.color_name, r.mainframe_color, r.size,
+                 r.gtin, r.ns_id or "", r.method]
+            )
+    print(f"Wrote mapping -> {out} ({len(report.rows)} rows)")
+
+    if report.unmatched:
+        print("\nSample unmatched SKUs (style | color | size):")
+        for r in report.unmatched[:10]:
+            print(f"  {r.style} | {r.color_name} ({r.mainframe_color}) | {r.size}")
+    if report.dup_parents:
+        print("\nStyles with duplicate parents (first 10):")
+        for style, ids in list(report.dup_parents.items())[:10]:
+            print(f"  {style}: ids {ids}")
+    return 0
+
+
+def cmd_ensure_matrix_options(args: argparse.Namespace, config: AppConfig) -> int:
+    """Create (or, in dry-run, preview) any missing matrix color/size values.
+
+    Reads the live matrix lists, so it needs NetSuite credentials even when
+    previewing. Writes only when ``SYNC_DRY_RUN=false``.
+    """
+    from .netsuite.client import NetSuiteClient, NetSuiteError
+    from .netsuite.matrix_options import ensure_matrix_options
+    from .sanmar.parsers import parse_styles
+
+    path = _resolve_file(args.file, C.FILE_SDL_N, config)
+    styles = parse_styles(path)
+    client = NetSuiteClient(config.netsuite)
+    try:
+        report = ensure_matrix_options(client, styles, allow_create=not config.sync.dry_run)
+    except NetSuiteError as exc:
+        if exc.status == 403:
+            log.error(
+                "NetSuite refused the write (403 INSUFFICIENT_PERMISSION). The "
+                "integration role needs the 'Custom Lists' permission at Full level to "
+                "add matrix color/size values. Ask a NetSuite admin to grant it "
+                "(Setup > Users/Roles > Manage Roles > [integration role] > Permissions "
+                "> Setup tab > add 'Custom Lists' = Full), then re-run this command."
+            )
+            return 2
+        raise
+    print(report.summary())
     return 0
 
 
@@ -196,7 +386,53 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("export-csv", help="Generate the matrix-item import CSV")
     p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
     p.add_argument("--out", default="data/matrix_items.csv", help="Output CSV path")
+    p.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge-aware export: reference parents by internal id and skip "
+        "existing color/size combos (needs NetSuite creds)",
+    )
     p.set_defaults(func=cmd_export_csv)
+
+    p = sub.add_parser(
+        "reconcile-items",
+        help="Set income account + Base Price on imported matrix children (post-import)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.set_defaults(func=cmd_reconcile_items)
+
+    p = sub.add_parser(
+        "push-children",
+        help="Create matrix children via the RESTlet (works for numeric-style "
+        "parents; preview unless SYNC_DRY_RUN=false)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.add_argument("--style", default=None, help="Only push children of this style (e.g. 2000)")
+    p.add_argument(
+        "--limit", type=int, default=0, help="Cap the number of children pushed (0 = no cap)"
+    )
+    p.set_defaults(func=cmd_push_children)
+
+    p = sub.add_parser(
+        "reconcile-report",
+        help="Read-only: match feed SKUs to existing NetSuite items by "
+        "vendor code + color + size (for the UPC/external-id back-fill)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.add_argument("--out", default="data/reconcile_report.csv", help="Mapping CSV output path")
+    p.add_argument(
+        "--style-limit", type=int, default=0,
+        help="Only check the first N styles (quick sample; 0 = all)",
+    )
+    p.set_defaults(func=cmd_reconcile_report)
+
+    p = sub.add_parser(
+        "ensure-matrix-options",
+        help="Create any missing matrix color/size list values (preview unless "
+        "SYNC_DRY_RUN=false)",
+    )
+    p.add_argument("--file", default=None, help="Path to SDL_N/EPDD CSV")
+    p.set_defaults(func=cmd_ensure_matrix_options)
 
     p = sub.add_parser("all", help="Download + catalog + pricing + inventory")
     p.add_argument("--catalog-file", default=None, help="Path to SDL_N/EPDD CSV")

@@ -1,0 +1,4 @@
+# run 3 — SOAP create all 45 fields; first delete the double-prefixed probe field
+FIELD_CREATE=false
+SOAP_CREATE=true
+SOAP_DELETE_IDS=4824

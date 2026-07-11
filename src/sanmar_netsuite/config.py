@@ -115,6 +115,9 @@ class NetSuiteConfig:
     token_id: str
     token_secret: str
     rest_base: str
+    restlet_base: str
+    matrix_script_id: str
+    matrix_deploy_id: str
     sanmar_vendor_id: str
     subsidiary_id: str
     income_account_id: str
@@ -139,12 +142,12 @@ class NetSuiteConfig:
     @classmethod
     def from_env(cls) -> NetSuiteConfig:
         account_id = _get("NETSUITE_ACCOUNT_ID")
-        # REST host: account id lowercased with underscores → hyphens.
-        derived_base = (
-            f"https://{account_id.lower().replace('_', '-')}.suitetalk.api.netsuite.com"
-            if account_id
-            else ""
-        )
+        # Hosts: account id lowercased with underscores → hyphens. The RESTlet
+        # endpoint lives on a different host (`restlets`) than the record/SuiteQL
+        # REST API (`suitetalk`), but both derive from the same account id.
+        host_id = account_id.lower().replace("_", "-")
+        derived_base = f"https://{host_id}.suitetalk.api.netsuite.com" if account_id else ""
+        derived_restlet = f"https://{host_id}.restlets.api.netsuite.com" if account_id else ""
         return cls(
             account_id=account_id,
             consumer_key=_get("NETSUITE_CONSUMER_KEY"),
@@ -152,6 +155,9 @@ class NetSuiteConfig:
             token_id=_get("NETSUITE_TOKEN_ID"),
             token_secret=_get("NETSUITE_TOKEN_SECRET"),
             rest_base=_get("NETSUITE_REST_BASE", derived_base),
+            restlet_base=_get("NETSUITE_RESTLET_BASE", derived_restlet),
+            matrix_script_id=_get("NETSUITE_MATRIX_SCRIPT_ID"),
+            matrix_deploy_id=_get("NETSUITE_MATRIX_DEPLOY_ID"),
             sanmar_vendor_id=_get("NETSUITE_SANMAR_VENDOR_ID"),
             subsidiary_id=_get("NETSUITE_SUBSIDIARY_ID"),
             income_account_id=_get("NETSUITE_INCOME_ACCOUNT_ID"),
@@ -171,6 +177,8 @@ class SyncConfig:
     max_records: int
     dry_run: bool
     log_level: str
+    tax_schedule: str
+    income_account: str
 
     @classmethod
     def from_env(cls) -> SyncConfig:
@@ -179,6 +187,8 @@ class SyncConfig:
             max_records=_get_int("SYNC_MAX_RECORDS", 0),
             dry_run=_get_bool("SYNC_DRY_RUN", True),
             log_level=_get("LOG_LEVEL", "INFO"),
+            tax_schedule=_get("SYNC_TAX_SCHEDULE", "Taxable"),
+            income_account=_get("SYNC_INCOME_ACCOUNT", "4100"),
         )
 
 

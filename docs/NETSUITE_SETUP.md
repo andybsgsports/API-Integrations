@@ -99,18 +99,60 @@ these option fields.
 sanmar-sync export-csv --file downloads/SanMar_SDL_N.csv --out data/matrix_items.csv
 ```
 
+The export writes **one child-matrix row per SKU** in BSG's matrix
+import-template format. Each row carries `Parent/Child Matrix Item` =
+`Child Matrix Item` and `Subitem Of` = the style, so NetSuite nests them under
+the parent instead of creating standalone items. Column conventions match BSG's
+live items: `Vendor Name/Code` = style, `Display Name/Code` = product title,
+`Base Price` = SanMar MSRP, accounts by name (`SALES OF MERCHANDISE` /
+`COST OF MERCHANDISE SOLD` / `INVENTORY`), `Class` mapped from SanMar category
+(`Knit Shirts` → `Tops : Polos`, etc.), `Department` = `Apparel`. Income
+account and tax schedule come from `SYNC_INCOME_ACCOUNT` / `SYNC_TAX_SCHEDULE`.
+
+**Prerequisite:** the parent matrix item must already exist and list each SKU's
+color/size in its grid. The REST API *cannot* create matrix children (the matrix
+option fields are read-only), so this load goes through the Import Assistant.
+
 Then `Setup > Import/Export > Import CSV Records`:
 
 - Import Type: **Items**, Record Type: **Inventory Item**.
 - Data Handling: **Add or Update**.
-- Map columns: `External ID` → External ID, `Parent External ID`/`Parent Item
-  Name` → the matrix parent, `Color`/`Size` → the matrix option fields, prices
-  and `custitem_*` columns to their fields.
+- Map columns straight across (the headers match BSG's matrix template):
+  `Parent/Child Matrix Item` → Matrix Type, `Subitem Of` → Subitem Of,
+  `Matrix Attribute 1 - Size` / `Matrix Attribute 2 - Color` → the matrix
+  option fields, accounts/class/department/etc. to their fields.
 - Save the map as `SanMar Matrix Items` so you can re-run it.
 
-NetSuite creates the parent items automatically from the parent reference and
-links each child via its matrix options. After this load, ongoing updates flow
-through the REST syncs.
+NetSuite nests each child under its parent style via the matrix options.
+
+**Merging into existing parents:** generate the CSV with `--merge`. It reads the
+live catalog and (a) references every parent by **internal id** in `Subitem Of`
+— so purely-numeric styles like `2000` resolve correctly instead of colliding
+with an internal id — and (b) **skips color/size combos that already exist**, so
+the import only adds genuinely new children (no "already exists" / "missing
+price(s)" noise):
+
+```bash
+sanmar-sync export-csv --file downloads/SanMar_SDL_N.csv --out data/matrix_items.csv --merge
+```
+
+Because `Subitem Of` then holds internal ids, set that column's reference in the
+Import Assistant to match by **Internal ID**.
+
+### Post-import reconcile (income account + Base Price)
+
+The CSV import nests children but does **not** apply the income account or Base
+Price to them (children inherit the parent's accounts, and the price sublist is
+skipped). Run `reconcile-items` after the import to set them by external id:
+
+```bash
+sanmar-sync reconcile-items --file downloads/SanMar_SDL_N.csv   # preview (dry run)
+SYNC_DRY_RUN=false sanmar-sync reconcile-items --file downloads/SanMar_SDL_N.csv
+```
+
+It sets income (`SYNC_INCOME_ACCOUNT`) and Base Price (SanMar MSRP) on every
+SanMar child found, and reports any not yet imported. After this, ongoing
+updates flow through the REST syncs by external id.
 
 ## 9. Image folder (only if uploading images into NetSuite)
 

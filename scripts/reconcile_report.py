@@ -53,6 +53,21 @@ def main() -> int:
             )
     print(f"\nWrote mapping -> {out} ({len(report.rows)} rows)")
 
+    # Review-friendly: only the items that WOULD get a UPC (the write targets).
+    matched = report.matched
+    mout = Path("data/sanmar_matched_items.csv")
+    with mout.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(
+            ["style", "color_name", "size", "upc_to_write", "netsuite_item_id",
+             "match_method"]
+        )
+        for r in matched:
+            w.writerow(
+                [r.style, r.color_name, r.size, r.gtin, r.ns_id or "", r.method]
+            )
+    print(f"Wrote matched-items review -> {mout} ({len(matched)} rows)")
+
     if report.color_renames:
         plan = Path("data/color_rename_plan.csv")
         with plan.open("w", encoding="utf-8", newline="") as fh:

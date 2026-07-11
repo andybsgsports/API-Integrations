@@ -28,6 +28,9 @@ def _app_config(tmp_path) -> AppConfig:
             token_id="",
             token_secret="",
             rest_base="https://1234567.suitetalk.api.netsuite.com",
+            restlet_base="",
+            matrix_script_id="",
+            matrix_deploy_id="",
             sanmar_vendor_id="42",
             subsidiary_id="1",
             income_account_id="101",
@@ -43,6 +46,8 @@ def _app_config(tmp_path) -> AppConfig:
             max_records=0,
             dry_run=True,
             log_level="INFO",
+            tax_schedule="Taxable",
+            income_account="SALES OF MERCHANDISE",
         ),
     )
 
@@ -89,6 +94,8 @@ def test_max_records_limit(tmp_path, sdl_n_path):
             max_records=1,
             dry_run=True,
             log_level="INFO",
+            tax_schedule="Taxable",
+            income_account="SALES OF MERCHANDISE",
         ),
     )
     result = sync_catalog(sdl_n_path, config)

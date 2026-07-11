@@ -1,0 +1,149 @@
+/**
+ * BSG SanMar matrix-child creator (RESTlet).
+ *
+ * Creates/updates NetSuite *matrix child* items under existing matrix parents —
+ * the one operation neither the CSV Import Assistant (numeric-style parents) nor
+ * the REST record API (matrix option fields are read-only) can do reliably.
+ *
+ * POST body:
+ *   { "items": [ {
+ *       "externalId": "SANMAR-1959911",
+ *       "itemId": "K420-Classic Navy-Small",
+ *       "style": "2000",                 // parent matrix item Name/Number
+ *       "color": "Classic Navy",          // customlist_bsg_matrix_color value name
+ *       "size": "Small",                  // customlist_bsg_matrix_size value name
+ *       "displayName": "...", "description": "...", "vendorName": "2000",
+ *       "incomeAccount": "4100", "cogsAccount": "5100", "assetAccount": "1200",
+ *       "taxSchedule": "Taxable", "subsidiary": "Parent Company : ...",
+ *       "department": "Apparel", "class": "Tops : Tees",
+ *       "location": "Badger Sporting Goods", "costingMethod": "AVG",
+ *       "cost": 3.49, "basePrice": 6.00, "currency": "US Dollar"
+ *   }, ... ] }
+ *
+ * Response: { "results": [ { "externalId", "status": created|updated|error,
+ *                            "id", "message" } ] }
+ *
+ * @NApiVersion 2.1
+ * @NScriptType Restlet
+ */
+define(["N/record", "N/search"], (record, search) => {
+  const COLOR_LIST = "customlist_bsg_matrix_color";
+  const SIZE_LIST = "customlist_bsg_matrix_size";
+
+  const cache = {};
+  const memo = (key, fn) => (key in cache ? cache[key] : (cache[key] = fn()));
+
+  function firstId(type, filters) {
+    let id = null;
+    search.create({ type, filters, columns: ["internalid"] }).run().each((r) => {
+      id = r.id;
+      return false;
+    });
+    return id;
+  }
+
+  // Parent matrix item by Name/Number (exact). Works for numeric names too —
+  // SuiteScript search has none of the CSV's numeric-reference coercion.
+  const resolveParent = (style) =>
+    memo("parent:" + style, () => firstId("item", [["name", "is", style]]));
+
+  const resolveOption = (listId, name) =>
+    memo(listId + ":" + name, () => firstId(listId, [["name", "is", name]]));
+
+  const resolveAccount = (numberOrName) =>
+    memo("acct:" + numberOrName, () =>
+      firstId("account", [["number", "is", numberOrName]]) ||
+      firstId("account", [["name", "is", numberOrName]])
+    );
+
+  const resolveByName = (type, name) =>
+    memo(type + ":" + name, () => firstId(type, [["name", "is", name]]));
+
+  const resolveTaxSchedule = (name) =>
+    memo("tax:" + name, () => firstId("taxschedule", [["name", "is", name]]));
+
+  // Class can be a "Parent : Child" path; match the leaf, disambiguating by parent.
+  function resolveClass(path) {
+    return memo("class:" + path, () => {
+      const parts = path.split(":").map((p) => p.trim());
+      const leaf = parts[parts.length - 1];
+      const filters = [["name", "is", leaf]];
+      if (parts.length > 1) {
+        const parentId = firstId("classification", [["name", "is", parts[parts.length - 2]]]);
+        if (parentId) filters.push("AND", ["parent", "anyof", parentId]);
+      }
+      return firstId("classification", filters);
+    });
+  }
+
+  function setIf(rec, field, value) {
+    if (value !== undefined && value !== null && value !== "") rec.setValue(field, value);
+  }
+
+  // Apply the non-structural fields shared by create and update.
+  function applyFields(rec, it) {
+    setIf(rec, "displayname", it.displayName);
+    setIf(rec, "salesdescription", it.description);
+    setIf(rec, "purchasedescription", it.description);
+    setIf(rec, "vendorname", it.vendorName);
+    setIf(rec, "incomeaccount", it.incomeAccount && resolveAccount(it.incomeAccount));
+    setIf(rec, "cogsaccount", it.cogsAccount && resolveAccount(it.cogsAccount));
+    setIf(rec, "assetaccount", it.assetAccount && resolveAccount(it.assetAccount));
+    setIf(rec, "taxschedule", it.taxSchedule && resolveTaxSchedule(it.taxSchedule));
+    setIf(rec, "department", it.department && resolveByName("department", it.department));
+    setIf(rec, "class", it.class && resolveClass(it.class));
+    setIf(rec, "location", it.location && resolveByName("location", it.location));
+    setIf(rec, "costingmethod", it.costingMethod);
+    setIf(rec, "cost", it.cost);
+    if (it.basePrice !== undefined && it.basePrice !== null) {
+      try {
+        rec.setSublistValue({ sublistId: "price1", fieldId: "price_1_", line: 0, value: it.basePrice });
+      } catch (e) {
+        /* price sublist varies by config; reconcile sets it as a fallback */
+      }
+    }
+  }
+
+  function createChild(it) {
+    const parentId = resolveParent(it.style);
+    if (!parentId) throw new Error("parent matrix item not found for style '" + it.style + "'");
+    const colorId = resolveOption(COLOR_LIST, it.color);
+    const sizeId = resolveOption(SIZE_LIST, it.size);
+    if (!colorId) throw new Error("color '" + it.color + "' not in " + COLOR_LIST);
+    if (!sizeId) throw new Error("size '" + it.size + "' not in " + SIZE_LIST);
+
+    const rec = record.create({ type: record.Type.INVENTORY_ITEM });
+    rec.setValue("matrixtype", "CHILD");
+    rec.setValue("parent", parentId);
+    rec.setValue("itemid", it.itemId);
+    rec.setValue("matrixoptioncustitem_bsg_color", colorId);
+    rec.setValue("matrixoptioncustitem_bsg_size", sizeId);
+    setIf(rec, "externalid", it.externalId);
+    applyFields(rec, it);
+    return rec.save({ enableSourcing: true, ignoreMandatoryFields: false });
+  }
+
+  function findExisting(externalId) {
+    return externalId ? firstId("item", [["externalid", "is", externalId]]) : null;
+  }
+
+  function post(body) {
+    const items = (body && body.items) || [];
+    const results = items.map((it) => {
+      try {
+        const existing = findExisting(it.externalId);
+        if (existing) {
+          const rec = record.load({ type: record.Type.INVENTORY_ITEM, id: existing });
+          applyFields(rec, it);
+          return { externalId: it.externalId, status: "updated", id: rec.save() };
+        }
+        return { externalId: it.externalId, status: "created", id: createChild(it) };
+      } catch (e) {
+        return { externalId: it.externalId, status: "error", message: e.message || String(e) };
+      }
+    });
+    return { results };
+  }
+
+  return { post };
+});

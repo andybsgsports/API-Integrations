@@ -10,6 +10,10 @@ Env knobs:
     BACKFILL_MAX_ITEMS          cap on item writes (0 = no cap)
     BACKFILL_SET_EXTERNAL_IDS   "true" to also re-key external ids (overwrites
                                 the migrated numeric ids — deliberate opt-in)
+    BACKFILL_RENAME_COLORS      "false" to skip the color renames (default
+                                true). Keep off for style-limited smoke runs:
+                                the rename-safety guard needs the whole
+                                catalog's colors in view to spot collisions.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ def main() -> int:
     style_limit = int(os.environ.get("RECONCILE_STYLE_LIMIT", "0") or "0")
     max_items = int(os.environ.get("BACKFILL_MAX_ITEMS", "0") or "0")
     set_eids = _flag("BACKFILL_SET_EXTERNAL_IDS")
+    rename_colors = (os.environ.get("BACKFILL_RENAME_COLORS") or "true").strip().lower() != "false"
     allow_write = not cfg.sync.dry_run
 
     catalog = Path(cfg.sftp.download_dir) / C.FILE_SDL_N
@@ -49,7 +54,7 @@ def main() -> int:
 
     print(
         f"\nBack-fill config: allow_write={allow_write} max_items={max_items} "
-        f"set_external_ids={set_eids}"
+        f"set_external_ids={set_eids} rename_colors={rename_colors}"
     )
     result = backfill_keys(
         client,
@@ -57,6 +62,7 @@ def main() -> int:
         allow_write=allow_write,
         max_items=max_items,
         set_external_ids=set_eids,
+        rename_colors=rename_colors,
     )
     print("\n" + result.summary())
     return 1 if result.failures else 0
