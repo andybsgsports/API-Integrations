@@ -8,4 +8,4 @@ styles present by vendorname: 333
   ...300/333 styles processed; matched so far 1,561
 matched items: 1,747
 
-ua backfill: wrote 25 item(s); unchanged: 0; upcCode filled (was empty): 0; failures: 0
+ua backfill: wrote 1722 item(s); unchanged: 25; upcCode filled (was empty): 0; failures: 0
