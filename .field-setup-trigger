@@ -1,4 +1,5 @@
-# run 4 — vendor record probe only (read-only)
+# run 5 — create the 8 UA fields via SOAP (existing 45 report as exists)
 FIELD_CREATE=false
-SOAP_CREATE=false
-VENDOR_PROBE=true
+SOAP_CREATE=true
+SOAP_DELETE_IDS=
+VENDOR_PROBE=false
