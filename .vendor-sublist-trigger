@@ -1,3 +1,3 @@
-# run 4 — LIVE FULL ranking pass (authorized; smoke wrote 25/25 clean)
-DRY_RUN=false
+# run 5 — DRY RUN with UA(576) in the ranking (final pass planning)
+DRY_RUN=true
 MAX_ITEMS=0
