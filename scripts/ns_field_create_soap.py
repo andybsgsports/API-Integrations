@@ -17,9 +17,10 @@ import time
 from xml.sax.saxutils import escape
 
 import requests
-from ns_field_setup import FIELDS  # shared field list (scripts/ dir on sys.path)
+from ns_field_setup import FIELDS, field_exists  # shared list (scripts/ on sys.path)
 
 from sanmar_netsuite.config import get_config
+from sanmar_netsuite.netsuite.client import NetSuiteClient
 
 VERSION = "2023_2"
 TYPE_MAP = {
@@ -123,7 +124,17 @@ def main() -> int:
             print(f"delete internalId {did}: {'OK' if ok else 'FAILED'}")
             if not ok:
                 print(text[:800])
-    todo = [(sid, label, ftype) for sid, label, ftype, _ in FIELDS]
+    # Re-runnable: only attempt fields the audit says are missing.
+    rest = NetSuiteClient(cfg)
+    todo = [
+        (sid, label, ftype)
+        for sid, label, ftype, _ in FIELDS
+        if not field_exists(rest, sid)
+    ]
+    print(f"missing fields to create: {len(todo)}")
+    if not todo:
+        print("all fields already exist — nothing to do")
+        return 0
 
     # Probe with the first field; print the raw fault if the schema is off.
     sid, label, ftype = todo[0]

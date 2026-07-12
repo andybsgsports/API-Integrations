@@ -1,4 +1,4 @@
-# run 5 — create the 8 UA fields via SOAP (existing 45 report as exists)
+# run 6 — create only the missing UA fields via SOAP (skip existing)
 FIELD_CREATE=false
 SOAP_CREATE=true
 SOAP_DELETE_IDS=
