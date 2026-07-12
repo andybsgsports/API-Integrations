@@ -1,5 +1,8 @@
 name: UA Back-fill (write phase)
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -68,4 +71,15 @@ jobs:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
-        run: python scripts/ua_backfill.py
+        run: python scripts/ua_backfill.py | tee ua_backfill_report.txt
+
+      - name: Commit report back to this branch
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p data && cp ua_backfill_report.txt data/
+          git add -f data/ua_backfill_report.txt
+          git commit -m "UA back-fill report (run ${{ github.run_id }}) [skip ci]" || exit 0
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git push origin HEAD:${{ github.ref_name }} || echo "push failed - report in log only" 
