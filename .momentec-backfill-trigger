@@ -1,3 +1,4 @@
-# run 1 — DRY RUN, full: report what the Momentec back-fill would write
-DRY_RUN=true
-MAX_ITEMS=0
+# run 2 — LIVE smoke, 25 items (user authorized all sandbox write phases;
+# dry run: 8,268 would-write, 0 failures)
+DRY_RUN=false
+MAX_ITEMS=25
