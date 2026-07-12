@@ -1,0 +1,3 @@
+# run 1 — DRY RUN, full: plan the vendor ranking (SanMar>Momentec>S&S) per item
+DRY_RUN=true
+MAX_ITEMS=0
