@@ -1,0 +1,11 @@
+UA sellable styles: 7,448
+styles present by vendorname: 333
+  ...50/333 styles processed; matched so far 260
+  ...100/333 styles processed; matched so far 588
+  ...150/333 styles processed; matched so far 1,074
+  ...200/333 styles processed; matched so far 1,404
+  ...250/333 styles processed; matched so far 1,561
+  ...300/333 styles processed; matched so far 1,561
+matched items: 1,747
+
+ua backfill: wrote 25 item(s); unchanged: 0; upcCode filled (was empty): 0; failures: 0
