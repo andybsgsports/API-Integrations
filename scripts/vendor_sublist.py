@@ -25,6 +25,7 @@ KEY_FIELDS = {  # supplier vendor id -> item field carrying its code
     512: "custitem_sanmar_style",
     264: "custitem_mtec_item_sku",
     510: "custitem_ss_sku",
+    576: "custitem_ua_part_id",
 }
 
 
