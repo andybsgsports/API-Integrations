@@ -1,3 +1,3 @@
-# run 1 — DRY RUN, full: plan the vendor ranking (SanMar>Momentec>S&S) per item
+# run 2 — DRY RUN again, committing the plan report back to the branch
 DRY_RUN=true
 MAX_ITEMS=0
