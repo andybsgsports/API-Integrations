@@ -57,6 +57,16 @@ def _same(current, new) -> bool:
         return False
 
 
+def _abs_url(path: str | None) -> str | None:
+    """S&S image fields carry relative CDN paths; Hyperlink fields need URLs."""
+    v = (path or "").strip()
+    if not v:
+        return None
+    if v.startswith(("http://", "https://")):
+        return v
+    return "https://cdn.ssactivewear.com/" + v.lstrip("/")
+
+
 def payload_for(p: dict) -> dict[str, object]:
     want: dict[str, object] = {}
     put = _put_into(want)
@@ -90,8 +100,8 @@ def payload_for(p: dict) -> dict[str, object]:
     put("custitem_ss_qty_by_whse", whse)
     want["custitem_ss_is_closeout"] = bool(p.get("is_closeout"))
     want["custitem_ss_is_discontinued"] = bool(p.get("is_discontinued"))
-    put("custitem_ss_front_image_url", p.get("front_image_url"))
-    put("custitem_ss_on_model_image_url", p.get("on_model_image_url"))
+    put("custitem_ss_front_image_url", _abs_url(p.get("front_image_url")))
+    put("custitem_ss_on_model_image_url", _abs_url(p.get("on_model_image_url")))
     return want
 
 
@@ -208,7 +218,8 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 if failures <= 10:
-                    print(f"  FAILED item {rid}: {str(exc)[:150]}")
+                    detail = getattr(exc, "detail", "") or getattr(exc, "args", "")
+                    print(f"  FAILED item {rid}: {str(exc)[:120]} :: {str(detail)[:400]}")
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
