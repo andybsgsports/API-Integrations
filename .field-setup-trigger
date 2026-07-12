@@ -1,4 +1,4 @@
-# run 3 — SOAP create all 45 fields; first delete the double-prefixed probe field
+# run 4 — vendor record probe only (read-only)
 FIELD_CREATE=false
-SOAP_CREATE=true
-SOAP_DELETE_IDS=4824
+SOAP_CREATE=false
+VENDOR_PROBE=true
