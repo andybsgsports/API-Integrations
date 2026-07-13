@@ -1,0 +1,31 @@
+queried columns: displayname, description, purchasedescription
+supplier-matched items: 19,474
+custitem_sanmar_unique_key: copy for 160,962 feed SKUs
+custitem_mtec_item_sku: copy for 104,047 feed SKUs
+custitem_ss_sku: copy for 195,552 feed SKUs
+  sample item 98752:
+    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone 1000 - Neon Rainbow - 2XL'
+    salesDescription: '' -> 'Colortone 1000 - Neon Rainbow - 2XL'
+    purchaseDescription: '' -> 'Colortone 1000 Colortone 1000 - Neon Rainbow/2XL'
+  sample item 98751:
+    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone 1000 - Neon Rainbow - 3XL'
+    salesDescription: '' -> 'Colortone 1000 - Neon Rainbow - 3XL'
+    purchaseDescription: '' -> 'Colortone 1000 Colortone 1000 - Neon Rainbow/3XL'
+  sample item 98754:
+    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone 1000 - Neon Rainbow - L'
+    salesDescription: '' -> 'Colortone 1000 - Neon Rainbow - L'
+    purchaseDescription: '' -> 'Colortone 1000 Colortone 1000 - Neon Rainbow/L'
+  sample item 98755:
+    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone 1000 - Neon Rainbow - M'
+    salesDescription: '' -> 'Colortone 1000 - Neon Rainbow - M'
+    purchaseDescription: '' -> 'Colortone 1000 Colortone 1000 - Neon Rainbow/M'
+  sample item 98756:
+    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone 1000 - Neon Rainbow - S'
+    salesDescription: '' -> 'Colortone 1000 - Neon Rainbow - S'
+    purchaseDescription: '' -> 'Colortone 1000 Colortone 1000 - Neon Rainbow/S'
+  sample item 98753:
+    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone 1000 - Neon Rainbow - XL'
+    salesDescription: '' -> 'Colortone 1000 - Neon Rainbow - XL'
+    purchaseDescription: '' -> 'Colortone 1000 Colortone 1000 - Neon Rainbow/XL'
+
+description update: WOULD write (dry run) 19473 item(s); unchanged: 0; no feed copy: 1; failures: 0
