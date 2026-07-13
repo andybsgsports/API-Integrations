@@ -1,0 +1,3 @@
+# run 1 — DRY RUN, full: before/after samples + would-write counts
+DRY_RUN=true
+MAX_ITEMS=0
