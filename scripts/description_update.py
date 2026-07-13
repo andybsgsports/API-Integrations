@@ -45,7 +45,11 @@ def _copy(name: str, brand: str, style: str, color: str, size: str, desc: str) -
     name, desc = _clean(name), _clean(desc)
     variant = " - ".join(x for x in (color, size) if x)
     disp = f"{name} - {variant}" if variant else name
-    purch = _clean(f"{brand} {style} {name}" + (f" - {color}/{size}" if variant else ""))
+    # prefix brand/style only when the name doesn't already carry them
+    prefix = " ".join(
+        t for t in (brand, style) if t and t.lower() not in name.lower()
+    )
+    purch = _clean(f"{prefix} {name}".strip() + (f" - {color}/{size}" if variant else ""))
     out = {
         "displayName": disp,
         "salesDescription": desc or disp,
@@ -149,7 +153,7 @@ def main() -> int:
         print(f"{field}: copy for {len(copy_by_field[field]):,} feed SKUs")
 
     considered = written = unchanged = nocopy = failures = 0
-    samples = 0
+    samples: dict[str, int] = {}
     for row in items:
         rid = str(row["id"])
         want = None
@@ -174,9 +178,14 @@ def main() -> int:
         if max_items and considered >= max_items:
             continue
         considered += 1
-        if samples < 6:
-            samples += 1
-            print(f"  sample item {rid}:")
+        src = next(
+            (f for f, _ in SOURCES if str(row.get(f) or "").strip()
+             and copy_by_field[f].get(str(row.get(f) or "").strip())),
+            "?",
+        )
+        if samples.get(src, 0) < 3:
+            samples[src] = samples.get(src, 0) + 1
+            print(f"  sample item {rid} [{src}]:")
             for k, v in body.items():
                 print(f"    {k}: {current[k][:70]!r} -> {v[:70]!r}")
         if not allow_write:

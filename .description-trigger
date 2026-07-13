@@ -1,3 +1,3 @@
-# run 2 — DRY RUN retry (SuiteQL column names fixed; pipefail on)
+# run 3 — DRY RUN: deduped purchase descriptions + per-supplier samples
 DRY_RUN=true
 MAX_ITEMS=0
