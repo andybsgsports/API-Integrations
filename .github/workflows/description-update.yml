@@ -73,7 +73,9 @@ jobs:
       - name: Run item copy update
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
-        run: python scripts/description_update.py | tee copy_report.txt
+        run: |
+          set -o pipefail
+          python scripts/description_update.py | tee copy_report.txt
 
       - name: Commit report back to this branch
         if: always()

@@ -124,10 +124,23 @@ def main() -> int:
 
     key_cols = ", ".join(f for f, _ in SOURCES)
     where = " OR ".join(f"{f} IS NOT NULL" for f, _ in SOURCES)
-    items = client.suiteql(
-        f"SELECT id, {key_cols}, displayname, salesdescription, "
-        f"purchasedescription FROM item WHERE {where}"
-    )
+    # SuiteQL column names differ from REST field names; probe progressively.
+    items = None
+    for extra in (
+        "displayname, description, purchasedescription",
+        "displayname, description",
+        "displayname",
+    ):
+        try:
+            items = client.suiteql(
+                f"SELECT id, {key_cols}, {extra} FROM item WHERE {where}"
+            )
+            print(f"queried columns: {extra}")
+            break
+        except Exception as exc:  # noqa: BLE001
+            print(f"column set rejected ({extra}): {str(exc)[:80]}")
+    if items is None:
+        raise SystemExit("no column set accepted")
     print(f"supplier-matched items: {len(items):,}")
 
     copy_by_field: dict[str, dict[str, dict]] = {}
@@ -151,7 +164,7 @@ def main() -> int:
             continue
         current = {
             "displayName": str(row.get("displayname") or ""),
-            "salesDescription": str(row.get("salesdescription") or ""),
+            "salesDescription": str(row.get("description") or ""),
             "purchaseDescription": str(row.get("purchasedescription") or ""),
         }
         body = {k: v for k, v in want.items() if _clean(current[k]) != _clean(v)}

@@ -1,3 +1,3 @@
-# run 1 — DRY RUN, full: before/after samples + would-write counts
+# run 2 — DRY RUN retry (SuiteQL column names fixed; pipefail on)
 DRY_RUN=true
 MAX_ITEMS=0
