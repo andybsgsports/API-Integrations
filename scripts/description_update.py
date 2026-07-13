@@ -41,8 +41,29 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(text or "")).strip()
 
 
+_STATUS_PREFIX = re.compile(r"^(DISCONTINUED|CLOSEOUT|NEW)\b[\s:–-]*", re.I)
+
+
+def _polish_name(name: str, style: str) -> str:
+    """Feed titles arrive with status prefixes, trailing style numbers, and
+    sometimes ALL CAPS; normalize to a clean product title."""
+    name = _STATUS_PREFIX.sub("", _clean(name))
+    if style:
+        name = re.sub(rf"[\s.,-]*{re.escape(style)}[\s.]*$", "", name, flags=re.I)
+    name = name.strip(" .,-")
+    if name.isupper():
+        name = name.title()
+    return name
+
+
+def _polish_desc(desc: str) -> str:
+    """Insert sentence breaks at run-together boundaries (4+ lowercase then a
+    capitalized word) — SanMar concatenates bullet sentences without spaces."""
+    return re.sub(r"(?<=[a-z]{6})(?=[A-Z][a-z]{3,})", ". ", desc)
+
+
 def _copy(name: str, brand: str, style: str, color: str, size: str, desc: str) -> dict:
-    name, desc = _clean(name), _clean(desc)
+    name, desc = _polish_name(name, style), _polish_desc(_clean(desc))
     variant = " - ".join(x for x in (color, size) if x)
     disp = f"{name} - {variant}" if variant else name
     # prefix brand/style only when the name doesn't already carry them
