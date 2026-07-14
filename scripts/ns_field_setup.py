@@ -65,6 +65,15 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_mtec_qty_available", "Momentec Qty Available", "INTEGER", ""),
     ("custitem_mtec_qty_by_whse", "Momentec Qty By Warehouse", "TEXTAREA", ""),
     ("custitem_mtec_front_image_url", "Momentec Front Image URL", "URL", ""),
+    # Under Armour (DC OneSource)
+    ("custitem_ua_part_id", "UA Part ID", "TEXT", ""),
+    ("custitem_ua_style", "UA Style", "TEXT", ""),
+    ("custitem_ua_gtin", "UA GTIN", "TEXT", ""),
+    ("custitem_ua_msrp", "UA MSRP", "CURRENCY", ""),
+    ("custitem_ua_cost", "UA Cost", "CURRENCY", ""),
+    ("custitem_ua_qty_available", "UA Qty Available", "INTEGER", ""),
+    ("custitem_ua_qty_by_whse", "UA Qty By Warehouse", "TEXTAREA", ""),
+    ("custitem_ua_front_image_url", "UA Front Image URL", "URL", ""),
 ]
 
 

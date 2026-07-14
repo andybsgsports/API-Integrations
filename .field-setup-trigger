@@ -1,4 +1,5 @@
-# run 3 — SOAP create all 45 fields; first delete the double-prefixed probe field
+# run 6 — create only the missing UA fields via SOAP (skip existing)
 FIELD_CREATE=false
 SOAP_CREATE=true
-SOAP_DELETE_IDS=4824
+SOAP_DELETE_IDS=
+VENDOR_PROBE=false

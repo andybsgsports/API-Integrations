@@ -1,0 +1,80 @@
+name: Vendor Sublist (ranking)
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (true = report only)"
+        required: true
+        default: "true"
+      max_items:
+        description: "Cap on item writes (0 = no cap)"
+        required: false
+        default: "25"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".vendor-sublist-trigger"]
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Resolve run parameters
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            get() { grep -E "^$1=" .vendor-sublist-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
+            DRY_RUN=$(get DRY_RUN); MAX_ITEMS=$(get MAX_ITEMS)
+          else
+            DRY_RUN="${{ github.event.inputs.dry_run }}"
+            MAX_ITEMS="${{ github.event.inputs.max_items }}"
+          fi
+          [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
+          echo "MAX_ITEMS=${MAX_ITEMS:-25}" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$DRY_RUN max_items=${MAX_ITEMS:-25}"
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=${DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+
+      - name: Run vendor sublist writer
+        env:
+          UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+        run: python scripts/vendor_sublist.py | tee vendor_sublist_report.txt
+
+      - name: Commit report back to this branch
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p data && cp vendor_sublist_report.txt data/
+          git add -f data/vendor_sublist_report.txt
+          git commit -m "Vendor sublist report (run ${{ github.run_id }}) [skip ci]" || exit 0
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git push origin HEAD:${{ github.ref_name }} || echo "push failed - report in log only" 

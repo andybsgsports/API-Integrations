@@ -68,3 +68,12 @@ jobs:
           else
             echo "SOAP_CREATE not set - skipping"
           fi
+
+      - name: Vendor record probe (when VENDOR_PROBE=true)
+        run: |
+          v=$(grep -E '^VENDOR_PROBE=' .field-setup-trigger 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \r')
+          if [ "$v" = "true" ]; then
+            python scripts/ns_vendor_probe.py
+          else
+            echo "VENDOR_PROBE not set - skipping"
+          fi
