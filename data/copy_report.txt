@@ -1,31 +1,43 @@
 queried columns: displayname, description, purchasedescription
 supplier-matched items: 19,474
-custitem_sanmar_unique_key: copy for 160,962 feed SKUs
+custitem_sanmar_unique_key: copy for 160,916 feed SKUs
 custitem_mtec_item_sku: copy for 104,047 feed SKUs
-custitem_ss_sku: copy for 195,552 feed SKUs
-  sample item 98752 [custitem_ss_sku]:
-    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone - Neon Rainbow - 2XL'
-    salesDescription: '' -> 'Colortone - Neon Rainbow - 2XL'
-    purchaseDescription: '' -> '1000 Colortone - Neon Rainbow/2XL'
-  sample item 98751 [custitem_ss_sku]:
-    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone - Neon Rainbow - 3XL'
-    salesDescription: '' -> 'Colortone - Neon Rainbow - 3XL'
-    purchaseDescription: '' -> '1000 Colortone - Neon Rainbow/3XL'
-  sample item 98754 [custitem_ss_sku]:
-    displayName: 'COLORTONE TIE-DYED SHIRT' -> 'Colortone - Neon Rainbow - L'
-    salesDescription: '' -> 'Colortone - Neon Rainbow - L'
-    purchaseDescription: '' -> '1000 Colortone - Neon Rainbow/L'
-  sample item 132420 [custitem_mtec_item_sku]:
-    displayName: 'Performance Fit Flex Ss Tee' -> 'Fit Flex Tee - Black - 2XL'
+custitem_ss_sku: copy for 195,740 feed SKUs
+  sample item 132394 [custitem_mtec_item_sku]:
+    displayName: 'Performance Fit Flex Ss Tee' -> 'Fit Flex Tee - Royal (Ba) - 4XL'
     salesDescription: 'Performance Fit Flex Ss Tee' -> '* 95% Cotton/5% Spandex moisture management BadgerBlend fabric * Natur'
-    purchaseDescription: 'Performance Fit Flex Ss Tee' -> '100000 Fit Flex Tee - Black/2XL'
-  sample item 132419 [custitem_mtec_item_sku]:
-    displayName: 'Performance Fit Flex Ss Tee' -> 'Fit Flex Tee - Black - 3XL'
+    purchaseDescription: 'Performance Fit Flex Ss Tee' -> '100000 Fit Flex Tee - Royal (Ba)/4XL'
+  sample item 132398 [custitem_mtec_item_sku]:
+    displayName: 'Performance Fit Flex Ss Tee' -> 'Fit Flex Tee - Royal (Ba) - L'
     salesDescription: 'Performance Fit Flex Ss Tee' -> '* 95% Cotton/5% Spandex moisture management BadgerBlend fabric * Natur'
-    purchaseDescription: 'Performance Fit Flex Ss Tee' -> '100000 Fit Flex Tee - Black/3XL'
-  sample item 132418 [custitem_mtec_item_sku]:
-    displayName: 'Performance Fit Flex Ss Tee' -> 'Fit Flex Tee - Black - 4XL'
+    purchaseDescription: 'Performance Fit Flex Ss Tee' -> '100000 Fit Flex Tee - Royal (Ba)/L'
+  sample item 132399 [custitem_mtec_item_sku]:
+    displayName: 'Performance Fit Flex Ss Tee' -> 'Fit Flex Tee - Royal (Ba) - M'
     salesDescription: 'Performance Fit Flex Ss Tee' -> '* 95% Cotton/5% Spandex moisture management BadgerBlend fabric * Natur'
-    purchaseDescription: 'Performance Fit Flex Ss Tee' -> '100000 Fit Flex Tee - Black/4XL'
+    purchaseDescription: 'Performance Fit Flex Ss Tee' -> '100000 Fit Flex Tee - Royal (Ba)/M'
+  sample item 23579 [custitem_ss_sku]:
+    displayName: 'Ladies Bella Baby Rib S/S Tee' -> 'Badger - Black - M'
+    salesDescription: 'Ladies Bella Baby Rib S/S Tee' -> 'Badger - Black - M'
+    purchaseDescription: 'Ladies Bella Baby Rib S/S Tee' -> '1001 Badger - Black/M'
+  sample item 23578 [custitem_ss_sku]:
+    displayName: 'Ladies Bella Baby Rib S/S Tee' -> 'Badger - Black - S'
+    salesDescription: 'Ladies Bella Baby Rib S/S Tee' -> 'Badger - Black - S'
+    purchaseDescription: 'Ladies Bella Baby Rib S/S Tee' -> '1001 Badger - Black/S'
+  sample item 23581 [custitem_ss_sku]:
+    displayName: 'Ladies Bella Baby Rib S/S Tee' -> 'Badger - Black - XL'
+    salesDescription: 'Ladies Bella Baby Rib S/S Tee' -> 'Badger - Black - XL'
+    purchaseDescription: 'Ladies Bella Baby Rib S/S Tee' -> '1001 Badger - Black/XL'
+  sample item 160753 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan® - DryBlend® Crewneck Sweatshirt.' -> 'Gildan - DryBlend Crewneck Sweatshirt - Black - 2XL'
+    salesDescription: '9.3 Oz Crew' -> '9-ounce 50/50 cotton/poly Moisture-wicking properties. Recycled high-p'
+    purchaseDescription: '9.3 Oz Crew' -> '12000 Gildan - DryBlend Crewneck Sweatshirt - Black/2XL'
+  sample item 160758 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan® - DryBlend® Crewneck Sweatshirt.' -> 'Gildan - DryBlend Crewneck Sweatshirt - Black - L'
+    salesDescription: '9.3 Oz Crew' -> '9-ounce 50/50 cotton/poly Moisture-wicking properties. Recycled high-p'
+    purchaseDescription: '9.3 Oz Crew' -> '12000 Gildan - DryBlend Crewneck Sweatshirt - Black/L'
+  sample item 160761 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan® - DryBlend® Crewneck Sweatshirt.' -> 'Gildan - DryBlend Crewneck Sweatshirt - Black - M'
+    salesDescription: '9.3 Oz Crew' -> '9-ounce 50/50 cotton/poly Moisture-wicking properties. Recycled high-p'
+    purchaseDescription: '9.3 Oz Crew' -> '12000 Gildan - DryBlend Crewneck Sweatshirt - Black/M'
 
-description update: wrote 25 item(s); unchanged: 0; no feed copy: 1; failures: 0
+description update: wrote 19448 item(s); unchanged: 25; no feed copy: 1; failures: 0
