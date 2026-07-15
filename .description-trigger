@@ -1,3 +1,4 @@
-# DRY RUN: plain-title naming rule (drop variant suffix + style prefix)
-DRY_RUN=true
-MAX_ITEMS=0
+# Trigger file for description-update.yml push-trigger runs.
+# run: live-smoke-plain-title-rule
+DRY_RUN=false
+MAX_ITEMS=25
