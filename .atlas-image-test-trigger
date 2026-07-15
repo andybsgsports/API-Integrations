@@ -1,1 +1,1 @@
-run 4 — plain URL rejected; create/find folder, test file upload path
+run 5 — use any existing folder (folder record type not in REST)

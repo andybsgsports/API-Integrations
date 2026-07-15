@@ -38,9 +38,7 @@ jobs:
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF2
 
-      - name: Find or create the image upload folder
-        env:
-          FOLDER_CREATE: "true"
+      - name: Find an image upload folder
         run: python scripts/ns_folder_probe.py | tee folder_probe.txt
 
       - name: Extract folder id into env

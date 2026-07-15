@@ -1,10 +1,12 @@
-"""Find (or create) a File Cabinet folder for supplier item images. Read-only
-unless FOLDER_CREATE=true.
+"""Find (or create) a File Cabinet folder for supplier item images.
+
+The REST record API doesn't expose a 'folder' record type (folders live under
+SOAP's document services), so this first tries to find a folder by name, then
+falls back to any existing folder — good enough to prove the image-upload
+write path works; the folder can be reorganized once the format is confirmed.
 """
 
 from __future__ import annotations
-
-import os
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
@@ -18,20 +20,20 @@ def main() -> int:
         f"SELECT id, name FROM mediaitemfolder WHERE name = '{FOLDER_NAME}'"
     )
     if rows:
-        print(f"FOUND folder '{FOLDER_NAME}' -> id {rows[0]['id']}")
+        found_id = rows[0]["id"]
+        print(f"FOUND folder '{FOLDER_NAME}' -> id {found_id}")
         return 0
-    print(f"no folder named '{FOLDER_NAME}' found")
-    if (os.environ.get("FOLDER_CREATE") or "").lower() != "true":
-        print("(FOLDER_CREATE not set — not creating)")
-        return 1
-    try:
-        new_id = client.create_record("folder", {"name": FOLDER_NAME})
-        print(f"CREATED folder '{FOLDER_NAME}' -> id {new_id}")
+
+    print(f"no folder named '{FOLDER_NAME}' found; listing existing folders")
+    rows = client.suiteql("SELECT id, name FROM mediaitemfolder FETCH FIRST 10 ROWS ONLY")
+    for r in rows:
+        print(f"  id {r['id']}: {r.get('name')!r}")
+    if rows:
+        pick_id = rows[0]["id"]
+        print(f"\nUSING folder id {pick_id} for the test")
         return 0
-    except Exception as exc:  # noqa: BLE001
-        payload = getattr(exc, "payload", "")
-        print(f"folder creation failed: {str(exc)[:150]} :: {str(payload)[:400]}")
-        return 1
+    print("no folders found at all")
+    return 1
 
 
 if __name__ == "__main__":
