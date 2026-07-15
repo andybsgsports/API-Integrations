@@ -27,6 +27,8 @@ jobs:
       - name: Write .env from repo secrets
         run: |
           cat > .env <<EOF2
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
           NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
           NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
           NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
