@@ -75,3 +75,23 @@ def upload_from_url_soap(
     file_id = m.group(1)
     log.info("SOAP-uploaded %s -> File Cabinet id %s", filename, file_id)
     return SoapUploadedFile(file_id=file_id, name=filename)
+
+
+def create_folder_soap(cfg, name: str) -> str:
+    """Create a File Cabinet folder via SOAP (REST has no 'folder' record)."""
+    doc_ns = f"urn:filecabinet_{VERSION}.documents.webservices.netsuite.com"
+    body = f"""
+    <platformMsgs:add xmlns:documents="{doc_ns}">
+      <platformMsgs:record xsi:type="documents:Folder">
+        <documents:name>{escape(name)}</documents:name>
+      </platformMsgs:record>
+    </platformMsgs:add>"""
+    text = post(cfg, "add", body)
+    if not is_success(text):
+        raise RuntimeError(f"SOAP folder create failed: {text[:1500]}")
+    m = re.search(r'internalId="(\d+)"', text)
+    if not m:
+        raise RuntimeError(f"folder created but no internalId found: {text[:800]}")
+    folder_id = m.group(1)
+    log.info("SOAP-created folder %r -> id %s", name, folder_id)
+    return folder_id
