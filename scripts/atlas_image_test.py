@@ -92,6 +92,9 @@ def main() -> int:
     for shape_name, shape in (
         ("id-string", {"id": uploaded.file_id}),
         ("internalId-key", {"internalId": uploaded.file_id}),
+        ("bare-string", uploaded.file_id),
+        ("bare-int", int(uploaded.file_id)),
+        ("refName-key", {"refName": uploaded.file_id}),
     ):
         try:
             client.update_record("inventoryItem", item_id, {FIELD: shape})

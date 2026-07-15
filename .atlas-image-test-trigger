@@ -1,1 +1,1 @@
-run 7 — fix SOAP namespace segment order (filecabinet.documents, not documents.filecabinet)
+run 8 — mark file available-without-login; try 3 more attach shapes

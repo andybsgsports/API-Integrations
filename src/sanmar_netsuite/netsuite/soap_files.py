@@ -60,6 +60,7 @@ def upload_from_url_soap(
         <documents:name>{escape(filename)}</documents:name>
         <documents:fileType>{_file_type_for(filename)}</documents:fileType>
         <documents:folder internalId="{folder_id}"/>
+        <documents:isOnline>true</documents:isOnline>
         <documents:content>{b64}</documents:content>
       </platformMsgs:record>
     </platformMsgs:add>"""
