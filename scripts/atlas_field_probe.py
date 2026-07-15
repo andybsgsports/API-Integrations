@@ -46,6 +46,16 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"  failed: {str(exc)[:200]}")
 
+    print("\n=== spot-check: same color, all sizes, same file id? (PC450-White-*) ===")
+    try:
+        rows = client.suiteql(
+            f"SELECT itemid, {FIELD} FROM item WHERE itemid LIKE 'PC450-White-%'"
+        )
+        for r in rows:
+            print(f"  {r['itemid']}: {r.get(FIELD)!r}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  failed: {str(exc)[:200]}")
+
     print("\n=== REST metadata catalog: inventoryItem field schema ===")
     url = f"{cfg.netsuite.rest_base}/services/rest/record/v1/metadata-catalog/inventoryItem"
     try:
