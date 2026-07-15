@@ -82,11 +82,19 @@ def momentec_images() -> dict[str, str]:
     return out
 
 
+def _abs_ss_url(path: str) -> str:
+    """S&S image fields carry relative CDN paths, not full URLs."""
+    v = path.strip()
+    if not v or v.startswith(("http://", "https://")):
+        return v
+    return "https://cdn.ssactivewear.com/" + v.lstrip("/")
+
+
 def ss_images() -> dict[str, str]:
     products_file = Path(ss_config().download_dir) / "products.json"
     out: dict[str, str] = {}
     for p in json.loads(products_file.read_text(encoding="utf-8")):
-        url = p.get("front_image_url") or p.get("on_model_image_url") or ""
+        url = _abs_ss_url(p.get("front_image_url") or p.get("on_model_image_url") or "")
         sku = p.get("sku") or ""
         if url and sku:
             out[sku] = url
