@@ -16,8 +16,8 @@ from pathlib import Path
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.files import ImageUploader
 from sanmar_netsuite.netsuite.repository import _sql_escape
+from sanmar_netsuite.netsuite.soap_files import upload_from_url_soap
 from sanmar_netsuite.sanmar import constants as C
 from sanmar_netsuite.sanmar.parsers import parse_styles
 from sanmar_netsuite.sanmar.sftp_client import SanMarSftp
@@ -75,31 +75,41 @@ def main() -> int:
         print("\nRESULT: plain URL string works.")
         return 0
 
-    print(f"\n--- attempt 2: upload bytes + Document reference into {FIELD} ---")
+    print(f"\n--- attempt 2: SOAP-upload bytes + Document reference into {FIELD} ---")
     folder_id = os.environ.get("NETSUITE_IMAGE_FOLDER_ID", "")
     if not folder_id:
         print("NETSUITE_IMAGE_FOLDER_ID not set — cannot test the upload path")
         return 1
-    uploader = ImageUploader(client, folder_id)
-    uploaded = uploader.upload_from_url(image_url, f"{TARGET_ITEMID}.jpg")
-    print(f"uploaded -> File Cabinet id {uploaded.file_id}")
     try:
-        client.update_record(
-            "inventoryItem", item_id, {FIELD: {"id": uploaded.file_id}}
+        uploaded = upload_from_url_soap(
+            cfg.netsuite, image_url, f"{TARGET_ITEMID}.jpg", folder_id
         )
-        print("PATCH accepted (HTTP 200/204)")
     except Exception as exc:  # noqa: BLE001
-        detail = getattr(exc, "payload", "")
-        print(f"PATCH rejected: {str(exc)[:150]}")
-        print(f"detail: {str(detail)[:500]}")
-    readback = client.suiteql(f"SELECT {FIELD} FROM item WHERE id = '{item_id}'")
-    val = readback[0].get(FIELD) if readback else None
-    print(f"readback after attempt 2: {val!r}")
-    if val:
-        print("\nRESULT: Document/file reference works.")
-        return 0
+        print(f"SOAP upload failed: {str(exc)[:800]}")
+        return 1
+    print(f"uploaded -> File Cabinet id {uploaded.file_id}")
 
-    print("\nRESULT: neither format worked — needs manual inspection in the UI.")
+    for shape_name, shape in (
+        ("id-string", {"id": uploaded.file_id}),
+        ("internalId-key", {"internalId": uploaded.file_id}),
+    ):
+        try:
+            client.update_record("inventoryItem", item_id, {FIELD: shape})
+            print(f"PATCH accepted with shape [{shape_name}] (HTTP 200/204)")
+        except Exception as exc:  # noqa: BLE001
+            detail = getattr(exc, "payload", "")
+            print(f"PATCH rejected with shape [{shape_name}]: {str(exc)[:150]}")
+            print(f"detail: {str(detail)[:500]}")
+            continue
+        readback = client.suiteql(f"SELECT {FIELD} FROM item WHERE id = '{item_id}'")
+        val = readback[0].get(FIELD) if readback else None
+        print(f"readback after shape [{shape_name}]: {val!r}")
+        if val:
+            print(f"\nRESULT: Document reference works with shape {shape_name}: {shape}")
+            return 0
+
+    print("\nRESULT: file uploaded (id "
+          f"{uploaded.file_id}) but no attach shape worked — needs manual inspection.")
     return 1
 
 
