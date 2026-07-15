@@ -1,4 +1,4 @@
 # Trigger file for description-update.yml push-trigger runs.
-# run: live-smoke-plain-title-rule
+# run: full-live-run-plain-title-rule
 DRY_RUN=false
-MAX_ITEMS=25
+MAX_ITEMS=0
