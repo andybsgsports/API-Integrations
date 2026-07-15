@@ -12,14 +12,33 @@ landed. This is a single, reversible, targeted write — not a bulk change.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.files import ImageUploader
 from sanmar_netsuite.netsuite.repository import _sql_escape
+from sanmar_netsuite.sanmar import constants as C
+from sanmar_netsuite.sanmar.parsers import parse_styles
+from sanmar_netsuite.sanmar.sftp_client import SanMarSftp
 
 FIELD = "custitem_atlas_item_image"
 TARGET_ITEMID = os.environ.get("ATLAS_TEST_ITEMID", "PC450-White-Small")
+
+
+def _resolve_image_url(cfg, itemid: str) -> str | None:
+    """Source the color's image directly from the feed — independent of
+    whether the bulk field update has run yet."""
+    style_token, color = itemid.split("-", 1)
+    color = color.rsplit("-", 1)[0]  # strip the trailing -Size
+    path = Path(cfg.sftp.download_dir) / C.FILE_SDL_N
+    if not path.exists():
+        path = SanMarSftp(cfg.sftp).download(C.FILE_SDL_N)
+    for style in parse_styles(path):
+        if style.style == style_token:
+            images = style.images_by_color.get(color)
+            return images.primary_url() if images else None
+    return None
 
 
 def main() -> int:
@@ -27,18 +46,18 @@ def main() -> int:
     client = NetSuiteClient(cfg.netsuite)
 
     rows = client.suiteql(
-        f"SELECT id, itemid, custitem_sanmar_front_image_url AS img_url "
-        f"FROM item WHERE itemid = '{_sql_escape(TARGET_ITEMID)}'"
+        f"SELECT id, itemid FROM item WHERE itemid = '{_sql_escape(TARGET_ITEMID)}'"
     )
     if not rows:
         print(f"item {TARGET_ITEMID} not found")
         return 1
     item_id = str(rows[0]["id"])
-    image_url = rows[0].get("img_url")
     print(f"target item {TARGET_ITEMID} -> internal id {item_id}")
-    print(f"source image URL: {image_url}")
+
+    image_url = _resolve_image_url(cfg, TARGET_ITEMID)
+    print(f"source image URL (resolved from feed): {image_url}")
     if not image_url:
-        print("no image URL on this item yet (run the SanMar field update first)")
+        print("no image found in the feed for this style/color")
         return 1
 
     print(f"\n--- attempt 1: plain URL string into {FIELD} ---")
