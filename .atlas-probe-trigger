@@ -1,1 +1,2 @@
-run 1 — probe custitem_atlas_item_image schema
+# Trigger file for atlas-probe.yml push-trigger runs.
+# run: verify-pc450-white-group
