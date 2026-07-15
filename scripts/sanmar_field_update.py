@@ -34,6 +34,7 @@ FIELD_ORDER = [
     "custitem_sanmar_status",
     "custitem_sanmar_qty_available",
     "custitem_sanmar_qty_by_whse",
+    "custitem_sanmar_front_image_url",
 ]
 
 
@@ -93,6 +94,8 @@ def build_payloads(styles, inventory) -> dict[str, dict[str, object]]:
             put("custitem_sanmar_status", sku.product_status)
             put("custitem_sanmar_qty_available", None if qty is None else int(qty))
             put("custitem_sanmar_qty_by_whse", whse_by_key.get(sku.unique_key, ""))
+            images = style.images_by_color.get(sku.color_name)
+            put("custitem_sanmar_front_image_url", images.primary_url() if images else None)
             if entry:
                 payloads[sku.gtin] = entry
     return payloads
