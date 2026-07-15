@@ -53,7 +53,7 @@ def upload_from_url_soap(
     """Download ``url`` and create a File Cabinet record for it via SOAP."""
     content = _fetch(url, timeout)
     b64 = base64.b64encode(content).decode("ascii")
-    doc_ns = f"urn:documents_{VERSION}.filecabinet.webservices.netsuite.com"
+    doc_ns = f"urn:filecabinet_{VERSION}.documents.webservices.netsuite.com"
     body = f"""
     <platformMsgs:add xmlns:documents="{doc_ns}">
       <platformMsgs:record xsi:type="documents:File">
