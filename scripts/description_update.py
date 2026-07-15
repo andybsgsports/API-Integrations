@@ -63,19 +63,12 @@ def _polish_desc(desc: str) -> str:
 
 
 def _copy(name: str, brand: str, style: str, color: str, size: str, desc: str) -> dict:
-    name, desc = _polish_name(name, style), _polish_desc(_clean(desc))
-    variant = " - ".join(x for x in (color, size) if x)
-    disp = f"{name} - {variant}" if variant else name
-    # prefix brand/style only when the name doesn't already carry them
-    prefix = " ".join(
-        t for t in (brand, style) if t and t.lower() not in name.lower()
-    )
-    purch = _clean(f"{prefix} {name}".strip() + (f" - {color}/{size}" if variant else ""))
-    out = {
-        "displayName": disp,
-        "salesDescription": desc or disp,
-        "purchaseDescription": purch,
-    }
+    """Plain product title on all three copy fields — no color/size suffix,
+    no style-number prefix. Variant info already lives in the item name
+    (STYLE-COLOR-SIZE) and the matrix color/size fields, so repeating it in
+    the customer-facing copy is redundant."""
+    name = _polish_name(name, style)
+    out = {"displayName": name, "salesDescription": name, "purchaseDescription": name}
     return {k: v[: MAXLEN[k]] for k, v in out.items() if v}
 
 
