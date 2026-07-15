@@ -1,4 +1,4 @@
 # Trigger file for atlas-image-backfill.yml push-trigger runs.
-# run: live-smoke-2 (after S&S relative-URL fix)
+# run: full-live-run-1
 DRY_RUN=false
-MAX_ITEMS=25
+MAX_ITEMS=0
