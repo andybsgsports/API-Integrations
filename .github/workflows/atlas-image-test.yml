@@ -37,8 +37,20 @@ jobs:
           SYNC_DRY_RUN=true
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF2
+
+      - name: Find or create the image upload folder
+        env:
+          FOLDER_CREATE: "true"
+        run: python scripts/ns_folder_probe.py | tee folder_probe.txt
+
+      - name: Extract folder id into env
+        run: |
+          fid=$(grep -oE "id [0-9]+" folder_probe.txt | tail -1 | awk '{print $2}')
+          echo "NETSUITE_IMAGE_FOLDER_ID=$fid" >> "$GITHUB_ENV"
+          echo "resolved folder id: $fid"
+
       - name: Test custitem_atlas_item_image (single reversible write)
         env:
           ATLAS_TEST_ITEMID: ${{ github.event.inputs.itemid || 'PC450-White-Small' }}
-          NETSUITE_IMAGE_FOLDER_ID: ${{ secrets.NETSUITE_IMAGE_FOLDER_ID }}
+          NETSUITE_IMAGE_FOLDER_ID: ${{ env.NETSUITE_IMAGE_FOLDER_ID }}
         run: python scripts/atlas_image_test.py

@@ -211,7 +211,7 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures += 1
             if failures <= 10:
-                detail = getattr(exc, "detail", "")
+                detail = getattr(exc, "payload", "")
                 print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"

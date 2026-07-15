@@ -65,7 +65,7 @@ def main() -> int:
         client.update_record("inventoryItem", item_id, {FIELD: image_url})
         print("PATCH accepted (HTTP 200/204)")
     except Exception as exc:  # noqa: BLE001
-        detail = getattr(exc, "detail", "")
+        detail = getattr(exc, "payload", "")
         print(f"PATCH rejected: {str(exc)[:150]}")
         print(f"detail: {str(detail)[:500]}")
     readback = client.suiteql(f"SELECT {FIELD} FROM item WHERE id = '{item_id}'")
@@ -89,7 +89,7 @@ def main() -> int:
         )
         print("PATCH accepted (HTTP 200/204)")
     except Exception as exc:  # noqa: BLE001
-        detail = getattr(exc, "detail", "")
+        detail = getattr(exc, "payload", "")
         print(f"PATCH rejected: {str(exc)[:150]}")
         print(f"detail: {str(detail)[:500]}")
     readback = client.suiteql(f"SELECT {FIELD} FROM item WHERE id = '{item_id}'")

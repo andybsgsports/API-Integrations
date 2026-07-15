@@ -1,1 +1,1 @@
-run 3 — add missing SanMar SFTP secrets to the test workflow
+run 4 — plain URL rejected; create/find folder, test file upload path
