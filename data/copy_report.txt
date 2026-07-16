@@ -3,29 +3,44 @@ supplier-matched items: 19,474
 custitem_sanmar_unique_key: copy for 160,878 feed SKUs
 custitem_mtec_item_sku: copy for 103,587 feed SKUs
 custitem_ss_sku: copy for 195,529 feed SKUs
-  sample item 98752 [custitem_ss_sku]:
-    displayName: 'Colortone - Neon Rainbow - 2XL' -> 'Colortone'
-    salesDescription: 'Colortone - Neon Rainbow - 2XL' -> 'Colortone'
-    purchaseDescription: '1000 Colortone - Neon Rainbow/2XL' -> 'Colortone'
-  sample item 98751 [custitem_ss_sku]:
-    displayName: 'Colortone - Neon Rainbow - 3XL' -> 'Colortone'
-    salesDescription: 'Colortone - Neon Rainbow - 3XL' -> 'Colortone'
-    purchaseDescription: '1000 Colortone - Neon Rainbow/3XL' -> 'Colortone'
-  sample item 98754 [custitem_ss_sku]:
-    displayName: 'Colortone - Neon Rainbow - L' -> 'Colortone'
-    salesDescription: 'Colortone - Neon Rainbow - L' -> 'Colortone'
-    purchaseDescription: '1000 Colortone - Neon Rainbow/L' -> 'Colortone'
-  sample item 132420 [custitem_mtec_item_sku]:
-    displayName: 'Fit Flex Tee - Black - 2XL' -> 'Fit Flex Tee'
+  sample item 132394 [custitem_mtec_item_sku]:
+    displayName: 'Fit Flex Tee - Royal (Ba) - 4XL' -> 'Fit Flex Tee'
     salesDescription: '* 95% Cotton/5% Spandex moisture management BadgerBlend fabric * Natur' -> 'Fit Flex Tee'
-    purchaseDescription: '100000 Fit Flex Tee - Black/2XL' -> 'Fit Flex Tee'
-  sample item 132419 [custitem_mtec_item_sku]:
-    displayName: 'Fit Flex Tee - Black - 3XL' -> 'Fit Flex Tee'
+    purchaseDescription: '100000 Fit Flex Tee - Royal (Ba)/4XL' -> 'Fit Flex Tee'
+  sample item 132398 [custitem_mtec_item_sku]:
+    displayName: 'Fit Flex Tee - Royal (Ba) - L' -> 'Fit Flex Tee'
     salesDescription: '* 95% Cotton/5% Spandex moisture management BadgerBlend fabric * Natur' -> 'Fit Flex Tee'
-    purchaseDescription: '100000 Fit Flex Tee - Black/3XL' -> 'Fit Flex Tee'
-  sample item 132418 [custitem_mtec_item_sku]:
-    displayName: 'Fit Flex Tee - Black - 4XL' -> 'Fit Flex Tee'
+    purchaseDescription: '100000 Fit Flex Tee - Royal (Ba)/L' -> 'Fit Flex Tee'
+  sample item 132399 [custitem_mtec_item_sku]:
+    displayName: 'Fit Flex Tee - Royal (Ba) - M' -> 'Fit Flex Tee'
     salesDescription: '* 95% Cotton/5% Spandex moisture management BadgerBlend fabric * Natur' -> 'Fit Flex Tee'
-    purchaseDescription: '100000 Fit Flex Tee - Black/4XL' -> 'Fit Flex Tee'
+    purchaseDescription: '100000 Fit Flex Tee - Royal (Ba)/M' -> 'Fit Flex Tee'
+  sample item 23579 [custitem_ss_sku]:
+    displayName: 'Badger - Black - M' -> 'Badger'
+    salesDescription: 'Badger - Black - M' -> 'Badger'
+    purchaseDescription: '1001 Badger - Black/M' -> 'Badger'
+  sample item 23578 [custitem_ss_sku]:
+    displayName: 'Badger - Black - S' -> 'Badger'
+    salesDescription: 'Badger - Black - S' -> 'Badger'
+    purchaseDescription: '1001 Badger - Black/S' -> 'Badger'
+  sample item 23581 [custitem_ss_sku]:
+    displayName: 'Badger - Black - XL' -> 'Badger'
+    salesDescription: 'Badger - Black - XL' -> 'Badger'
+    purchaseDescription: '1001 Badger - Black/XL' -> 'Badger'
+  sample item 160753 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan - DryBlend Crewneck Sweatshirt - Black - 2XL' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+    salesDescription: '9-ounce 50/50 cotton/poly Moisture-wicking properties. Recycled high-p' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+    purchaseDescription: '12000 Gildan - DryBlend Crewneck Sweatshirt - Black/2XL' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+  sample item 160758 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan - DryBlend Crewneck Sweatshirt - Black - L' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+    salesDescription: '9-ounce 50/50 cotton/poly Moisture-wicking properties. Recycled high-p' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+    purchaseDescription: '12000 Gildan - DryBlend Crewneck Sweatshirt - Black/L' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+  sample item 160761 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan - DryBlend Crewneck Sweatshirt - Black - M' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+    salesDescription: '9-ounce 50/50 cotton/poly Moisture-wicking properties. Recycled high-p' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+    purchaseDescription: '12000 Gildan - DryBlend Crewneck Sweatshirt - Black/M' -> 'Gildan - DryBlend Crewneck Sweatshirt'
+  FAILED item 40039: NetSuite 400: Bad Request :: {'type': 'https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.1', 'title': 'Bad Request', 'status': 400, 'o:errorDetails': [{'detail': 'Error while accessing a resource. Record has been changed.'
+  FAILED item 40036: NetSuite 400: Bad Request :: {'type': 'https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.1', 'title': 'Bad Request', 'status': 400, 'o:errorDetails': [{'detail': 'Error while accessing a resource. Record has been changed.'
+  FAILED item 40035: NetSuite 400: Bad Request :: {'type': 'https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.1', 'title': 'Bad Request', 'status': 400, 'o:errorDetails': [{'detail': 'Error while accessing a resource. Record has been changed.'
 
-description update: wrote 25 item(s); unchanged: 0; no feed copy: 3; failures: 0
+description update: wrote 19443 item(s); unchanged: 25; no feed copy: 3; failures: 3
