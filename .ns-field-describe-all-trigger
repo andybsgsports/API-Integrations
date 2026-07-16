@@ -1,2 +1,3 @@
 # Trigger file for ns-field-describe-all.yml push-trigger runs.
-DRY_RUN=true
+# run: live-all-fields
+DRY_RUN=false
