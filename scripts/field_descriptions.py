@@ -128,8 +128,6 @@ DESCRIPTIONS: dict[str, str] = {
     ),
     "custitem_ua_style": "Under Armour's style number for this product line.",
     "custitem_ua_gtin": "This item's barcode (GTIN/UPC) as provided by Under Armour.",
-    "custitem_ua_msrp": "Under Armour's Manufacturer's Suggested Retail Price for this item.",
-    "custitem_ua_cost": "Under Armour's cost price for this item.",
     "custitem_ua_qty_available": (
         "Total quantity of this item currently available from Under Armour "
         "(updated nightly)."

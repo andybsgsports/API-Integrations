@@ -69,8 +69,8 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_ua_part_id", "UA Part ID", "TEXT", ""),
     ("custitem_ua_style", "UA Style", "TEXT", ""),
     ("custitem_ua_gtin", "UA GTIN", "TEXT", ""),
-    ("custitem_ua_msrp", "UA MSRP", "CURRENCY", ""),
-    ("custitem_ua_cost", "UA Cost", "CURRENCY", ""),
+    # UA MSRP/Cost intentionally absent: pricing lives on the native fields
+    # (Base Price = UA list price, Purchase Price/cost = UA net cost).
     ("custitem_ua_qty_available", "UA Qty Available", "INTEGER", ""),
     ("custitem_ua_qty_by_whse", "UA Qty By Warehouse", "TEXTAREA", ""),
     ("custitem_ua_front_image_url", "UA Front Image URL", "URL", ""),

@@ -1,0 +1,39 @@
+name: UA Pricing Probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      style:
+        description: "UA style to probe pricing for (blank = first sellable)"
+        required: false
+        default: ""
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".ua-pricing-probe-trigger"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve style
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            STYLE=$(grep -E "^STYLE=" .ua-pricing-probe-trigger | tail -1 | cut -d= -f2- | tr -d ' \r')
+          else
+            STYLE="${{ github.event.inputs.style }}"
+          fi
+          echo "UA_PROBE_STYLE=${STYLE:-}" >> "$GITHUB_ENV"
+      - name: Probe UA pricing (read-only)
+        env:
+          DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
+          DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+        run: python scripts/ua_pricing_probe.py
