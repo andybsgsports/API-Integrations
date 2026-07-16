@@ -1,0 +1,55 @@
+name: NS Field Descriptions (all custitem_* fields)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (true = report only)"
+        required: true
+        default: "true"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".ns-field-describe-all-trigger"]
+
+jobs:
+  describe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Resolve run parameters
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            get() { grep -E "^$1=" .ns-field-describe-all-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
+            DRY_RUN=$(get DRY_RUN)
+          else
+            DRY_RUN="${{ github.event.inputs.dry_run }}"
+          fi
+          [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$DRY_RUN"
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=${DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+
+      - name: Set field descriptions
+        run: python scripts/ns_field_describe_all.py
