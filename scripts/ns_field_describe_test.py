@@ -6,6 +6,7 @@ of -- and reads it back via SOAP get to confirm the write landed.
 
 from __future__ import annotations
 
+import re
 from xml.sax.saxutils import escape
 
 from sanmar_netsuite.config import get_config
@@ -17,21 +18,6 @@ DESCRIPTION = (
 )
 
 
-def _sid_suffix(scriptid: str) -> str:
-    return scriptid.removeprefix("custitem")
-
-
-def update_description(cfg, scriptid: str, description: str) -> str:
-    ns = f"urn:customization_{VERSION}.setup.webservices.netsuite.com"
-    body = f"""
-    <platformMsgs:update xmlns:setupCustom="{ns}">
-      <platformMsgs:record xsi:type="setupCustom:ItemCustomField" scriptId="{_sid_suffix(scriptid)}">
-        <setupCustom:description>{escape(description)}</setupCustom:description>
-      </platformMsgs:record>
-    </platformMsgs:update>"""
-    return post(cfg, "update", body)
-
-
 def get_field(cfg, scriptid: str) -> str:
     body = f"""
     <platformMsgs:get>
@@ -41,11 +27,35 @@ def get_field(cfg, scriptid: str) -> str:
     return post(cfg, "get", body)
 
 
+def update_description(cfg, internal_id: str, description: str) -> str:
+    ns = f"urn:customization_{VERSION}.setup.webservices.netsuite.com"
+    body = f"""
+    <platformMsgs:update xmlns:setupCustom="{ns}">
+      <platformMsgs:record xsi:type="setupCustom:ItemCustomField" internalId="{internal_id}">
+        <setupCustom:description>{escape(description)}</setupCustom:description>
+      </platformMsgs:record>
+    </platformMsgs:update>"""
+    return post(cfg, "update", body)
+
+
 def main() -> int:
     cfg = get_config().netsuite
 
-    print(f"--- update: setting description on {FIELD} ---")
-    text = update_description(cfg, FIELD, DESCRIPTION)
+    print(f"--- get: resolving {FIELD} by scriptId (read-only) ---")
+    text = get_field(cfg, FIELD)
+    print(text[:3000])
+    if not is_success(text):
+        print(f"\nget FAILED for {FIELD} -- cannot resolve internalId")
+        return 1
+    m = re.search(r'internalId="(\d+)"', text)
+    if not m:
+        print("\nget succeeded but no internalId found in response")
+        return 1
+    internal_id = m.group(1)
+    print(f"\nresolved internalId: {internal_id}")
+
+    print(f"\n--- update: setting description on {FIELD} (internalId {internal_id}) ---")
+    text = update_description(cfg, internal_id, DESCRIPTION)
     ok = is_success(text)
     print(f"update {'succeeded' if ok else 'FAILED'}")
     if not ok:
