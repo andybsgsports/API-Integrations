@@ -71,45 +71,63 @@ def _err(text: str) -> str | None:
     return m.group(0)[:600] if m else None
 
 
+def _prices_by_part(text: str) -> dict[str, str]:
+    parts = re.findall(r"<\s*(?:\w+:)?partId\s*>([^<]+)<", text)
+    prices = re.findall(r"<\s*(?:\w+:)?price\s*>([^<]+)<", text)
+    return dict(zip(parts, prices))
+
+
 def main() -> int:
     key_id = os.environ["DCOS_KEY_ID"]
     key_pw = os.environ["DCOS_KEY_PASSWORD"]
     style = os.environ.get("UA_PROBE_STYLE", "")
-    if not style:
+    if style:
+        styles = [style]
+    else:
         from ua_backfill import get_sellable_styles  # scripts/ is on sys.path
 
         styles = get_sellable_styles(key_id, key_pw)
-        print(f"UA sellable styles: {len(styles):,}; probing the first")
+        print(f"UA sellable styles: {len(styles):,}; sampling across the range")
         if not styles:
             print("no sellable styles returned")
             return 1
-        style = styles[0]
+        # Spread the sample across the catalog, not just the first few.
+        step = max(1, len(styles) // 8)
+        styles = styles[::step][:8]
 
-    print(f"--- getFobPoints for style {style} ---")
-    text = get_fob_points(key_id, key_pw, style)
-    print(f"response bytes: {len(text):,}")
-    err = _err(text)
-    if err:
-        print(err)
-    fob_ids = re.findall(r"<\s*(?:\w+:)?fobId\s*>([^<]+)<", text)
-    print(f"fobIds: {fob_ids[:5]}")
-    if not fob_ids:
-        print("no fobId found -- PPC may be disabled for this key/style")
-        return 1
-
-    for price_type in ("Net", "List", "Customer"):
-        print(f"\n--- getConfigurationAndPricing priceType={price_type} ---")
-        text = get_pricing(key_id, key_pw, style, fob_ids[0], price_type)
-        print(f"response bytes: {len(text):,}")
+    for style in styles:
+        text = get_fob_points(key_id, key_pw, style)
         err = _err(text)
-        if err:
-            print(err)
+        fob_ids = re.findall(r"<\s*(?:\w+:)?fobId\s*>([^<]+)<", text)
+        if not fob_ids:
+            print(f"{style}: no fobId ({(err or 'no error block')[:120]})")
             continue
-        parts = re.findall(r"<\s*(?:\w+:)?partId\s*>([^<]+)<", text)
-        prices = re.findall(r"<\s*(?:\w+:)?price\s*>([^<]+)<", text)
-        print(f"parts: {len(parts)}  prices: {len(prices)}")
-        for p, pr in list(zip(parts, prices))[:5]:
-            print(f"  {p}: {pr}")
+        by_type: dict[str, dict[str, str]] = {}
+        for price_type in ("Net", "List", "Customer"):
+            t = get_pricing(key_id, key_pw, style, fob_ids[0], price_type)
+            e = _err(t)
+            if e:
+                print(f"{style} [{price_type}]: {e[:150]}")
+                by_type[price_type] = {}
+                continue
+            by_type[price_type] = _prices_by_part(t)
+        net, lst = by_type.get("Net", {}), by_type.get("List", {})
+        cust = by_type.get("Customer", {})
+
+        def rng(d: dict[str, str]) -> str:
+            if not d:
+                return "-"
+            vals = sorted({float(v) for v in d.values()})
+            return f"{vals[0]}..{vals[-1]} ({len(d)} parts)"
+
+        same = sorted(net.items()) == sorted(lst.items()) if net and lst else None
+        print(
+            f"{style}: Net {rng(net)} | List {rng(lst)} | Customer {rng(cust)}"
+            f" | Net==List: {same}"
+        )
+        first = sorted(net)[:3] if net else []
+        for p in first:
+            print(f"    {p}: Net={net.get(p)} List={lst.get(p)} Customer={cust.get(p)}")
     return 0
 
 
