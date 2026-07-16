@@ -1,3 +1,4 @@
+UA_COST_PCT not set -- writing Base Price only, cost untouched
 UA sellable styles: 7,448
 styles present by vendorname: 333
   ...50/333 styles processed; matched so far 260
@@ -7,5 +8,6 @@ styles present by vendorname: 333
   ...250/333 styles processed; matched so far 1,561
   ...300/333 styles processed; matched so far 1,561
 matched items: 1,747
+items with a feed price: 1,747
 
-ua backfill: wrote 463 item(s); unchanged: 1284; upcCode filled (was empty): 0; failures: 0
+ua backfill: WOULD write (dry run) 25 item(s); unchanged: 1023; upcCode filled (was empty): 0; price/cost updated: 20; failures: 0
