@@ -94,6 +94,10 @@ class ColorImages:
         """Best single image to represent the color: front model, else flat."""
         return self.front_model_url or self.front_flat_url or ""
 
+    def back_url(self) -> str:
+        """Best single back-view image: back model, else back flat."""
+        return self.back_model_url or self.back_flat_url or ""
+
     def all_urls(self) -> list[str]:
         urls = [
             self.front_model_url,
