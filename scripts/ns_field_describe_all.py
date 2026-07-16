@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import re
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, unescape
 
 from field_descriptions import DESCRIPTIONS
 from sanmar_netsuite.config import get_config
@@ -47,7 +47,9 @@ def update_field(cfg, internal_id: str, description: str, display_type: str) -> 
 
 def _tag_value(get_response_text: str, tag: str) -> str:
     m = re.search(rf"<setupCustom:{tag}>(.*?)</setupCustom:{tag}>", get_response_text)
-    return m.group(1) if m else ""
+    # The raw response carries XML entities (S&amp;S); unescape before
+    # comparing against plain text or every &-containing field re-writes.
+    return unescape(m.group(1)) if m else ""
 
 
 def main() -> int:
