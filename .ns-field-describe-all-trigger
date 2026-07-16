@@ -1,3 +1,3 @@
 # Trigger file for ns-field-describe-all.yml push-trigger runs.
-# run: dry-run-display-type
-DRY_RUN=true
+# run: live-display-type
+DRY_RUN=false
