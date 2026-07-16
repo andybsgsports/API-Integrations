@@ -1,2 +1,2 @@
 STYLE=105100
-# run: mismatch-scan
+# run: post-smoke-mismatch-recheck
