@@ -1,10 +1,13 @@
-"""Set the Description on every custitem_* field this project writes, via
+"""Enforce metadata on every custitem_* field this project writes, via
 SOAP (REST 404s on itemcustomfield entirely). Runs on CI.
 
+Two properties are kept in line for each field:
+* Description -- the Field Help text (from field_descriptions.py).
+* Display Type -- "Inline Text": these fields are feed-managed, so they
+  render as read-only text on item records instead of editable inputs.
+
 For each field: resolve its internalId with a read-only get-by-scriptId,
-then update the description if it doesn't already match. Small, one-shot,
-idempotent -- no dry-run/smoke ladder needed at this scale (53 fields,
-metadata only, each write independently reversible).
+then update only if something differs. Small, idempotent, metadata-only.
 """
 
 from __future__ import annotations
@@ -27,21 +30,23 @@ def get_field(cfg, scriptid: str) -> str:
     return post(cfg, "get", body)
 
 
-def update_description(cfg, internal_id: str, description: str) -> str:
+DISPLAY_TYPE = "_inlineText"
+
+
+def update_field(cfg, internal_id: str, description: str, display_type: str) -> str:
     ns = f"urn:customization_{VERSION}.setup.webservices.netsuite.com"
     body = f"""
     <platformMsgs:update xmlns:setupCustom="{ns}">
       <platformMsgs:record xsi:type="setupCustom:ItemCustomField" internalId="{internal_id}">
         <setupCustom:description>{escape(description)}</setupCustom:description>
+        <setupCustom:displayType>{display_type}</setupCustom:displayType>
       </platformMsgs:record>
     </platformMsgs:update>"""
     return post(cfg, "update", body)
 
 
-def _current_description(get_response_text: str) -> str:
-    m = re.search(
-        r"<setupCustom:description>(.*?)</setupCustom:description>", get_response_text
-    )
+def _tag_value(get_response_text: str, tag: str) -> str:
+    m = re.search(rf"<setupCustom:{tag}>(.*?)</setupCustom:{tag}>", get_response_text)
     return m.group(1) if m else ""
 
 
@@ -62,18 +67,24 @@ def main() -> int:
             print(f"  no internalId in get response for {scriptid}")
             continue
         internal_id = m.group(1)
-        current = _current_description(text)
-        if current == description:
+        cur_desc = _tag_value(text, "description")
+        cur_display = _tag_value(text, "displayType")
+        diffs = []
+        if cur_desc != description:
+            diffs.append("description")
+        if cur_display != DISPLAY_TYPE:
+            diffs.append(f"displayType {cur_display or '?'} -> {DISPLAY_TYPE}")
+        if not diffs:
             unchanged += 1
             continue
         if not allow_write:
             updated += 1
-            print(f"  WOULD update {scriptid} (id {internal_id})")
+            print(f"  WOULD update {scriptid} (id {internal_id}): {', '.join(diffs)}")
             continue
-        result = update_description(cfg, internal_id, description)
+        result = update_field(cfg, internal_id, description, DISPLAY_TYPE)
         if is_success(result):
             updated += 1
-            print(f"  updated {scriptid} (id {internal_id})")
+            print(f"  updated {scriptid} (id {internal_id}): {', '.join(diffs)}")
         else:
             failures += 1
             print(f"  FAILED {scriptid} (id {internal_id}): {result[:300]}")
