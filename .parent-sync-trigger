@@ -1,4 +1,4 @@
 # Trigger file for parent-sync.yml push-trigger runs.
-# run: live-smoke-2-wider-to-hit-department-class
+# run: full-live-run-1
 DRY_RUN=false
-MAX_ITEMS=1000
+MAX_ITEMS=0
