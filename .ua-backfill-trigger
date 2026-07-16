@@ -1,5 +1,5 @@
 # Trigger file for ua-backfill.yml push-trigger runs.
-# run: verify-dry-after-smoke
-DRY_RUN=true
-MAX_ITEMS=25
+# run: full-live-pricing-cost40
+DRY_RUN=false
+MAX_ITEMS=0
 UA_COST_PCT=40
