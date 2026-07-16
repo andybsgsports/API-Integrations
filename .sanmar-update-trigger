@@ -1,3 +1,4 @@
-# full-refresh pass step 1/6 — SanMar field update (live, diff-aware)
-DRY_RUN=false
-MAX_ITEMS=0
+# Trigger file for sanmar-field-update.yml push-trigger runs.
+# run: dry-run-back-image-field
+DRY_RUN=true
+MAX_ITEMS=25
