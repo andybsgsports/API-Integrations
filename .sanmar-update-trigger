@@ -1,4 +1,4 @@
 # Trigger file for sanmar-field-update.yml push-trigger runs.
-# run: live-smoke-back-image-field
+# run: full-live-run-back-image-field
 DRY_RUN=false
-MAX_ITEMS=25
+MAX_ITEMS=0
