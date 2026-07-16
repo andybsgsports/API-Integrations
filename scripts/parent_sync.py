@@ -52,19 +52,26 @@ def main() -> int:
     parents_by_id = {str(p["id"]): p for p in parents}
     print(f"candidate parent items: {len(parents):,}")
 
-    children = client.suiteql(f"SELECT id, parent, {cols} FROM item WHERE parent IS NOT NULL")
-    print(f"children scanned: {len(children):,}")
-
+    # SuiteQL caps a single query's result window at 100,000 rows; a plain
+    # "parent IS NOT NULL" scan silently truncates well before covering all
+    # children (151k+ in this catalog). Chunk by parent id instead so every
+    # query stays well under that cap.
+    parent_ids = list(parents_by_id)
     values_by_parent: dict[str, dict[str, list[str]]] = {}
-    for c in children:
-        pid = str(c.get("parent") or "")
-        if pid not in parents_by_id:
-            continue
-        bucket = values_by_parent.setdefault(pid, {f: [] for f in FIELDS})
-        for f in FIELDS:
-            v = c.get(f)
-            if v is not None and str(v).strip() != "":
-                bucket[f].append(str(v))
+    total_children = 0
+    for i in range(0, len(parent_ids), 250):
+        chunk = parent_ids[i : i + 250]
+        in_list = ", ".join(chunk)
+        rows = client.suiteql(f"SELECT id, parent, {cols} FROM item WHERE parent IN ({in_list})")
+        total_children += len(rows)
+        for c in rows:
+            pid = str(c.get("parent") or "")
+            bucket = values_by_parent.setdefault(pid, {f: [] for f in FIELDS})
+            for f in FIELDS:
+                v = c.get(f)
+                if v is not None and str(v).strip() != "":
+                    bucket[f].append(str(v))
+    print(f"children scanned: {total_children:,}")
 
     considered = written = unchanged = no_children = failures = 0
     samples = 0
