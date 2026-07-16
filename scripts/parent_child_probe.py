@@ -56,6 +56,20 @@ def main() -> int:
         "SELECT COUNT(DISTINCT parent) AS n FROM item WHERE parent IS NOT NULL"
     )
     print(f"  {n2[0]['n']}")
+
+    print("\n=== mismatch scan: distinct parents with >=1 child disagreeing, per field ===")
+    for f in FIELDS:
+        if f == "parent":
+            continue
+        try:
+            rows = client.suiteql(
+                "SELECT COUNT(DISTINCT p.id) AS n FROM item p "
+                "JOIN item c ON c.parent = p.id "
+                f"WHERE p.parent IS NULL AND NVL(TO_CHAR(p.{f}),'') <> NVL(TO_CHAR(c.{f}),'')"
+            )
+            print(f"  {f}: {rows[0]['n']}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {f}: query failed: {str(exc)[:150]}")
     return 0
 
 
