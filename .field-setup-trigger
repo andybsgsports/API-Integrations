@@ -1,5 +1,5 @@
-# run 6 — create only the missing UA fields via SOAP (skip existing)
+# Trigger file for ns-field-setup.yml push-trigger runs.
+# run: delete-ua-cost-msrp
 FIELD_CREATE=false
 SOAP_CREATE=true
-SOAP_DELETE_IDS=
-VENDOR_PROBE=false
+SOAP_DELETE_IDS=5326,5226
