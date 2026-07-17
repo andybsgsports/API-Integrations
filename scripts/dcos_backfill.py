@@ -235,6 +235,18 @@ def main() -> int:
     print(f"feed styles with NetSuite items (by vendorname, incl. range "
           f"members): {len(present):,} ({len(present_members):,} member styles)")
 
+    hint = (os.environ.get("DCOS_DEBUG_HINT") or "").strip().lower()
+    if debug and hint:
+        # Sample items whose display name mentions the brand, to learn how
+        # this supplier's items are keyed when style lookups find nothing.
+        rows = client.suiteql(
+            "SELECT itemid, vendorname, upccode FROM item "
+            f"WHERE LOWER(displayname) LIKE '%{_sql_escape(hint)}%' AND rownum <= 12"
+        )
+        print(f"  DEBUG name-hint '{hint}': {len(rows)} sample items")
+        for r in rows:
+            print(f"    itemid={r.get('itemid')!r} vendorname={r.get('vendorname')!r} "
+                  f"upccode={r.get('upccode')!r}")
     if debug:
         # How are this supplier's items ACTUALLY keyed in NetSuite? Probe by
         # itemid prefix (the STYLE-COLOR-SIZE naming convention) for a sample
