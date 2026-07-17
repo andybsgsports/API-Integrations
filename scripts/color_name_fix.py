@@ -27,7 +27,7 @@ from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.repository import _sql_escape
 
 ROOT = Path(__file__).resolve().parents[1]
-APPLY_STATUSES = {"auto", "user", "inferred", "inferred_low"}
+APPLY_STATUSES = {"auto", "user", "inferred", "inferred_low", "user_new_color"}
 
 
 def load_mapping() -> dict[str, str]:

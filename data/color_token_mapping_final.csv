@@ -147,7 +147,7 @@ Pink Rush Heath,4,Pink Rush Heather,auto,abbrev
 Red/Royal/Wht,4,Red/Royal/White,auto,abbrev
 Ne Or,4,Neon Orange,inferred,
 Rd/W,4,Red/White,inferred,
-Vg/Bk,4,Vegas Gold/Black,NOT_IN_LIST,proposed name missing from production color list
+Vg/Bk,4,Vegas Gold/Black,user_new_color,user-approved; value to be ADDED to the color list
 ForGrn/White,4,Forrest Green/White,auto,abbrev
 Or/Wh,4,Orange/White,auto,abbrev
 Bk/Bk/Wh,3,Black/Black/White,auto,abbrev
@@ -216,8 +216,8 @@ Skbl,1,Sky Blue,auto,heuristic
 Vapu,1,Varsity Purple,auto,heuristic
 White-2x,1,White,artifact,size tail; real color: White
 Gd/Ro,1,Gold/Royal,auto,abbrev
-Ca/Ro,1,Cardinal/Royal,NOT_IN_LIST,proposed name missing from production color list
-Ca/Bk,1,Cardinal/Black,NOT_IN_LIST,proposed name missing from production color list
+Ca/Ro,1,Cardinal/Royal,user_new_color,user-approved; value to be ADDED to the color list
+Ca/Bk,1,Cardinal/Black,user_new_color,user-approved; value to be ADDED to the color list
 Sc/Wh,1,Scarlet/White,auto,compound
 BK/CHHE,1,Black/Charcoal Heather,inferred,
 Charcoal Healther,1,Charcoal Heather,inferred,
@@ -282,7 +282,7 @@ DKHEGR/BK,1,Dark Heather Grey/Black,auto,abbrev
 "Green-1.5"" X 42""",1,Green,artifact,size tail; real color: Green
 Qsg-Large/X,1,,artifact,size tail; real color: Qsg
 Scooter Red,1,Scooter Red Heather,auto,abbrev
-Wh/Urd,1,White/University Red,NOT_IN_LIST,proposed name missing from production color list
+Wh/Urd,1,White/University Red,user_new_color,user-approved; value to be ADDED to the color list
 Powder Blue/BK,1,Powder Blue/Black,auto,abbrev
 Mbk-Large/X,1,Mbk,artifact,size tail; real color: Mbk
 Con Grey-Youth X,1,Con Grey,artifact,size tail; real color: Con Grey

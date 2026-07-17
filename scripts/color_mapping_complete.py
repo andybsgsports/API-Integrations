@@ -90,9 +90,18 @@ INFERRED = {
 # "needs a second look" even though a best guess is filled in.
 INFERRED_LOW = {
     "st": "Stealth",
+    "soblack": "Solid Black",
+}
+
+# User-approved targets that are NOT in the production color list yet --
+# the user said to add these values to the list ("add to color list if we
+# need them"). Item renames can proceed (names are strings); the list-value
+# additions happen in the consolidation phase.
+USER_NEW_COLORS = {
+    "vg/bk": "Vegas Gold/Black",
     "ca/ro": "Cardinal/Royal",
     "ca/bk": "Cardinal/Black",
-    "soblack": "Solid Black",
+    "wh/urd": "White/University Red",
 }
 
 # Size tails the name parser didn't know; the leading part is the color.
@@ -130,6 +139,11 @@ def main() -> int:
             if r["method"] != "UNRESOLVED":
                 w.writerow([token, n, r["proposed_name"], "auto", r["method"]])
                 counts["auto"] = counts.get("auto", 0) + 1
+                continue
+            if low in USER_NEW_COLORS:
+                w.writerow([token, n, USER_NEW_COLORS[low], "user_new_color",
+                            "user-approved; value to be ADDED to the color list"])
+                counts["user_new_color"] = counts.get("user_new_color", 0) + 1
                 continue
             for source, status in (
                 (USER_CONFIRMED, "user"),
