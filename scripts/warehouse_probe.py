@@ -79,13 +79,10 @@ def probe_ss_live() -> None:
         skus.append(p.sku)
         print(f"  sku={p.sku} qty_available={p.qty_available} warehouses={p.warehouses!r}")
 
-    print("\n=== S&S live API check (per-SKU /Inventory/{sku} endpoint) ===")
-    for sku in skus:
-        inv = ss.get_inventory(sku)
-        if inv is None:
-            print(f"  sku={sku}: no inventory record")
-            continue
-        print(f"  sku={sku} qty_available={inv.qty_available} warehouses={inv.warehouses!r}")
+    print("\n=== S&S live API check (per-SKU /Inventory/{sku} endpoint, RAW) ===")
+    for sku in skus[:2]:
+        raw = ss._get(f"/Inventory/{sku}")
+        print(f"  sku={sku} raw={raw!r}")
 
 
 def main() -> int:
