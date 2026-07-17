@@ -1,2 +1,2 @@
 # Trigger file for warehouse-probe.yml push-trigger runs.
-# run: initial-probe
+# run: fixed-pagination

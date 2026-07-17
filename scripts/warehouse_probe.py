@@ -27,24 +27,16 @@ def collect(client: NetSuiteClient, field: str, label: str) -> None:
     print(f"\n=== {label} ({field}) ===")
     codes: dict[str, int] = {}
     items_with_data = 0
-    offset = 0
-    while True:
-        rows = client.suiteql(
-            f"SELECT {field} AS whse FROM item WHERE {field} IS NOT NULL "
-            f"ORDER BY id OFFSET {offset} FETCH NEXT 1000 ROWS ONLY"
-        )
-        if not rows:
-            break
-        for r in rows:
-            text = str(r.get("whse") or "")
-            if not text.strip():
-                continue
-            items_with_data += 1
-            for code, _qty in LINE_RE.findall(text):
-                codes[code] = codes.get(code, 0) + 1
-        offset += 1000
-        if len(rows) < 1000:
-            break
+    # Well under the ~100k SuiteQL result-window cap (a few thousand rows at
+    # most here), so a single call is fine -- the client pages internally.
+    rows = client.suiteql(f"SELECT {field} AS whse FROM item WHERE {field} IS NOT NULL")
+    for r in rows:
+        text = str(r.get("whse") or "")
+        if not text.strip():
+            continue
+        items_with_data += 1
+        for code, _qty in LINE_RE.findall(text):
+            codes[code] = codes.get(code, 0) + 1
     print(f"items with data: {items_with_data:,}")
     print(f"distinct warehouse codes: {len(codes)}")
     for code, n in sorted(codes.items(), key=lambda kv: (-kv[1], kv[0])):
