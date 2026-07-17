@@ -266,7 +266,12 @@ def main() -> int:
                         print(f"  DEBUG itemid-prefix hit [{s}]: itemid={r.get('itemid')!r} "
                               f"vendorname={r.get('vendorname')!r} upccode={r.get('upccode')!r}")
         print(f"  DEBUG itemid-prefix: {hits}/60 sampled styles have 'STYLE-%' items")
-        for s in (present[:2] + [x for x in styles if x not in present][:1]):
+        # When the allowlist filter empties the pool (feed productIds aren't
+        # style codes, e.g. TCK's are product NAMES), sample raw feed products
+        # so the part detail still reveals where the style codes live.
+        sample = (present[:2] + [x for x in styles if x not in present][:1]) \
+            or list(members_of)[:3]
+        for s in sample:
             try:
                 parts = get_parts(base, key_id, key_pw, s)
             except Exception as exc:  # noqa: BLE001
