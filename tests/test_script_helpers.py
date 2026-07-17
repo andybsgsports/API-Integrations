@@ -126,3 +126,49 @@ class TestNativeDiffs:
             price=None, cost=None, weight=None, same=_same,
         )
         assert body == {}
+
+
+class TestPerWarehouseFields:
+    """ss_backfill.payload_for's per-warehouse columns (warehouse_fields maps)."""
+
+    def _product(self) -> dict:
+        return {"sku": "B0001", "style_name": "G500", "qty_available": 7}
+
+    def test_no_inventory_rows_leaves_columns_unset(self):
+        from warehouse_fields import SS_QTY_FIELDS
+        from ss_backfill import payload_for
+
+        want = payload_for(self._product())
+        assert not any(f in want for f in SS_QTY_FIELDS)
+        assert "custitem_ss_qty_by_whse" not in want  # empty text is skipped
+
+    def test_rows_fill_matched_columns_and_zero_fill_rest(self):
+        from warehouse_fields import SS_WHSE_FIELDS, SS_QTY_FIELDS
+        from ss_backfill import payload_for
+
+        rows = [
+            {"warehouseAbbr": "IL", "qty": 12},
+            {"warehouseAbbr": "TX", "qty": 0},
+        ]
+        want = payload_for(self._product(), rows)
+        assert want[SS_WHSE_FIELDS["IL"][0]] == 12
+        assert want[SS_WHSE_FIELDS["TX"][0]] == 0
+        # every other column zero-filled, so stale counts always clear
+        assert all(want[f] == 0 for f in SS_QTY_FIELDS
+                   if f not in (SS_WHSE_FIELDS["IL"][0],))
+        # text breakdown hides zero-stock rows
+        assert want["custitem_ss_qty_by_whse"] == "IL: 12"
+
+    def test_unknown_code_collected_not_dropped_silently(self):
+        import ss_backfill
+        from ss_backfill import payload_for
+
+        ss_backfill.UNKNOWN_WHSE.clear()
+        payload_for(self._product(), [{"warehouseAbbr": "ZZ", "qty": 5}])
+        assert "ZZ" in ss_backfill.UNKNOWN_WHSE
+
+    def test_sanmar_map_covers_constants_table(self):
+        from warehouse_fields import SANMAR_WHSE_FIELDS
+        from sanmar_netsuite.sanmar import constants as C
+
+        assert set(SANMAR_WHSE_FIELDS) == set(C.WAREHOUSES)

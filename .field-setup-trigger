@@ -1,3 +1,3 @@
-# run: post-refresh-create-fields
+# run: create-per-warehouse-qty-fields
 FIELD_CREATE=false
 SOAP_CREATE=true

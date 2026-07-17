@@ -9,6 +9,8 @@ Keyed by scriptid; must cover (at least) every field in
 
 from __future__ import annotations
 
+from warehouse_fields import SANMAR_WHSE_FIELDS, SS_WHSE_FIELDS
+
 DESCRIPTIONS: dict[str, str] = {
     # SanMar
     "custitem_sanmar_unique_key": (
@@ -140,3 +142,16 @@ DESCRIPTIONS: dict[str, str] = {
         "Link to this item's product photo from Under Armour's DC OneSource catalog."
     ),
 }
+
+# Per-warehouse quantity columns (one INTEGER field per supplier warehouse).
+for _no, (_sid, _label) in SANMAR_WHSE_FIELDS.items():
+    _city = _label.removeprefix("SanMar Qty: ")
+    DESCRIPTIONS[_sid] = (
+        f"Quantity of this item currently available at SanMar's {_city} "
+        f"warehouse (warehouse #{_no}, updated nightly)."
+    )
+for _abbr, (_sid, _label) in SS_WHSE_FIELDS.items():
+    DESCRIPTIONS[_sid] = (
+        f"Quantity of this item currently available at S&S Activewear's "
+        f"'{_abbr}' warehouse (their code, updated nightly)."
+    )
