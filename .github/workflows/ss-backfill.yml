@@ -1,6 +1,14 @@
 name: S&S Back-fill (write phase)
 
+permissions:
+  contents: read
+  issues: write
+
 on:
+  schedule:
+    # Nightly steady-state run (diff-aware); staggered so live
+    # writers never overlap on the same records.
+    - cron: "0 8 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -36,6 +44,8 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             get() { grep -E "^$1=" .ss-backfill-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
             DRY_RUN=$(get DRY_RUN); MAX_ITEMS=$(get MAX_ITEMS)
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            DRY_RUN="false"; MAX_ITEMS="0"   # nightly live run (sandbox-gated)
           else
             DRY_RUN="${{ github.event.inputs.dry_run }}"
             MAX_ITEMS="${{ github.event.inputs.max_items }}"
@@ -69,3 +79,12 @@ jobs:
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
         run: python scripts/ss_backfill.py
+
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

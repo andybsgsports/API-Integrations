@@ -2,8 +2,13 @@ name: Item Copy Update (descriptions/display names)
 
 permissions:
   contents: write
+  issues: write
 
 on:
+  schedule:
+    # Nightly steady-state run (diff-aware); staggered so live
+    # writers never overlap on the same records.
+    - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -39,6 +44,8 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             get() { grep -E "^$1=" .description-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
             DRY_RUN=$(get DRY_RUN); MAX_ITEMS=$(get MAX_ITEMS)
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            DRY_RUN="false"; MAX_ITEMS="0"   # nightly live run (sandbox-gated)
           else
             DRY_RUN="${{ github.event.inputs.dry_run }}"
             MAX_ITEMS="${{ github.event.inputs.max_items }}"
@@ -87,3 +94,12 @@ jobs:
           git commit -m "Item copy report (run ${{ github.run_id }}) [skip ci]" || exit 0
           git pull --rebase origin ${{ github.ref_name }} || true
           git push origin HEAD:${{ github.ref_name }} || echo "push failed - report in log only"
+
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

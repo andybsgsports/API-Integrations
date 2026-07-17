@@ -1,5 +1,9 @@
 name: SanMar Field Update (UPC-keyed)
 
+permissions:
+  contents: read
+  issues: write
+
 on:
   schedule:
     # 10:00 UTC, an hour after the nightly sync window — diff-aware, so
@@ -72,3 +76,12 @@ jobs:
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
         run: python scripts/sanmar_field_update.py
+
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
