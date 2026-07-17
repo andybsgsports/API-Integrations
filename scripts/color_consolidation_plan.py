@@ -59,6 +59,10 @@ def main() -> int:
         f"WHERE {COLOR_FIELD} IS NOT NULL GROUP BY {COLOR_FIELD}"
     ):
         usage[str(r["c"])] = int(r["n"])
+    # Proof the usage read worked -- ~151k children carry a color option, so
+    # a tiny total here means the query silently broke, not that dupes are unused.
+    print(f"usage rows: {len(usage):,}; total items with a color option: "
+          f"{sum(usage.values()):,}")
 
     out = ROOT / "data" / "color_consolidation_plan.csv"
     total_items = 0
