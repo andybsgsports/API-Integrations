@@ -141,6 +141,19 @@ def get_inventory(base: str, key_id: str, key_pw: str, style: str) -> dict[str, 
     return out
 
 
+def expand_style_members(raw: str) -> list[str]:
+    """Champro publishes some productIds as ranges ('A014-A019') covering
+    several catalog styles. Expand to the member styles when the pattern is a
+    sane same-prefix numeric span; otherwise the raw id is its own member."""
+    m = re.match(r"^([A-Z]*)(\d+)-([A-Z]*)(\d+)$", raw.upper())
+    if m and (m.group(3) in ("", m.group(1))):
+        pfx, lo, hi = m.group(1), m.group(2), m.group(4)
+        if int(hi) >= int(lo) and int(hi) - int(lo) <= 50:
+            width = len(lo)
+            return [f"{pfx}{n:0{width}d}" for n in range(int(lo), int(hi) + 1)]
+    return [raw.upper()]
+
+
 def load_allowlist(key: str) -> set[str] | None:
     """Uppercased style set from the user's price list, or None if no file."""
     path = ROOT / "data" / f"pricelist_{key}.csv"
@@ -187,30 +200,40 @@ def main() -> int:
     debug = (os.environ.get("DCOS_DEBUG") or "").lower() == "true"
     styles = get_sellable_styles(base, key_id, key_pw)
     print(f"{sup['label']} sellable styles: {len(styles):,}")
+    members_of = {s: expand_style_members(s) for s in styles}
     allowlist = load_allowlist(key)
     if allowlist is not None:
-        on_list = [s for s in styles if s.upper() in allowlist]
+        on_list = [s for s in styles
+                   if any(mem in allowlist for mem in members_of[s])]
+        covered = {mem for s in on_list for mem in members_of[s]} & allowlist
         print(f"price-list allowlist: {len(allowlist):,} styles; "
               f"feed styles on the list: {len(on_list):,} "
-              f"(list styles missing from feed: {len(allowlist) - len({s.upper() for s in on_list}):,})")
+              f"(list styles covered incl. ranges: {len(covered):,}; "
+              f"missing from feed: {len(allowlist) - len(covered):,})")
         if debug:
-            feed_upper = {s.upper() for s in styles}
-            missing = sorted(allowlist - feed_upper)
+            all_members = {mem for s in styles for mem in members_of[s]}
+            missing = sorted(allowlist - all_members)
             print(f"  DEBUG feed styles sample: {styles[:25]}")
             print(f"  DEBUG list styles missing from feed (sample): {missing[:25]}")
         styles = on_list
     else:
         print("no price-list allowlist found -- processing the full feed")
 
-    present: list[str] = []
-    for i in range(0, len(styles), 300):
-        chunk = styles[i : i + 300]
+    # Which feed styles have NetSuite items? Check every expanded member
+    # (vendorname carries the member style, e.g. 'A014', not the range id).
+    style_of_member = {mem: s for s in styles for mem in members_of[s]}
+    present_members: set[str] = set()
+    all_members = sorted(style_of_member)
+    for i in range(0, len(all_members), 300):
+        chunk = all_members[i : i + 300]
         in_list = ", ".join(f"'{_sql_escape(v)}'" for v in chunk)
         rows = client.suiteql(
-            f"SELECT DISTINCT vendorname FROM item WHERE vendorname IN ({in_list})"
+            f"SELECT DISTINCT vendorname FROM item WHERE UPPER(vendorname) IN ({in_list})"
         )
-        present.extend(str(r["vendorname"]) for r in rows)
-    print(f"styles present by vendorname: {len(present):,}")
+        present_members.update(str(r["vendorname"]).upper() for r in rows)
+    present = sorted({style_of_member[m] for m in present_members})
+    print(f"feed styles with NetSuite items (by vendorname, incl. range "
+          f"members): {len(present):,} ({len(present_members):,} member styles)")
 
     if debug:
         # How are this supplier's items ACTUALLY keyed in NetSuite? Probe by
@@ -250,16 +273,32 @@ def main() -> int:
             print(f"  getProduct failed for {style}: {str(exc)[:100]}")
             continue
         inv = get_inventory(base, key_id, key_pw, style)
-        safe = _sql_escape(style)
+        in_list = ", ".join(f"'{_sql_escape(m)}'" for m in members_of[style])
         rows = client.suiteql(
-            f"SELECT id, upccode, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
-            f"FROM item WHERE vendorname = '{safe}'"
+            f"SELECT id, itemid, upccode, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
+            f"FROM item WHERE UPPER(vendorname) IN ({in_list})"
         )
         by_upc = {str(r.get("upccode") or ""): str(r["id"]) for r in rows if r.get("upccode")}
         opt_index = {
             (str(r.get("color") or ""), str(r.get("size") or "")): str(r["id"])
             for r in rows if r.get("color") and r.get("size")
         }
+        # itemid 'STYLE-COLOR[-SIZE]' -> color segment, for feeds without
+        # GTINs (Champro): match part color names against the name segment.
+        seg_color = {
+            str(r["id"]): str(r.get("itemid") or "").split("-")[1].strip().lower()
+            for r in rows if "-" in str(r.get("itemid") or "")
+        }
+
+        def claim(rid: str, part: dict) -> None:
+            if rid and rid not in matched:
+                matched[rid] = {
+                    f"custitem_{prefix}_part_id": part["partId"],
+                    f"custitem_{prefix}_style": style,
+                    f"custitem_{prefix}_gtin": part.get("gtin", ""),
+                    f"custitem_{prefix}_qty_available": inv.get(part["partId"]),
+                }
+
         for part in parts:
             rid = by_upc.get(part.get("gtin", ""))
             if not rid and options.available and opt_index:
@@ -274,13 +313,20 @@ def main() -> int:
                                 if (cid, sid) in opt_index), None)
                     if rid:
                         break
-            if rid and rid not in matched:
-                matched[rid] = {
-                    f"custitem_{prefix}_part_id": part["partId"],
-                    f"custitem_{prefix}_style": style,
-                    f"custitem_{prefix}_gtin": part.get("gtin", ""),
-                    f"custitem_{prefix}_qty_available": inv.get(part["partId"]),
-                }
+            if rid:
+                claim(rid, part)
+                continue
+            # color-segment pass: every item whose itemid color matches
+            part_colors = {c.strip().lower() for c in part["colors"] if c.strip()}
+            if part_colors:
+                for iid, seg in seg_color.items():
+                    if seg in part_colors:
+                        claim(iid, part)
+        if len(parts) == 1:
+            # single-part style (one price/qty for the whole style): the part
+            # applies to every item of the style not claimed above.
+            for r in rows:
+                claim(str(r["id"]), parts[0])
         if n % 50 == 0:
             print(f"  ...{n}/{len(present)} styles processed; matched so far {len(matched):,}")
     print(f"matched items: {len(matched):,}")
