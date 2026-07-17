@@ -1,5 +1,3 @@
-# Trigger file for ns-field-setup.yml push-trigger runs.
-# run: delete-ua-cost-msrp
+# run: post-refresh-audit
 FIELD_CREATE=false
-SOAP_CREATE=true
-SOAP_DELETE_IDS=5326,5226
+SOAP_CREATE=false
