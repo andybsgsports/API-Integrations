@@ -70,9 +70,16 @@ def build_payloads(
     whse_by_key: dict[str, str] = {}
     total_by_key: dict[str, int] = {}
     for rec in inventory:
-        whse_by_key[rec.unique_key] = "; ".join(
-            f"{w.warehouse_label or w.warehouse_no}: {w.quantity}"
+        # One warehouse per line, zero-stock locations hidden -- the
+        # semicolon-joined single line was unreadable on item records.
+        lines = [
+            f"{w.warehouse_label or w.warehouse_no}: {w.quantity:,}"
             for w in rec.warehouses
+            if w.quantity
+        ]
+        whse_by_key[rec.unique_key] = (
+            "\n".join(lines) if lines
+            else ("0 at all warehouses" if rec.warehouses else "")
         )
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
 

@@ -191,7 +191,7 @@ def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, tuple[int, 
             elif t == "inventoryLocationId" and v:
                 whse.append(v)
         if pid:
-            out[pid] = (qty, "; ".join(whse))
+            out[pid] = (qty, "\n".join(whse))
     return out
 
 

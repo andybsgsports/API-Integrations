@@ -51,6 +51,7 @@ def fetch(url: str, dest: Path) -> Path:
 def load_inventory(path: Path) -> tuple[dict[str, int], dict[str, str]]:
     total: dict[str, int] = {}
     parts: dict[str, list[str]] = {}
+    seen: dict[str, bool] = {}
     with path.open(encoding="utf-8-sig", errors="replace", newline="") as fh:
         for row in csv.DictReader(fh):
             sku = (row.get("Item_SKU") or "").strip()
@@ -62,8 +63,14 @@ def load_inventory(path: Path) -> tuple[dict[str, int], dict[str, str]]:
                 continue
             whse = (row.get("WarehouseID") or "").strip()
             total[sku] = total.get(sku, 0) + qty
-            parts.setdefault(sku, []).append(f"{whse}: {qty}")
-    return total, {k: "; ".join(v) for k, v in parts.items()}
+            seen[sku] = True
+            # One warehouse per line, zero-stock locations hidden.
+            if qty:
+                parts.setdefault(sku, []).append(f"{whse}: {qty:,}")
+    return total, {
+        k: "\n".join(parts[k]) if k in parts else "0 at all warehouses"
+        for k in seen
+    }
 
 
 def load_front_images(path: Path) -> dict[str, str]:

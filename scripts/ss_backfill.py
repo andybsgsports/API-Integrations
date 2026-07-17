@@ -74,9 +74,14 @@ def _abs_url(path: str | None) -> str | None:
 def payload_for(p: dict) -> dict[str, object]:
     want: dict[str, object] = {}
     put = _put_into(want)
-    whse = "; ".join(
-        f"{w.get('warehouseAbbr', '')}: {w.get('qty', 0)}"
+    # One warehouse per line, zero-stock locations hidden (readability).
+    lines = [
+        f"{w.get('warehouseAbbr', '')}: {int(w.get('qty') or 0):,}"
         for w in (p.get("warehouses") or [])
+        if int(w.get("qty") or 0)
+    ]
+    whse = "\n".join(lines) if lines else (
+        "0 at all warehouses" if p.get("warehouses") else ""
     )
     def num(key):
         v = p.get(key)
