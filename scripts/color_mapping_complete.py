@@ -35,6 +35,10 @@ USER_CONFIRMED = {
     "pond blhe": "Pond Blue Heather",
     "-navy": "Navy",
     "true royalx": "True Royal",
+    "diblu": "Direct Blue",
+    "par blue": "Parcel Blue",
+    "pirht": "Pink Rush Heather",
+    "rbn": "River Blue Navy",
 }
 
 # Inferred from the user's confirmed pattern language (Gr=Grey, initial

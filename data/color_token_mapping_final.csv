@@ -179,12 +179,12 @@ Royal-Large/X,2,Royal,artifact,size tail; real color: Royal
 White-Large/X,2,White,artifact,size tail; real color: White
 Sc/Wh/Bk,2,Scarlet/White/Black,auto,abbrev
 GreySmokeHeathe,2,Grey Smoke Heather,auto,abbrev
-Diblu,2,,unresolved,
+Diblu,2,Direct Blue,user,
 DSH,2,Deep Smoke Heather,auto,abbrev
-PAR BLUE,2,,unresolved,
+PAR BLUE,2,Parcel Blue,user,
 Roh,2,Royal Heather,auto,abbrev
 VIHE/BK,2,Vintage Heather/Black,inferred,
-Pirht,2,,unresolved,
+Pirht,2,Pink Rush Heather,user,
 Sy,2,Sy/Gp,auto,prefix
 WH/FG,2,White/Forest Green,auto,abbrev
 Dk Gr,2,Dark Grey,auto,abbrev
@@ -253,7 +253,7 @@ Royal-2X,1,Royal,artifact,size tail; real color: Royal
 Bk/Or,1,Black/Orange,inferred,
 Large/X,1,,artifact,size tail; real color: (none)
 WH/BK/BK,1,White/Black/Black,auto,compound
-Rbn,1,,unresolved,
+Rbn,1,River Blue Navy,user,
 Naht,1,Navy Heather,inferred,
 GRHE,1,Grey Heather,inferred,
 Pond Blhe,1,Pond Blue Heather,user,
