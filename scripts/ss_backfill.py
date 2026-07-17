@@ -283,6 +283,14 @@ def main() -> int:
                 continue
             want = payload_for(p, whse_by_sku.get(str(p.get("sku") or "")))
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
+            # Clear stale 0.01 placeholder MAPs written before the no-MAP rule
+            # (REST PATCH null empties the field).
+            if "custitem_ss_map" not in want:
+                try:
+                    if float(row.get("custitem_ss_map")) <= 0.011:
+                        body["custitem_ss_map"] = None
+                except (TypeError, ValueError):
+                    pass
             gtin = (p.get("gtin") or "").strip()
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin

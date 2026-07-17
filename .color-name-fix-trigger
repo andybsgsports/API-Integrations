@@ -1,3 +1,3 @@
-# run: fresh-sandbox-dry-all-tokens
-DRY_RUN=true
-MAX_ITEMS=0
+# run: fresh-sandbox-SMOKE-25
+DRY_RUN=false
+MAX_ITEMS=25
