@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: champro-DEBUG-dry-2-range-and-segment-matching
+# run: champro-SMOKE
 SUPPLIER=champro
-DRY_RUN=true
-MAX_ITEMS=0
-DEBUG=true
+DRY_RUN=false
+MAX_ITEMS=25
+DEBUG=false
