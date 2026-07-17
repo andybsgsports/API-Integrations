@@ -2,7 +2,9 @@
 
 Fills the ``custitem_sanmar_*`` fields on every existing item whose upcCode
 matches a feed GTIN — availability (total + per-warehouse), pricing
-(MAP/MSRP/case), status, and the SanMar keys. Diff-aware: current values are
+(MAP/MSRP/case), status, and the SanMar keys — plus the NATIVE money/shipping
+fields: Base Price = SanMar MSRP, Purchase Price (``cost``) = SanMar piece
+price (our cost), ``weight`` = piece weight. Diff-aware: current values are
 bulk-read first and only changed fields are written, so steady-state nightly
 runs are small. Honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
 """
@@ -12,6 +14,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from native_pricing import add_native_diffs, read_base_prices
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.repository import _sql_escape
@@ -55,8 +58,11 @@ def _make_put(entry: dict[str, object]):
     return put
 
 
-def build_payloads(styles, inventory) -> dict[str, dict[str, object]]:
-    """GTIN -> field payload for every feed SKU carrying a barcode.
+def build_payloads(
+    styles, inventory
+) -> tuple[dict[str, dict[str, object]], dict[str, tuple]]:
+    """GTIN -> field payload for every feed SKU carrying a barcode, plus
+    GTIN -> (base price, cost, weight) for the native-field writes.
 
     Values are typed (numbers as numbers) and empty values are omitted —
     NetSuite 400s on an empty string in a numeric/currency field.
@@ -71,6 +77,7 @@ def build_payloads(styles, inventory) -> dict[str, dict[str, object]]:
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
 
     payloads: dict[str, dict[str, object]] = {}
+    natives: dict[str, tuple] = {}
     for style in styles:
         for sku in style.skus:
             if not sku.gtin:
@@ -101,7 +108,12 @@ def build_payloads(styles, inventory) -> dict[str, dict[str, object]]:
             put("custitem_sanmar_front_image_url", images.back_url() if images else None)
             if entry:
                 payloads[sku.gtin] = entry
-    return payloads
+                natives[sku.gtin] = (
+                    None if sku.msrp is None else float(sku.msrp),
+                    None if sku.piece_price is None else float(sku.piece_price),
+                    None if sku.piece_weight is None else float(sku.piece_weight),
+                )
+    return payloads, natives
 
 
 def _same(current: object, new: object) -> bool:
@@ -121,19 +133,21 @@ def main() -> int:
 
     styles = parse_styles(_dl(cfg, C.FILE_SDL_N))
     inventory = parse_inventory(_dl(cfg, C.FILE_DIP))
-    payloads = build_payloads(styles, inventory)
+    payloads, natives = build_payloads(styles, inventory)
     print(f"feed SKUs with GTIN: {len(payloads):,}")
 
     client = NetSuiteClient(cfg.netsuite)
     cols = ", ".join(FIELD_ORDER)
     gtins = sorted(payloads)
-    considered = written = unchanged = failures = 0
+    considered = written = unchanged = priced = failures = 0
     for i in range(0, len(gtins), 250):
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         rows = client.suiteql(
-            f"SELECT id, upccode, {cols} FROM item WHERE upccode IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE upccode IN ({in_list})"
         )
+        id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
+        base_by_rid = read_base_prices(client, id_list)
         for row in rows:
             gtin = str(row.get("upccode") or "")
             want = payloads.get(gtin)
@@ -142,12 +156,19 @@ def main() -> int:
             body = {
                 f: v for f, v in want.items() if not _same(row.get(f), v)
             }
+            price, cost, weight = natives.get(gtin, (None, None, None))
+            add_native_diffs(
+                body, row, base_by_rid, str(row["id"]),
+                price=price, cost=cost, weight=weight, same=_same,
+            )
             if not body:
                 unchanged += 1
                 continue
             if max_items and considered >= max_items:
                 continue
             considered += 1
+            if "price" in body or "cost" in body or "weight" in body:
+                priced += 1
             if not allow_write:
                 written += 1
                 continue
@@ -161,7 +182,8 @@ def main() -> int:
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
-          f"unchanged: {unchanged}; failures: {failures}")
+          f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
+          f"failures: {failures}")
     return 1 if failures else 0
 
 

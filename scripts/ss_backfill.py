@@ -7,8 +7,11 @@ Match priority per SKU:
 2. **vendorname + option ids** — style -> items via Vendor Name/Code, child by
    matrix color/size (same machinery as the SanMar/Momentec matchers).
 
-Writes the ``custitem_ss_*`` set and fills ``upcCode`` only where empty.
-Diff-aware; honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
+Writes the ``custitem_ss_*`` set and fills ``upcCode`` only where empty,
+plus the NATIVE money/shipping fields: Base Price = S&S MSRP, Purchase
+Price (``cost``) = S&S customer price (our account cost; falls back to
+piece price), ``weight`` = S&S weight. Diff-aware; honors ``SYNC_DRY_RUN``;
+``UPDATE_MAX_ITEMS`` caps writes.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import json
 import os
 from pathlib import Path
 
+from native_pricing import add_native_diffs, read_base_prices
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
@@ -105,6 +109,17 @@ def payload_for(p: dict) -> dict[str, object]:
     return want
 
 
+def natives_for(p: dict) -> tuple:
+    """(base price, cost, weight) for the native-field writes."""
+    def num(key):
+        v = p.get(key)
+        try:
+            return None if v is None else float(v)
+        except (TypeError, ValueError):
+            return None
+    return (num("msrp"), num("customer_price") or num("piece_price"), num("weight"))
+
+
 def main() -> int:
     allow_write = not ns_config().sync.dry_run
     max_items = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
@@ -185,12 +200,13 @@ def main() -> int:
     # -- write phase (diff-aware)
     ids = sorted(matched)
     cols = ", ".join(FIELDS)
-    considered = written = unchanged = upc_filled = failures = 0
+    considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 200):
         chunk = ids[i : i + 200]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
+        base_by_rid = read_base_prices(client, in_list)
         for row in client.suiteql(
-            f"SELECT id, upccode, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             p = matched.get(rid)
@@ -201,6 +217,11 @@ def main() -> int:
             gtin = (p.get("gtin") or "").strip()
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
+            price, cost, weight = natives_for(p)
+            add_native_diffs(
+                body, row, base_by_rid, rid,
+                price=price, cost=cost, weight=weight, same=_same,
+            )
             if not body:
                 unchanged += 1
                 continue
@@ -209,6 +230,8 @@ def main() -> int:
             considered += 1
             if "upcCode" in body:
                 upc_filled += 1
+            if "price" in body or "cost" in body or "weight" in body:
+                priced += 1
             if not allow_write:
                 written += 1
                 continue
@@ -223,7 +246,8 @@ def main() -> int:
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
-          f"upcCode filled (was empty): {upc_filled}; failures: {failures}")
+          f"upcCode filled (was empty): {upc_filled}; "
+          f"price/cost/weight updated: {priced}; failures: {failures}")
     return 1 if failures else 0
 
 

@@ -3,7 +3,9 @@
 Re-runs the read-only match, then writes onto every matched existing item the
 ``custitem_mtec_*`` set (keys, MSRP/cost, case pack, availability incl.
 per-warehouse, front image URL) and fills ``upcCode`` ONLY where it is empty —
-items already keyed by a SanMar barcode are never re-keyed. Diff-aware and
+items already keyed by a SanMar barcode are never re-keyed. Also writes the
+NATIVE money/shipping fields: Base Price = Momentec MSRP, Purchase Price
+(``cost``) = Momentec cost, ``weight`` = feed weight. Diff-aware and
 honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
 """
 
@@ -15,6 +17,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from momentec_netsuite.adopt import match_momentec
+from native_pricing import add_native_diffs, read_base_prices
 from momentec_netsuite.config import get_config
 from momentec_netsuite.feeds import parse_product_data
 from sanmar_netsuite.config import get_config as ns_config
@@ -128,13 +131,14 @@ def main() -> int:
 
     ids = sorted(by_item)
     cols = ", ".join(FIELDS)
-    considered = written = unchanged = upc_filled = failures = 0
+    considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         rows = client.suiteql(
-            f"SELECT id, upccode, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE id IN ({in_list})"
         )
+        base_by_rid = read_base_prices(client, in_list)
         for row in rows:
             rid = str(row["id"])
             match = by_item.get(rid)
@@ -159,6 +163,11 @@ def main() -> int:
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             if not str(row.get("upccode") or "").strip() and sku.gtin:
                 body["upcCode"] = sku.gtin
+            add_native_diffs(
+                body, row, base_by_rid, rid,
+                price=_num(sku.msrp), cost=_num(sku.cost),
+                weight=_num(sku.weight), same=_same,
+            )
             if not body:
                 unchanged += 1
                 continue
@@ -167,6 +176,8 @@ def main() -> int:
             considered += 1
             if "upcCode" in body:
                 upc_filled += 1
+            if "price" in body or "cost" in body or "weight" in body:
+                priced += 1
             if not allow_write:
                 written += 1
                 continue
@@ -180,7 +191,8 @@ def main() -> int:
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nmomentec backfill: {verb} {written} item(s); unchanged: {unchanged}; "
-          f"upcCode filled (was empty): {upc_filled}; failures: {failures}")
+          f"upcCode filled (was empty): {upc_filled}; "
+          f"price/cost/weight updated: {priced}; failures: {failures}")
     return 1 if failures else 0
 
 
