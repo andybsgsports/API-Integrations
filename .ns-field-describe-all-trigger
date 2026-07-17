@@ -1,2 +1,2 @@
-# run: post-refresh-metadata
+# run: describe-per-warehouse-fields
 DRY_RUN=false
