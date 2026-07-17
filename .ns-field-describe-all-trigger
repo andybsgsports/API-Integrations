@@ -1,3 +1,2 @@
-# Trigger file for ns-field-describe-all.yml push-trigger runs.
-# run: live-help-text
+# run: post-refresh-metadata
 DRY_RUN=false
