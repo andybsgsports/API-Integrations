@@ -30,12 +30,14 @@ BASE = "https://api.dc-onesource.com/xml"
 # from not-entitled -- round 2 tries longer-form company names.
 BRAND_SLUGS: dict[str, list[str]] = {
     "Champro": ["CHAMPRO"],
-    "Schutt": ["SCHUTTSPORTSINC", "ADAMSUSA", "SCHUTTSPORT", "SCHUTTATHLETIC"],
-    "Champion": ["CHAMPIONSPORTS", "CHAMPIONSPORTSINC", "CHAMPIONTEAMSPORTS"],
+    # Schutt's parent company is Certor Sports (VICIS is their other brand) --
+    # the price list the user sent is a "Certor FB Pricelist".
+    "Schutt": ["CERTOR", "CERTORSPORTS", "VICIS", "SCHUTTVICIS"],
+    "Champion": ["CHAMPIONSPORTSWEAR", "CHAMPIONUSA", "HANESBRANDS"],
     "United Sports Brand": ["UNITEDSPORTSBRANDS"],
-    "Richardson": ["RICHARDSONCAP", "RICHARDSONCAPS", "RICHARDSONHEADWEAR", "RICHARDSON112"],
+    "Richardson": ["RICHARDSONSPORTSWEAR", "RICHARDSONBRAND", "OUTDOORCAP"],
     "TKC Twin City": ["TWINCITYKNITTING"],
-    "Cap America": ["CAPAMERICAINC", "CAPAMERICAHEADWEAR", "CAPAM"],
+    "Cap America": ["CAPAMERICA1985", "IMPRINTEDHEADWEAR"],
 }
 
 SELLABLE = """<?xml version="1.0" encoding="UTF-8"?>
