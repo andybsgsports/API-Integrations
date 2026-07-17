@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: champro-FULL
-SUPPLIER=champro
-DRY_RUN=false
+# run: usb-DRY
+SUPPLIER=usb
+DRY_RUN=true
 MAX_ITEMS=0
-DEBUG=false
+DEBUG=true
