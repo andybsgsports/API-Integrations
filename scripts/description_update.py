@@ -63,19 +63,12 @@ def _polish_desc(desc: str) -> str:
 
 
 def _copy(name: str, brand: str, style: str, color: str, size: str, desc: str) -> dict:
-    name, desc = _polish_name(name, style), _polish_desc(_clean(desc))
-    variant = " - ".join(x for x in (color, size) if x)
-    disp = f"{name} - {variant}" if variant else name
-    # prefix brand/style only when the name doesn't already carry them
-    prefix = " ".join(
-        t for t in (brand, style) if t and t.lower() not in name.lower()
-    )
-    purch = _clean(f"{prefix} {name}".strip() + (f" - {color}/{size}" if variant else ""))
-    out = {
-        "displayName": disp,
-        "salesDescription": desc or disp,
-        "purchaseDescription": purch,
-    }
+    """Plain product title on all three copy fields — no color/size suffix,
+    no style-number prefix. Variant info already lives in the item name
+    (STYLE-COLOR-SIZE) and the matrix color/size fields, so repeating it in
+    the customer-facing copy is redundant."""
+    name = _polish_name(name, style)
+    out = {"displayName": name, "salesDescription": name, "purchaseDescription": name}
     return {k: v[: MAXLEN[k]] for k, v in out.items() if v}
 
 
@@ -124,12 +117,29 @@ def momentec_copy() -> dict[str, dict]:
 
 def ss_copy() -> dict[str, dict]:
     products_file = Path(ss_config().download_dir) / "products.json"
+    # SKU-level style names are thin ("Colortone"); the style-level title is
+    # the real product name ("Multi-Color Tie-Dyed T-Shirt"). /Styles returns
+    # the whole list in one call; fall back to style names if it fails.
+    titles: dict[str, str] = {}
+    try:
+        from ss_activewear_netsuite.ss_activewear.client import SsClient
+
+        for s in SsClient(ss_config().ss_api).iter_styles():
+            if s.title:
+                titles[str(s.style_id)] = s.title
+        print(f"S&S style titles fetched: {len(titles):,}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"(S&S style titles unavailable, using style names: {str(exc)[:80]})")
+
     out: dict[str, dict] = {}
     for p in json.loads(products_file.read_text(encoding="utf-8")):
-        name = p.get("style_name") or ""
+        brand = p.get("brand_name") or ""
+        name = titles.get(str(p.get("style_id") or "")) or p.get("style_name") or ""
+        if brand and not name.lower().startswith(brand.lower()):
+            name = f"{brand} {name}".strip()
         out[p.get("sku") or ""] = _copy(
-            f"{p.get('brand_name', '')} {name}".strip(), p.get("brand_name") or "",
-            name, p.get("color_name") or "", p.get("size_name") or "",
+            name, brand,
+            p.get("style_name") or "", p.get("color_name") or "", p.get("size_name") or "",
             p.get("description") or "",
         )
     return out
@@ -218,7 +228,7 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             failures += 1
             if failures <= 10:
-                detail = getattr(exc, "detail", "")
+                detail = getattr(exc, "payload", "")
                 print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"

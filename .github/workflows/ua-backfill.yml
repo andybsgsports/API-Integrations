@@ -2,8 +2,13 @@ name: UA Back-fill (write phase)
 
 permissions:
   contents: write
+  issues: write
 
 on:
+  schedule:
+    # Nightly steady-state run (diff-aware); staggered so live
+    # writers never overlap on the same records.
+    - cron: "0 11 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -14,6 +19,10 @@ on:
         description: "Cap on item writes (0 = no cap)"
         required: false
         default: "25"
+      cost_pct:
+        description: "Cost as % of list price (blank = don't write cost)"
+        required: false
+        default: ""
   push:
     branches: ["claude/festive-carson-oj4y8n"]
     paths: [".ua-backfill-trigger"]
@@ -38,15 +47,19 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             get() { grep -E "^$1=" .ua-backfill-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
-            DRY_RUN=$(get DRY_RUN); MAX_ITEMS=$(get MAX_ITEMS)
+            DRY_RUN=$(get DRY_RUN); MAX_ITEMS=$(get MAX_ITEMS); COST_PCT=$(get UA_COST_PCT)
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            DRY_RUN="false"; MAX_ITEMS="0"; COST_PCT="40"   # nightly live run (sandbox-gated)
           else
             DRY_RUN="${{ github.event.inputs.dry_run }}"
             MAX_ITEMS="${{ github.event.inputs.max_items }}"
+            COST_PCT="${{ github.event.inputs.cost_pct }}"
           fi
           [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
           echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
           echo "MAX_ITEMS=${MAX_ITEMS:-25}" >> "$GITHUB_ENV"
-          echo "Resolved: dry_run=$DRY_RUN max_items=${MAX_ITEMS:-25}"
+          echo "UA_COST_PCT=${COST_PCT:-}" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$DRY_RUN max_items=${MAX_ITEMS:-25} cost_pct=${COST_PCT:-<unset>}"
 
       - name: Write .env from repo secrets
         run: |
@@ -69,6 +82,7 @@ jobs:
       - name: Run UA back-fill
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          UA_COST_PCT: ${{ env.UA_COST_PCT }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
         run: python scripts/ua_backfill.py | tee ua_backfill_report.txt
@@ -83,3 +97,12 @@ jobs:
           git commit -m "UA back-fill report (run ${{ github.run_id }}) [skip ci]" || exit 0
           git pull --rebase origin ${{ github.ref_name }} || true
           git push origin HEAD:${{ github.ref_name }} || echo "push failed - report in log only" 
+
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

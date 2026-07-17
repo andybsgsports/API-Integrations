@@ -1,11 +1,18 @@
 """Under Armour write phase (DC OneSource / PromoStandards), runs on CI.
 
 Finds the UA styles present in the catalog by Vendor Name/Code, pulls each
-style's part detail (``getProduct``) and live availability
-(``getInventoryLevels``), matches parts to existing items by GTIN -> upcCode
-then vendorname + matrix options, and writes the ``custitem_ua_*`` set plus
-``upcCode`` where empty. Diff-aware; honors ``SYNC_DRY_RUN``;
-``UPDATE_MAX_ITEMS`` caps writes.
+style's part detail (``getProduct``), live availability
+(``getInventoryLevels``), and pricing (``getConfigurationAndPricing``),
+matches parts to existing items by GTIN -> upcCode then vendorname + matrix
+options, and writes the ``custitem_ua_*`` set plus ``upcCode`` where empty.
+
+Pricing goes to the NATIVE fields, not custom ones: the feed's single
+published price (DC OneSource returns the same number for Net/List/Customer;
+values sit at UA retail price points, i.e. list/MSRP) is written to Base
+Price, and Purchase Price (``cost``) is derived from it via ``UA_COST_PCT``
+(cost = price * pct / 100). Without ``UA_COST_PCT``, only Base Price is
+written. Diff-aware; honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps
+writes.
 """
 
 from __future__ import annotations
@@ -25,6 +32,8 @@ from sanmar_netsuite.transform.sizes import normalize_size
 BASE = "https://api.dc-onesource.com/xml/UNDERARMOR"
 PRODUCT_NS = "http://www.promostandards.org/WSDL/ProductDataService/2.0.0/"
 INV_NS = "http://www.promostandards.org/WSDL/Inventory/2.0.0/"
+PPC_NS = "http://www.promostandards.org/WSDL/PricingAndConfiguration/1.0.0/"
+BASE_PRICE_LEVEL = "1"  # same identifier set reconcile.py uses
 
 FIELDS = [
     "custitem_ua_part_id", "custitem_ua_style", "custitem_ua_gtin",
@@ -104,6 +113,54 @@ def get_parts(key_id: str, key_pw: str, style: str) -> list[dict]:
     return parts
 
 
+def get_style_pricing(key_id: str, key_pw: str, style: str) -> dict[str, float]:
+    """partId -> published price for one style, or {} if pricing unavailable."""
+    fob_body = (
+        f'<ns:GetFobPointsRequest xmlns:ns="{PPC_NS}" '
+        f'xmlns:shar="{PPC_NS}SharedObjects/">'
+        f"<shar:wsVersion>1.0.0</shar:wsVersion><shar:id>{key_id}</shar:id>"
+        f"<shar:password>{key_pw}</shar:password>"
+        f"<shar:productId>{style}</shar:productId>"
+        "<shar:localizationCountry>US</shar:localizationCountry>"
+        "<shar:localizationLanguage>en</shar:localizationLanguage>"
+        "</ns:GetFobPointsRequest>"
+    )
+    try:
+        text = _soap(f"{BASE}/PPC/1.0.0/soap", "getFobPoints", fob_body)
+    except Exception:  # noqa: BLE001
+        return {}
+    fob = re.search(r"<\s*(?:\w+:)?fobId\s*>([^<]+)<", text)
+    if not fob:
+        return {}
+    price_body = (
+        f'<ns:GetConfigurationAndPricingRequest xmlns:ns="{PPC_NS}" '
+        f'xmlns:shar="{PPC_NS}SharedObjects/">'
+        f"<shar:wsVersion>1.0.0</shar:wsVersion><shar:id>{key_id}</shar:id>"
+        f"<shar:password>{key_pw}</shar:password>"
+        f"<shar:productId>{style}</shar:productId>"
+        "<shar:currency>USD</shar:currency>"
+        f"<shar:fobId>{fob.group(1)}</shar:fobId>"
+        "<shar:priceType>List</shar:priceType>"
+        "<shar:localizationCountry>US</shar:localizationCountry>"
+        "<shar:localizationLanguage>en</shar:localizationLanguage>"
+        "<shar:configurationType>Blank</shar:configurationType>"
+        "</ns:GetConfigurationAndPricingRequest>"
+    )
+    try:
+        text = _soap(f"{BASE}/PPC/1.0.0/soap", "getConfigurationAndPricing", price_body)
+    except Exception:  # noqa: BLE001
+        return {}
+    parts = re.findall(r"<\s*(?:\w+:)?partId\s*>([^<]+)<", text)
+    prices = re.findall(r"<\s*(?:\w+:)?price\s*>([^<]+)<", text)
+    out: dict[str, float] = {}
+    for p, pr in zip(parts, prices):
+        try:
+            out[p] = float(pr)
+        except ValueError:
+            continue
+    return out
+
+
 def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, tuple[int, str]]:
     body = (
         f'<ns:GetInventoryLevelsRequest xmlns:ns="{INV_NS}" '
@@ -134,7 +191,7 @@ def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, tuple[int, 
             elif t == "inventoryLocationId" and v:
                 whse.append(v)
         if pid:
-            out[pid] = (qty, "; ".join(whse))
+            out[pid] = (qty, "\n".join(whse))
     return out
 
 
@@ -154,6 +211,11 @@ def main() -> int:
     key_pw = os.environ["DCOS_KEY_PASSWORD"]
     allow_write = not ns_config().sync.dry_run
     max_items = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
+    cost_pct = float(os.environ.get("UA_COST_PCT", "0") or "0")
+    if cost_pct:
+        print(f"cost = list price x {cost_pct}%")
+    else:
+        print("UA_COST_PCT not set -- writing Base Price only, cost untouched")
     client = NetSuiteClient(ns_config().netsuite)
 
     styles = get_sellable_styles(key_id, key_pw)
@@ -170,6 +232,7 @@ def main() -> int:
 
     options = OptionMaps(client)
     matched: dict[str, dict] = {}
+    price_by_rid: dict[str, float] = {}
     for n, style in enumerate(sorted(present), 1):
         try:
             parts = get_parts(key_id, key_pw, style)
@@ -177,6 +240,7 @@ def main() -> int:
             print(f"  getProduct failed for {style}: {str(exc)[:100]}")
             continue
         inv = get_inventory(key_id, key_pw, style)
+        prices = get_style_pricing(key_id, key_pw, style)
         safe = _sql_escape(style)
         rows = client.suiteql(
             f"SELECT id, upccode, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
@@ -210,18 +274,33 @@ def main() -> int:
                     "custitem_ua_qty_available": qty,
                     "custitem_ua_qty_by_whse": whse,
                 }
+                list_price = prices.get(part["partId"])
+                if list_price is not None:
+                    price_by_rid[rid] = list_price
         if n % 50 == 0:
             print(f"  ...{n}/{len(present)} styles processed; matched so far {len(matched):,}")
     print(f"matched items: {len(matched):,}")
 
+    print(f"items with a feed price: {len(price_by_rid):,}")
     ids = sorted(matched)
     cols = ", ".join(FIELDS)
-    considered = written = unchanged = upc_filled = failures = 0
+    considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
+        # Current Base Price per item, for the diff. The pricing table carries
+        # one row per item/level; tolerate the query failing (write anyway).
+        base_by_rid: dict[str, str] = {}
+        try:
+            for r in client.suiteql(
+                f"SELECT item, unitprice FROM pricing "
+                f"WHERE pricelevel = {BASE_PRICE_LEVEL} AND item IN ({in_list})"
+            ):
+                base_by_rid[str(r["item"])] = str(r.get("unitprice") or "")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  (base-price read failed, writing unconditionally: {str(exc)[:80]})")
         for row in client.suiteql(
-            f"SELECT id, upccode, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, {cols} FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             want = {k: v for k, v in matched.get(rid, {}).items()
@@ -230,6 +309,23 @@ def main() -> int:
             gtin = matched.get(rid, {}).get("custitem_ua_gtin", "")
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
+            list_price = price_by_rid.get(rid)
+            if list_price is not None:
+                if not _same(base_by_rid.get(rid), list_price):
+                    body["price"] = {
+                        "items": [
+                            {
+                                "currencyPage": 1,
+                                "priceLevel": {"id": BASE_PRICE_LEVEL},
+                                "quantity": {"value": 0},
+                                "price": list_price,
+                            }
+                        ]
+                    }
+                if cost_pct:
+                    cost = round(list_price * cost_pct / 100.0, 2)
+                    if not _same(row.get("cost"), cost):
+                        body["cost"] = cost
             if not body:
                 unchanged += 1
                 continue
@@ -238,6 +334,8 @@ def main() -> int:
             considered += 1
             if "upcCode" in body:
                 upc_filled += 1
+            if "price" in body or "cost" in body:
+                priced += 1
             if not allow_write:
                 written += 1
                 continue
@@ -247,12 +345,13 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 if failures <= 10:
-                    detail = getattr(exc, "detail", "")
+                    detail = getattr(exc, "payload", "")
                     print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:300]}")
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nua backfill: {verb} {written} item(s); unchanged: {unchanged}; "
-          f"upcCode filled (was empty): {upc_filled}; failures: {failures}")
+          f"upcCode filled (was empty): {upc_filled}; "
+          f"price/cost updated: {priced}; failures: {failures}")
     return 1 if failures else 0
 
 

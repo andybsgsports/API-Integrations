@@ -1,11 +1,9 @@
+cost = list price x 40.0%
 UA sellable styles: 7,448
-styles present by vendorname: 333
-  ...50/333 styles processed; matched so far 260
-  ...100/333 styles processed; matched so far 588
-  ...150/333 styles processed; matched so far 1,074
-  ...200/333 styles processed; matched so far 1,404
-  ...250/333 styles processed; matched so far 1,561
-  ...300/333 styles processed; matched so far 1,561
-matched items: 1,747
+styles present by vendorname: 130
+  ...50/130 styles processed; matched so far 253
+  ...100/130 styles processed; matched so far 352
+matched items: 398
+items with a feed price: 398
 
-ua backfill: wrote 1722 item(s); unchanged: 25; upcCode filled (was empty): 0; failures: 0
+ua backfill: wrote 398 item(s); unchanged: 0; upcCode filled (was empty): 0; price/cost updated: 187; failures: 0

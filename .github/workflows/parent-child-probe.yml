@@ -1,0 +1,47 @@
+name: Parent/Child Field Probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      style:
+        description: "Parent item name/style to inspect"
+        required: false
+        default: "105100"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".parent-child-probe-trigger"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve style to probe
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            STYLE=$(grep -E "^STYLE=" .parent-child-probe-trigger | tail -1 | cut -d= -f2- | tr -d ' \r')
+          else
+            STYLE="${{ github.event.inputs.style }}"
+          fi
+          echo "PARENT_PROBE_STYLE=${STYLE:-105100}" >> "$GITHUB_ENV"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: Probe parent vs children fields (read-only)
+        run: python scripts/parent_child_probe.py

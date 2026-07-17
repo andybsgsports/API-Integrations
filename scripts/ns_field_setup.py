@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 
+from warehouse_fields import SANMAR_WHSE_FIELDS, SS_WHSE_FIELDS
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
@@ -69,11 +71,18 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_ua_part_id", "UA Part ID", "TEXT", ""),
     ("custitem_ua_style", "UA Style", "TEXT", ""),
     ("custitem_ua_gtin", "UA GTIN", "TEXT", ""),
-    ("custitem_ua_msrp", "UA MSRP", "CURRENCY", ""),
-    ("custitem_ua_cost", "UA Cost", "CURRENCY", ""),
+    # UA MSRP/Cost intentionally absent: pricing lives on the native fields
+    # (Base Price = UA list price, Purchase Price/cost = UA net cost).
     ("custitem_ua_qty_available", "UA Qty Available", "INTEGER", ""),
     ("custitem_ua_qty_by_whse", "UA Qty By Warehouse", "TEXTAREA", ""),
     ("custitem_ua_front_image_url", "UA Front Image URL", "URL", ""),
+]
+
+# Per-warehouse quantity columns (user-requested): one INTEGER field per
+# SanMar / S&S warehouse, from the shared maps in warehouse_fields.py.
+FIELDS += [
+    (sid, label, "INTEGER", "")
+    for sid, label in list(SANMAR_WHSE_FIELDS.values()) + list(SS_WHSE_FIELDS.values())
 ]
 
 

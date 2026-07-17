@@ -1,0 +1,293 @@
+token,item_count,final_name,status,notes
+AthleticHeather,67,Athletic Heather,auto,abbrev
+Si,40,Silver,user,
+Roy,27,Royal,user,
+KG,26,Kelly Green,user,
+DarkGreyHeather,25,Dark Grey Heather,auto,abbrev
+Nepi,25,Neon Pink,auto,heuristic
+Grfr,25,Grey Frost,user,
+Sc,23,Scarlet,user,
+Lm,23,Lime,inferred,
+Bk/Wh,21,Black/White,auto,compound
+Sagr,20,Safety Green,auto,heuristic
+Athletic Kelly,20,Athletic Kelly Green,auto,abbrev
+Whi,19,White,inferred,
+GraphiteHeather,19,Graphite Heather,auto,abbrev
+Lthtgr,19,Light Grey Heather,user,
+Na/Wh,18,Navy/White,auto,compound
+Wh/Na,17,White/Navy,auto,compound
+Gp,17,Graphite,inferred,
+Crd,17,Cardinal,user,
+Rofr,17,Royal Frost,auto,heuristic
+HeatherCardinal,16,Heather Cardinal,auto,abbrev
+Saf Orange/Refl,16,Safety Orange/Reflective,auto,abbrev
+Saf Yellow/Refl,16,Safety Yellow/Reflective,auto,abbrev
+Bk/Ch,16,Black/Charcoal,auto,compound
+True Navy/NaHe,16,True Navy/True Navy Heather,auto,abbrev
+Sg,15,Sport Grey,inferred,
+Mdgr,15,M. Gray,auto,abbrev
+NA/WH,14,Navy/White,auto,compound
+Gr/Na,14,Grey/Navy,auto,abbrev
+Chrcoal Heather,13,Charcoal Heather,auto,abbrev
+Gp/Bk,13,Graphite/Black,auto,abbrev
+Mgh,12,Medium Grey Heather,auto,abbrev
+Bkfr,12,Black Frost,inferred,
+DarkHeatherGrey,12,Dark Heather Grey,auto,abbrev
+Forest Green/Wh,12,Forest Green/White,auto,abbrev
+Pi,11,Pink,inferred,
+Nahea,11,Navy Heather,inferred,
+Cb/Wh,11,Columbia Blue/White,auto,abbrev
+Airy Bl Heather,11,Airy Blue Heather,auto,abbrev
+QuietShaGrey He,11,Quiet Shade Grey Heather,auto,abbrev
+Ca,10,Cardinal,auto,abbrev
+Saph,10,Sapphire,inferred,
+Carobl,10,Carolina Blue,inferred,
+WH/NA,10,White/Navy,auto,compound
+W/R/R,10,White/Royal/Royal,auto,abbrev
+Dkgrht,10,Dark Grey Heather,auto,abbrev
+GridIron Silver,10,Grid Iron Silver,auto,abbrev
+Rd/Bk,9,Red/Black,auto,abbrev
+Sfpi,9,Safety Pink,inferred,
+Kg/Wh,9,Kelly Green/White,auto,abbrev
+Wh/Rd,9,White/Red,auto,abbrev
+Bk/Gr,9,Black/Grey,auto,abbrev
+Elbl,9,Electric Blue,auto,abbrev
+Team Purple Hea,9,Team Purple Heather,auto,abbrev
+Neor,9,Neon Orange,auto,abbrev
+Trna,8,True Navy,auto,abbrev
+Modgrey,8,Mod Grey,auto,abbrev
+Ameth,8,Amethyst,auto,prefix
+Sfor,8,Safety Orange,auto,abbrev
+Grey 3 Melange,8,Grey Three Melange,auto,abbrev
+Wh/Sc,8,White/Scarlet,auto,abbrev
+Heather Neptune,8,Heathered Neptune Blue,auto,abbrev
+Grhtr,8,Grey Heather,inferred,
+Grey-Black Elec,8,Grey-Black Electric,auto,abbrev
+BK/AN/WH,8,Black/Anthracite/White,auto,abbrev
+Txor,8,Texas Orange,inferred,
+VintageHe/Black,8,Vintage Heather/Black,auto,abbrev
+Team KellyGreen,7,Team Kelly Green,auto,abbrev
+Bk/Gd,7,Black/Gold,auto,compound
+Rowh,7,Royal/White,inferred,
+MilGreenHe,7,Military Green Heather,auto,abbrev
+Focus Bl Melang,7,Focus Blue Melange,auto,abbrev
+Green Ox Melang,7,Green Oxide Melange,auto,abbrev
+Solid Athl Grey,7,Solid Athletic Grey,auto,abbrev
+Rohtr,7,Royal Heather,auto,abbrev
+Gry,7,Grey,auto,abbrev
+LiGrHe,7,Light Grey Heather,auto,abbrev
+TrueNavyHeather,7,True Navy Heather,auto,abbrev
+Neye,7,Neon Yellow,inferred,
+Jtbk,7,Jet Black,inferred,
+Black Heat Camo,7,Black Heather Camo,auto,abbrev
+Heath Navy Camo,7,Heather Navy Camo,auto,abbrev
+ConGryHtr,7,Concrete Grey Heather,auto,abbrev
+Charcoal Gr Hea,7,Charcoal Grey Heather,auto,abbrev
+Ltbl,6,Light Blue,inferred,
+Hgr,6,Heather Grey,inferred,
+Sftyor,6,Safety Orange,auto,abbrev
+Sc/Black/White,6,Scarlet/Black/White,auto,abbrev
+Sigr,6,Silver Grey,auto,heuristic
+Grey/Na,6,Grey/Navy,auto,abbrev
+Athltic Grey TB,6,Athletic Grey Triblend,auto,abbrev
+Bk/Rd,6,Black/Red,auto,compound
+Nafr,6,Navy Frost,auto,heuristic
+Black Charco He,6,Black Charcoal Heather,auto,abbrev
+Grh,6,Grey Heather,auto,abbrev
+Brrd,6,Bright Red,inferred,
+Ultramarine,6,Ultramarine Blue,auto,abbrev
+BerylGrnHeather,6,Beryl Green Heather,auto,abbrev
+BrillBlueHeathr,6,Brilliant Blue Heather,auto,abbrev
+Opal Bl Heather,6,Opal Blue Heather,auto,abbrev
+QuietShGrHe/Bk,6,Quiet Shade Grey Heather/Black,auto,abbrev
+St,5,Stealth,inferred_low,
+Castlerock/BK,5,Castlerock/Black,auto,abbrev
+Cstlrk,5,Castlerock,inferred,
+Sygn,5,Safety Green,auto,abbrev
+Cardnl Metallic,5,Cardinal Metallic,auto,abbrev
+Mdg,5,Mdgry,auto,prefix
+Grhe,5,Grey Heather,inferred,
+Ox,5,Oxford,inferred,
+Bkht,5,Black Heahter,auto,abbrev
+Unrd,5,University Red,inferred,
+Wh/Ro,5,White/Royal,auto,compound
+Ch/Bk,5,Charcoal/Black,auto,abbrev
+Li Wa Denim,5,Light Washed Denim,auto,abbrev
+Ltgr,5,Light Grey,auto,abbrev
+Heathr Charcoal,5,Heathered Charcoal,auto,abbrev
+Bk/Wh/Sc,5,Black/White/Scarlet,auto,abbrev
+Light Hthr Grey,5,Light Heather Gray,auto,abbrev
+MGH,5,Medium Grey Heather,auto,abbrev
+Crdrd,5,Cardinal Red,inferred,
+Lt Blue,5,Light Blue,auto,abbrev
+Wh/Pu,5,White/Purple,auto,abbrev
+Ma/Wh,5,Maroon/White,inferred,
+Black-Large/X,4,Black,artifact,size tail; real color: Black
+White-Youth X,4,White,artifact,size tail; real color: White
+Maroon/GR/WH,4,Maroon/Gray/White,auto,abbrev
+White/GR/BK,4,White/Grey/Black,auto,abbrev
+CH/AH,4,Carbon Heather/Athletic Heather,auto,abbrev
+Sublimation-Youth X,4,Sublimation,artifact,size tail; real color: Sublimation
+Hp,4,Hot Pink,auto,abbrev
+BK/RD,4,Black/Red,auto,compound
+CB/Graphite,4,Columbia Blue/Graphite,auto,abbrev
+Maroon/Gp,4,Maroon/Graphite,auto,abbrev
+Red/Gp,4,Red/Graphite,auto,abbrev
+Power Red/Gr/Wh,4,Team Power Red/Clear Grey/White,auto,abbrev
+Black/Cstlerock,4,Black/Castlerock,auto,abbrev
+Mahtr,4,Maroon Heather,inferred,
+Bor,4,Burnt Orange,inferred,
+Gr/Wh,4,Grey/White,auto,abbrev
+Grtri,4,Grey Triblend,auto,abbrev
+Hrd,4,Heather Red,auto,abbrev
+BK/GD,4,Black/Gold,auto,compound
+Rdfr,4,Red Frost,inferred,
+Na/Cb,4,Navy/Columbia Blue,auto,abbrev
+Pink Rush Heath,4,Pink Rush Heather,auto,abbrev
+Red/Royal/Wht,4,Red/Royal/White,auto,abbrev
+Ne Or,4,Neon Orange,inferred,
+Rd/W,4,Red/White,inferred,
+Vg/Bk,4,Vegas Gold/Black,user_new_color,user-approved; value to be ADDED to the color list
+ForGrn/White,4,Forrest Green/White,auto,abbrev
+Or/Wh,4,Orange/White,auto,abbrev
+Bk/Bk/Wh,3,Black/Black/White,auto,abbrev
+Red-Youth X,3,Red,artifact,size tail; real color: Red
+Lb,3,Light Blue,auto,abbrev
+Alabaster/Black,3,Alabaster/Vintage Black,auto,abbrev
+Bk/Sc,3,Black/Scarlet,auto,compound
+Bkh,3,Bkhe,auto,prefix
+SUMMIT,3,Summit White,auto,prefix
+Gr/Bk,3,Grey/Black,auto,abbrev
+Gphtr,3,Graphite Heather,auto,abbrev
+Youth X,3,,artifact,size tail; real color: (none)
+Red/Buffalo,3,Red/Black Buffalo Check,auto,abbrev
+Navy-Large/X,3,Navy,artifact,size tail; real color: Navy
+MeGrHe,3,Meld Grey Heather,auto,abbrev
+Wh/Fg,3,White/Forest Green,auto,abbrev
+Black-Youth X,2,Black,artifact,size tail; real color: Black
+Navy-Youth X,2,Navy,artifact,size tail; real color: Navy
+Royal-Youth X,2,Royal,artifact,size tail; real color: Royal
+Matte Mar,2,Matte Maroon,auto,prefix
+Elem Agua Black,2,Elements Agua Blackfin,auto,abbrev
+Mnt,2,Mint,inferred,
+Hpu,2,Heather Purple,auto,abbrev
+White/Grey/Blac,2,White/Grey/Black,auto,prefix
+Bk/Gr/Wh,2,Black/Grey/White,auto,abbrev
+Black-2X,2,Black,artifact,size tail; real color: Black
+Vint Turquoise,2,Vintage Turquoise,auto,abbrev
+Royal-Large/X,2,Royal,artifact,size tail; real color: Royal
+White-Large/X,2,White,artifact,size tail; real color: White
+Sc/Wh/Bk,2,Scarlet/White/Black,auto,abbrev
+GreySmokeHeathe,2,Grey Smoke Heather,auto,abbrev
+Diblu,2,,unresolved,
+DSH,2,Deep Smoke Heather,auto,abbrev
+PAR BLUE,2,,unresolved,
+Roh,2,Royal Heather,auto,abbrev
+VIHE/BK,2,Vintage Heather/Black,inferred,
+Pirht,2,,unresolved,
+Sy,2,Sy/Gp,auto,prefix
+WH/FG,2,White/Forest Green,auto,abbrev
+Dk Gr,2,Dark Grey,auto,abbrev
+Pu/Wh,2,Purple/White,inferred,
+Gr/Rd,2,Grey/Red,auto,abbrev
+Youth 2X,2,,artifact,size tail; real color: (none)
+Bk/Wh/Bk,1,Black/White/Black,auto,abbrev
+Blk/NeonOrg/Blk,1,Black/Neon Orange/Black,auto,abbrev
+Blk/NeYlw/Blk,1,Black/Neon Yellow/Black,auto,abbrev
+ColBlu/Wt/ColB,1,Columbia Blue/White/Columbia Blue,auto,abbrev
+Gra/NeGrn/Gra,1,Graphite/ Neon Green/Graphite,auto,abbrev
+Grey/Beige/Gold,1,Heather Grey/Beige/Amber Gold,auto,abbrev
+HG/Beige/OcnBlu,1,Heather Grey/Beige/Ocean Blue,auto,abbrev
+HG/LtChar/OcBlu,1,Heather Grey/Light Charcoal/Ocean Blue,auto,abbrev
+HG/LtChar/Red,1,Heather Grey/Light Charcoal/Varsity Red,auto,abbrev
+Khak/Brwn/Khak,1,Khaki/Brown/Khaki,auto,abbrev
+Maroon/Wt/Marn,1,Maroon/White/Maroon,auto,abbrev
+Gp/Bk-Large/X,1,,artifact,size tail; real color: Gp/Bk
+Columbia Blue-Youth X,1,Columbia Blue,artifact,size tail; real color: Columbia Blue
+Forest Green-Youth X,1,Forest Green,artifact,size tail; real color: Forest Green
+Mod Gray-Youth X,1,Mod Gray,artifact,size tail; real color: Mod Gray
+Orange-Youth X,1,Orange,artifact,size tail; real color: Orange
+Purple-Youth X,1,Purple,artifact,size tail; real color: Purple
+Gry/Wht/Blk-Large/X,1,,artifact,size tail; real color: Gry/Wht/Blk
+Antique Cherry,1,Antique Cherry Red,auto,abbrev
+Char,1,Charcoal,auto,abbrev
+Crnslk,1,Cornsilk,inferred,
+Skbl,1,Sky Blue,auto,heuristic
+Vapu,1,Varsity Purple,auto,heuristic
+White-2x,1,White,artifact,size tail; real color: White
+Gd/Ro,1,Gold/Royal,auto,abbrev
+Ca/Ro,1,Cardinal/Royal,user_new_color,user-approved; value to be ADDED to the color list
+Ca/Bk,1,Cardinal/Black,user_new_color,user-approved; value to be ADDED to the color list
+Sc/Wh,1,Scarlet/White,auto,compound
+BK/CHHE,1,Black/Charcoal Heather,inferred,
+Charcoal Healther,1,Charcoal Heather,inferred,
+Nat,1,Natural,inferred,
+NAT,1,Natural,inferred,
+Bk/Wh/Rd-Large/X,1,,artifact,size tail; real color: Bk/Wh/Rd
+Bk/Wh/Rd,1,Black/White/Red,auto,abbrev
+Graphite/NeYe-Large/X,1,,artifact,size tail; real color: Graphite/NeYe
+Graphite/NeYe,1,Graphite/Neon Yellow/Graphite,auto,abbrev
+Vg,1,Vg/Black,auto,prefix
+Wh/Rd-Large/X,1,,artifact,size tail; real color: Wh/Rd
+Navy-2X,1,Navy,artifact,size tail; real color: Navy
+Nv/Wh,1,Navy/White,auto,abbrev
+StoneWash Denim,1,Stone Wash Denim,auto,abbrev
+Vntny,1,Vintage Navy,auto,abbrev
+Carolina Mist,1,Carolina Blue Mist,auto,abbrev
+Dark Green-Large/X,1,Dark Green,artifact,size tail; real color: Dark Green
+Ox/Navy2X,1,Ox/Navy,artifact,size tail; real color: Ox/Navy
+Gr3,1,Grey Three,inferred,
+Na/Gr,1,Navy/Grey,auto,abbrev
+-Navy,1,Navy,user,
+WH/RO,1,White/Royal,auto,compound
+SOBLACK,1,Solid Black,inferred_low,
+Asph,1,Asphalt,auto,prefix
+Wh/Na-Youth X,1,,artifact,size tail; real color: Wh/Na
+Grey-Youth X,1,Grey,artifact,size tail; real color: Grey
+Royal/Crb,1,Royal/Carbon,auto,abbrev
+Scar/Wht/Ryl,1,Scarlet/White/Royal,auto,abbrev
+Hech,1,Heathered Charcoal,auto,heuristic
+GeraniumHeather,1,Geranium Heather,auto,abbrev
+Vbl,1,Valor Blue,auto,abbrev
+Royal-2X,1,Royal,artifact,size tail; real color: Royal
+Bk/Or,1,Black/Orange,inferred,
+Large/X,1,,artifact,size tail; real color: (none)
+WH/BK/BK,1,White/Black/Black,auto,compound
+Rbn,1,,unresolved,
+Naht,1,Navy Heather,inferred,
+GRHE,1,Grey Heather,inferred,
+Pond Blhe,1,Pond Blue Heather,user,
+Bk/Ro,1,Black/Royal,auto,abbrev
+Sc-Large/X,1,Scarlet,artifact,size tail; real color: Scarlet
+Bk/St,1,Black/Steel,auto,abbrev
+White/Grey-Large/X,1,White/Grey,artifact,size tail; real color: White/Grey
+Bk/Gp,1,Black/Graphite,auto,abbrev
+Na/Gp,1,Navy/Graphite,auto,abbrev
+Bk/Gp/Wh,1,Black/Graphite/White,auto,abbrev
+Na/Gr/Wh,1,Navy/Grey/White,auto,abbrev
+Ro/Bk/Wh,1,Royal/Black/White,auto,abbrev
+Brgo,1,Bright Gold,auto,heuristic
+True RoyalX,1,True Royal,user,
+GR/BKBuffalo,1,Grey/Black Buffalo Check,auto,abbrev
+Grey-Large/X,1,Grey,artifact,size tail; real color: Grey
+White/Royal-Large/X,1,White/Royal,artifact,size tail; real color: White/Royal
+Wh/Na-Large/X,1,,artifact,size tail; real color: Wh/Na
+Blk/ColBlu-Large/X,1,,artifact,size tail; real color: Blk/ColBlu
+Cb/Wh-Large/X,1,,artifact,size tail; real color: Cb/Wh
+Wh/Dg-Large/X,1,,artifact,size tail; real color: Wh/Dg
+Carolina Blue-6X,1,Carolina Blue,artifact,size tail; real color: Carolina Blue
+Irgr,1,Iron Grey,inferred,
+Cb/Na,1,Columbia Blue/Navy,auto,abbrev
+DKHEGR/BK,1,Dark Heather Grey/Black,auto,abbrev
+"Green-1.5"" X 42""",1,Green,artifact,size tail; real color: Green
+Qsg-Large/X,1,,artifact,size tail; real color: Qsg
+Scooter Red,1,Scooter Red Heather,auto,abbrev
+Wh/Urd,1,White/University Red,user_new_color,user-approved; value to be ADDED to the color list
+Powder Blue/BK,1,Powder Blue/Black,auto,abbrev
+Mbk-Large/X,1,Mbk,artifact,size tail; real color: Mbk
+Con Grey-Youth X,1,Con Grey,artifact,size tail; real color: Con Grey
+KG-Youth X,1,Kelly Green,artifact,size tail; real color: Kelly Green
+Lm-Youth X,1,Lime,artifact,size tail; real color: Lime
+Maroon-Youth X,1,Maroon,artifact,size tail; real color: Maroon
+Txor-Youth X,1,Texas Orange,artifact,size tail; real color: Texas Orange
+Dprd,1,Deep Red,inferred,

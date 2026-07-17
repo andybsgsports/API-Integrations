@@ -1,5 +1,3 @@
-# run 6 — create only the missing UA fields via SOAP (skip existing)
+# run: create-per-warehouse-qty-fields
 FIELD_CREATE=false
 SOAP_CREATE=true
-SOAP_DELETE_IDS=
-VENDOR_PROBE=false

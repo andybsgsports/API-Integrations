@@ -7,15 +7,22 @@ Match priority per SKU:
 2. **vendorname + option ids** — style -> items via Vendor Name/Code, child by
    matrix color/size (same machinery as the SanMar/Momentec matchers).
 
-Writes the ``custitem_ss_*`` set and fills ``upcCode`` only where empty.
-Diff-aware; honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
+Writes the ``custitem_ss_*`` set and fills ``upcCode`` only where empty,
+plus the NATIVE money/shipping fields: Base Price = S&S MSRP, Purchase
+Price (``cost``) = S&S customer price (our account cost; falls back to
+piece price), ``weight`` = S&S weight. Diff-aware; honors ``SYNC_DRY_RUN``;
+``UPDATE_MAX_ITEMS`` caps writes.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
+
+from native_pricing import add_native_diffs, read_base_prices
+from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
@@ -23,6 +30,7 @@ from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 from ss_activewear_netsuite.config import get_config as ss_config
+from ss_activewear_netsuite.ss_activewear.client import SsClient
 
 FIELDS = [
     "custitem_ss_sku", "custitem_ss_style_id", "custitem_ss_style",
@@ -33,7 +41,11 @@ FIELDS = [
     "custitem_ss_qty_available", "custitem_ss_qty_by_whse",
     "custitem_ss_is_closeout", "custitem_ss_is_discontinued",
     "custitem_ss_front_image_url", "custitem_ss_on_model_image_url",
-]
+] + SS_QTY_FIELDS
+
+# Feed warehouseAbbr values with no dedicated field, collected during payload
+# builds and reported once at the end (they still land in the text breakdown).
+UNKNOWN_WHSE: set[str] = set()
 
 
 def _put_into(want: dict[str, object]):
@@ -67,13 +79,20 @@ def _abs_url(path: str | None) -> str | None:
     return "https://cdn.ssactivewear.com/" + v.lstrip("/")
 
 
-def payload_for(p: dict) -> dict[str, object]:
+def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, object]:
+    """Field payload for one product. ``whse_rows`` is the per-warehouse
+    breakdown from the ``/Inventory`` endpoint (the products snapshot itself
+    never carries one -- its ``warehouses`` list is always empty)."""
     want: dict[str, object] = {}
     put = _put_into(want)
-    whse = "; ".join(
-        f"{w.get('warehouseAbbr', '')}: {w.get('qty', 0)}"
-        for w in (p.get("warehouses") or [])
-    )
+    rows = whse_rows if whse_rows is not None else (p.get("warehouses") or [])
+    # One warehouse per line, zero-stock locations hidden (readability).
+    lines = [
+        f"{w.get('warehouseAbbr', '')}: {int(w.get('qty') or 0):,}"
+        for w in rows
+        if int(w.get("qty") or 0)
+    ]
+    whse = "\n".join(lines) if lines else ("0 at all warehouses" if rows else "")
     def num(key):
         v = p.get(key)
         try:
@@ -102,7 +121,67 @@ def payload_for(p: dict) -> dict[str, object]:
     want["custitem_ss_is_discontinued"] = bool(p.get("is_discontinued"))
     put("custitem_ss_front_image_url", _abs_url(p.get("front_image_url")))
     put("custitem_ss_on_model_image_url", _abs_url(p.get("on_model_image_url")))
+    if whse_rows is not None:
+        # Zero-fill every column so a warehouse that drops out of the feed
+        # clears to 0 instead of keeping yesterday's count.
+        qtys = {sid: 0 for sid in SS_QTY_FIELDS}
+        for w in whse_rows:
+            abbr = str(w.get("warehouseAbbr") or "").strip()
+            hit = SS_WHSE_FIELDS.get(abbr)
+            if hit:
+                qtys[hit[0]] += int(w.get("qty") or 0)
+            elif abbr:
+                UNKNOWN_WHSE.add(abbr)
+        want.update(qtys)
     return want
+
+
+def natives_for(p: dict) -> tuple:
+    """(base price, cost, weight) for the native-field writes."""
+    def num(key):
+        v = p.get(key)
+        try:
+            return None if v is None else float(v)
+        except (TypeError, ValueError):
+            return None
+    return (num("msrp"), num("customer_price") or num("piece_price"), num("weight"))
+
+
+def fetch_warehouses(skus: list[str]) -> dict[str, list[dict]]:
+    """sku -> raw per-warehouse rows via batched ``/Inventory`` calls.
+
+    Paced between batches to stay under S&S's throttle (the client already
+    retries 429/5xx); a failed batch falls back to per-SKU fetches so one bad
+    identifier can't drop 39 good ones.
+    """
+    ss = SsClient(ss_config().ss_api)
+    out: dict[str, list[dict]] = {}
+
+    def keep(inv) -> None:
+        if inv is not None and inv.sku:
+            out[inv.sku] = [
+                {"warehouseAbbr": w.warehouse_abbr, "qty": w.qty}
+                for w in inv.warehouses
+            ]
+
+    step = SsClient.INVENTORY_BATCH_SIZE
+    for i in range(0, len(skus), step):
+        batch = skus[i : i + step]
+        try:
+            for inv in ss.iter_inventory(batch):
+                keep(inv)
+        except Exception:  # noqa: BLE001 - batch failed; retry singly
+            for sku in batch:
+                try:
+                    keep(ss.get_inventory(sku))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"  inventory fetch failed for {sku}: {str(exc)[:100]}")
+        done = min(i + step, len(skus))
+        if done % 400 < step or done == len(skus):
+            print(f"  warehouse breakdown fetched for {done}/{len(skus)} SKUs "
+                  f"({len(out)} returned)")
+        time.sleep(0.2)
+    return out
 
 
 def main() -> int:
@@ -182,25 +261,36 @@ def main() -> int:
     print(f"vendorname+option matches: {opt_matches:,} items")
     print(f"total matched items: {len(matched):,}")
 
+    # -- per-warehouse availability (only /Inventory carries the breakdown)
+    whse_by_sku = fetch_warehouses(
+        sorted({str(p.get("sku")) for p in matched.values() if p.get("sku")})
+    )
+
     # -- write phase (diff-aware)
     ids = sorted(matched)
     cols = ", ".join(FIELDS)
-    considered = written = unchanged = upc_filled = failures = 0
+    considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 200):
         chunk = ids[i : i + 200]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
+        base_by_rid = read_base_prices(client, in_list)
         for row in client.suiteql(
-            f"SELECT id, upccode, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             p = matched.get(rid)
             if p is None:
                 continue
-            want = payload_for(p)
+            want = payload_for(p, whse_by_sku.get(str(p.get("sku") or "")))
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             gtin = (p.get("gtin") or "").strip()
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
+            price, cost, weight = natives_for(p)
+            add_native_diffs(
+                body, row, base_by_rid, rid,
+                price=price, cost=cost, weight=weight, same=_same,
+            )
             if not body:
                 unchanged += 1
                 continue
@@ -209,6 +299,8 @@ def main() -> int:
             considered += 1
             if "upcCode" in body:
                 upc_filled += 1
+            if "price" in body or "cost" in body or "weight" in body:
+                priced += 1
             if not allow_write:
                 written += 1
                 continue
@@ -218,12 +310,16 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 if failures <= 10:
-                    detail = getattr(exc, "detail", "") or getattr(exc, "args", "")
+                    detail = getattr(exc, "payload", "") or getattr(exc, "args", "")
                     print(f"  FAILED item {rid}: {str(exc)[:120]} :: {str(detail)[:400]}")
 
+    if UNKNOWN_WHSE:
+        print(f"WARNING: feed warehouse code(s) with no dedicated field "
+              f"(still in the text breakdown): {sorted(UNKNOWN_WHSE)}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
-          f"upcCode filled (was empty): {upc_filled}; failures: {failures}")
+          f"upcCode filled (was empty): {upc_filled}; "
+          f"price/cost/weight updated: {priced}; failures: {failures}")
     return 1 if failures else 0
 
 

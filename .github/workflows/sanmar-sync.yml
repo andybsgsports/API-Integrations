@@ -1,10 +1,11 @@
-name: SanMar Nightly Sync
+name: SanMar Nightly Sync (legacy, manual-only)
 
+# LEGACY: superseded by sanmar-field-update.yml (nightly enrichment) and
+# sanmar-backfill.yml (adoption). Its nightly schedule is disabled -- this
+# writer predates the adopt-existing-items architecture and its runs had to
+# be cancelled by hand every morning. Manual dispatch is kept for emergencies.
 on:
-  schedule:
-    # 09:00 UTC = 2am PST / 1am PDT — after SanMar's nightly files land (6am PST).
-    - cron: "0 9 * * *"
-  workflow_dispatch: {} # manual "Run workflow" button, for testing
+  workflow_dispatch: {} # manual "Run workflow" button only
 
 jobs:
   sync:

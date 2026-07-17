@@ -1,0 +1,38 @@
+=== catalog coverage ===
+items total:                174,624
+items active:               174,526
+supplier-matched:           21,221
+supplier-matched active:    21,221
+UNMATCHED active:           153,305 (87.8% of active)
+
+=== unmatched active items by type ===
+  (breakdown query failed: 500 Internal Server Error)
+
+=== top unmatched active items by sales activity (last 12 months) ===
+  (sales-activity query unavailable: NetSuite 400: Bad Request)
+  -- falling back: sample of unmatched active inventory items --
+  #21: Youth Belt
+  #21-Black: Youth Belt
+  #21-Kelly Green: Youth Belt
+  #21-Navy: Youth Belt
+  #21-Orange: Youth Belt
+  #21-Purple: Youth Belt
+  #21-Royal: Youth Belt
+  #21-Sc: Youth Belt
+  #21-Vg: Youth Belt
+  #21-White: Youth Belt
+  #23: Youth Belt
+  #23-1 1/4": Youth Belt
+  #23-Black-1 1/4": Youth Belt
+  #23-Columbia Blue-1 1/4": Youth Belt
+  #23-Gold-1 1/4": Youth Belt
+  #23-Orange-1 1/4": Youth Belt
+  #23-Red-1 1/4": Youth Belt
+  #23-Royal-1 1/4": Youth Belt
+  #23-Si-1 1/4": Youth Belt
+  #42: Custom Back Stop Netting
+  #Num-Red-1.5": 1.5" Die Cut Numbers - 1 Color
+  ++: Misc. Merchandise Not Taxed
+  00000988764-Grey-36: Baseball Pant Relaxed Fit
+  000100: Sunglasses
+  00052000058550: Gatorade 9 Gallon Cooler

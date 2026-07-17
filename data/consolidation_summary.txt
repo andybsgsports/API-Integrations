@@ -1,0 +1,5 @@
+sandbox color values: 4,823; distinct names: 4,718
+names with duplicates in sandbox: 81
+duplicate values to retire: 105 (keeping 81 canonicals)
+items needing repointing: 0
+wrote /home/runner/work/API-Integrations/API-Integrations/data/color_consolidation_plan.csv

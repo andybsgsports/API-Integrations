@@ -15,7 +15,7 @@ delegated to the caller.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from decimal import Decimal
 from typing import Any
 
@@ -114,7 +114,9 @@ def product_from_payload(row: dict[str, Any]) -> SsProduct:
         map_price=_decimal(row.get("mapPrice")),
         msrp=_decimal(row.get("msrp")),
         qty_available=_int(row.get("qty")),
-        warehouses=_warehouses(row.get("warehouseAvailability")),
+        # ``/Products`` (filtered) keys this "warehouseAvailability"; the
+        # per-SKU ``/Inventory/{sku}`` endpoint keys the same shape "warehouses".
+        warehouses=_warehouses(row.get("warehouseAvailability") or row.get("warehouses")),
         is_closeout=_bool(row.get("isCloseout")),
         is_discontinued=_bool(row.get("isDiscontinued")),
         front_image_url=str(row.get("colorFrontImage") or row.get("frontImage") or "").strip(),
@@ -250,3 +252,30 @@ class SsClient:
         if isinstance(data, list):
             return product_from_payload(data[0]) if data else None
         return product_from_payload(data)
+
+    #: How many SKUs to request per batched ``/Inventory`` call.
+    INVENTORY_BATCH_SIZE = 40
+
+    def iter_inventory(self, skus: Iterable[str]) -> Iterator[SsProduct]:
+        """Stream inventory records (incl. the per-warehouse breakdown) for
+        the given SKUs via batched ``/Inventory/{id,id,...}`` calls.
+
+        ``/Inventory`` is the only S&S endpoint that returns ``warehouses``;
+        the filtered ``/Products`` pull never includes a per-warehouse
+        breakdown (confirmed empirically). Only sku/gtin/style/warehouses
+        are populated on the yielded products.
+        """
+        batch: list[str] = []
+        for sku in skus:
+            if not sku:
+                continue
+            batch.append(sku)
+            if len(batch) >= self.INVENTORY_BATCH_SIZE:
+                yield from self._inventory_for(batch)
+                batch = []
+        if batch:
+            yield from self._inventory_for(batch)
+
+    def _inventory_for(self, skus: list[str]) -> Iterator[SsProduct]:
+        data = self._get("/Inventory/" + ",".join(skus))
+        yield from self._parse_rows(data, product_from_payload)

@@ -1,3 +1,3 @@
-# run 3 — LIVE FULL back-fill (authorized; smoke wrote 25/25 clean)
+# run: post-refresh-FULL
 DRY_RUN=false
 MAX_ITEMS=0

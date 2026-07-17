@@ -1,0 +1,4 @@
+# Trigger file for atlas-image-backfill.yml push-trigger runs.
+# run: post-refresh-FULL
+DRY_RUN=false
+MAX_ITEMS=0

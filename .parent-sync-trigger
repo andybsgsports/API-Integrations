@@ -1,0 +1,4 @@
+# Trigger file for parent-sync.yml push-trigger runs.
+# run: post-refresh-full-run
+DRY_RUN=false
+MAX_ITEMS=0
