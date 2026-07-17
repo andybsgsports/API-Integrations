@@ -55,34 +55,53 @@ def collect(client: NetSuiteClient, field: str, label: str, sibling: str) -> Non
         print(f"  {code!r:<28} appears on {n:,} items")
 
 
-def probe_ss_live() -> None:
-    """Hit the S&S API directly (the same filtered batch endpoint ss_backfill.py
-    uses) for a handful of styles and print the raw warehouseAvailability the
-    API actually returns -- resolves whether "0 items with data" in the
-    sandbox means the write is broken, or the feed itself has no per-warehouse
-    breakdown on that endpoint."""
-    print("\n=== S&S live API check (filtered /Products?styleid= endpoint) ===")
-    ss = SsClient(ss_config().ss_api)
-    styles = []
-    for s in ss.iter_styles():
-        if s.style_id:
-            styles.append(s.style_id)
-        if len(styles) >= 3:
-            break
-    print(f"probing styleIDs: {styles}")
-    skus = []
-    seen = 0
-    for p in ss._products_for_styles(styles):
-        if seen >= 5:
-            break
-        seen += 1
-        skus.append(p.sku)
-        print(f"  sku={p.sku} qty_available={p.qty_available} warehouses={p.warehouses!r}")
+def probe_ss_live(client: NetSuiteClient, sample_size: int = 150) -> None:
+    """The filtered /Products?styleid= batch endpoint (what ss_backfill.py uses
+    for everything else) never returns per-warehouse detail -- confirmed
+    empirically, aggregate qty is real but warehouses=() every time. The
+    per-SKU /Inventory/{sku} endpoint DOES carry it, under the key
+    "warehouses" (not "warehouseAvailability" like /Products -- client.py's
+    parser has been fixed to accept either).
 
-    print("\n=== S&S live API check (per-SKU /Inventory/{sku} endpoint, RAW) ===")
-    for sku in skus[:2]:
-        raw = ss._get(f"/Inventory/{sku}")
-        print(f"  sku={sku} raw={raw!r}")
+    S&S's own network is mid-consolidation this year (several DCs closing in
+    2026 per their public announcements), so this deliberately does NOT
+    hardcode a warehouse table the way SanMar's constants.py does. Instead it
+    samples real /Inventory/{sku} responses across a broad, diverse slice of
+    our actually-matched S&S items (not arbitrary catalog styles) to build an
+    empirical superset of the codes our field set needs to cover.
+    """
+    print(f"\n=== S&S live API check (per-SKU /Inventory/{{sku}} endpoint, "
+          f"sampling up to {sample_size} matched items) ===")
+    rows = client.suiteql(
+        "SELECT custitem_ss_sku AS sku FROM item "
+        "WHERE custitem_ss_sku IS NOT NULL ORDER BY id"
+    )
+    skus = sorted({str(r["sku"]) for r in rows if r.get("sku")})
+    # Evenly spread the sample across the full id range rather than the first
+    # N rows, so it isn't biased toward one supplier batch/style run.
+    step = max(1, len(skus) // sample_size)
+    sample = skus[::step][:sample_size]
+    print(f"matched S&S items: {len(skus):,}; sampling {len(sample)}")
+
+    ss = SsClient(ss_config().ss_api)
+    codes: dict[str, int] = {}
+    errors = 0
+    for sku in sample:
+        try:
+            inv = ss.get_inventory(sku)
+        except Exception as exc:  # noqa: BLE001
+            errors += 1
+            if errors <= 5:
+                print(f"  sku={sku}: ERROR {str(exc)[:120]}")
+            continue
+        if inv is None:
+            continue
+        for w in inv.warehouses:
+            codes[w.warehouse_abbr] = codes.get(w.warehouse_abbr, 0) + 1
+    print(f"errors: {errors}")
+    print(f"distinct warehouse codes seen: {len(codes)}")
+    for code, n in sorted(codes.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"  {code!r:<10} appears on {n:,}/{len(sample)} sampled items")
 
 
 def main() -> int:
@@ -94,7 +113,7 @@ def main() -> int:
 
     collect(client, "custitem_sanmar_qty_by_whse", "SanMar sandbox data", "custitem_sanmar_style")
     collect(client, "custitem_ss_qty_by_whse", "S&S sandbox data", "custitem_ss_sku")
-    probe_ss_live()
+    probe_ss_live(client)
     return 0
 
 

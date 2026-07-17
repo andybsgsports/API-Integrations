@@ -1,2 +1,2 @@
 # Trigger file for warehouse-probe.yml push-trigger runs.
-# run: raw-inventory-json-shape
+# run: broad-ss-inventory-sample

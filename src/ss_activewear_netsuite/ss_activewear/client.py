@@ -114,7 +114,9 @@ def product_from_payload(row: dict[str, Any]) -> SsProduct:
         map_price=_decimal(row.get("mapPrice")),
         msrp=_decimal(row.get("msrp")),
         qty_available=_int(row.get("qty")),
-        warehouses=_warehouses(row.get("warehouseAvailability")),
+        # ``/Products`` (filtered) keys this "warehouseAvailability"; the
+        # per-SKU ``/Inventory/{sku}`` endpoint keys the same shape "warehouses".
+        warehouses=_warehouses(row.get("warehouseAvailability") or row.get("warehouses")),
         is_closeout=_bool(row.get("isCloseout")),
         is_discontinued=_bool(row.get("isDiscontinued")),
         front_image_url=str(row.get("colorFrontImage") or row.get("frontImage") or "").strip(),
