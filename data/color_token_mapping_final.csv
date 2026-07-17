@@ -238,7 +238,7 @@ Dark Green-Large/X,1,Dark Green,artifact,size tail; real color: Dark Green
 Ox/Navy2X,1,Ox/Navy,artifact,size tail; real color: Ox/Navy
 Gr3,1,Grey Three,inferred,
 Na/Gr,1,Navy/Grey,auto,abbrev
--Navy,1,,unresolved,
+-Navy,1,Navy,user,
 WH/RO,1,White/Royal,auto,compound
 SOBLACK,1,Solid Black,inferred_low,
 Asph,1,Asphalt,auto,prefix
@@ -256,7 +256,7 @@ WH/BK/BK,1,White/Black/Black,auto,compound
 Rbn,1,,unresolved,
 Naht,1,Navy Heather,inferred,
 GRHE,1,Grey Heather,inferred,
-Pond Blhe,1,,unresolved,
+Pond Blhe,1,Pond Blue Heather,user,
 Bk/Ro,1,Black/Royal,auto,abbrev
 Sc-Large/X,1,Scarlet,artifact,size tail; real color: Scarlet
 Bk/St,1,Black/Steel,auto,abbrev
@@ -267,7 +267,7 @@ Bk/Gp/Wh,1,Black/Graphite/White,auto,abbrev
 Na/Gr/Wh,1,Navy/Grey/White,auto,abbrev
 Ro/Bk/Wh,1,Royal/Black/White,auto,abbrev
 Brgo,1,Bright Gold,auto,heuristic
-True RoyalX,1,,unresolved,
+True RoyalX,1,True Royal,user,
 GR/BKBuffalo,1,Grey/Black Buffalo Check,auto,abbrev
 Grey-Large/X,1,Grey,artifact,size tail; real color: Grey
 White/Royal-Large/X,1,White/Royal,artifact,size tail; real color: White/Royal

@@ -32,6 +32,9 @@ USER_CONFIRMED = {
     "crd": "Cardinal",
     "rofr": "Royal Frost",
     "grfr": "Grey Frost",
+    "pond blhe": "Pond Blue Heather",
+    "-navy": "Navy",
+    "true royalx": "True Royal",
 }
 
 # Inferred from the user's confirmed pattern language (Gr=Grey, initial
