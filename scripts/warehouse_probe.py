@@ -19,6 +19,8 @@ import re
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.sanmar import constants as C
+from ss_activewear_netsuite.config import get_config as ss_config
+from ss_activewear_netsuite.ss_activewear.client import SsClient
 
 LINE_RE = re.compile(r"^\s*([^:\n]+?)\s*:\s*([\d,]+)\s*$", re.MULTILINE)
 
@@ -53,6 +55,29 @@ def collect(client: NetSuiteClient, field: str, label: str, sibling: str) -> Non
         print(f"  {code!r:<28} appears on {n:,} items")
 
 
+def probe_ss_live() -> None:
+    """Hit the S&S API directly (the same filtered batch endpoint ss_backfill.py
+    uses) for a handful of styles and print the raw warehouseAvailability the
+    API actually returns -- resolves whether "0 items with data" in the
+    sandbox means the write is broken, or the feed itself has no per-warehouse
+    breakdown on that endpoint."""
+    print("\n=== S&S live API check (filtered /Products?styleid= endpoint) ===")
+    ss = SsClient(ss_config().ss_api)
+    styles = []
+    for s in ss.iter_styles():
+        if s.style_id:
+            styles.append(s.style_id)
+        if len(styles) >= 3:
+            break
+    print(f"probing styleIDs: {styles}")
+    seen = 0
+    for p in ss._products_for_styles(styles):
+        if seen >= 5:
+            break
+        seen += 1
+        print(f"  sku={p.sku} qty_available={p.qty_available} warehouses={p.warehouses!r}")
+
+
 def main() -> int:
     client = NetSuiteClient(get_config().netsuite)
 
@@ -62,6 +87,7 @@ def main() -> int:
 
     collect(client, "custitem_sanmar_qty_by_whse", "SanMar sandbox data", "custitem_sanmar_style")
     collect(client, "custitem_ss_qty_by_whse", "S&S sandbox data", "custitem_ss_sku")
+    probe_ss_live()
     return 0
 
 
