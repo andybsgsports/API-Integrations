@@ -1,8 +1,7 @@
 # Back-fill run parameters (read by sanmar-backfill.yml on push)
-# RUN 3 of 3: FULL back-fill (user-approved via confirmation prompt) — all
-# matched UPCs + the 113 guarded color renames, full catalog in view. Sandbox.
-DRY_RUN=false
+# POST-REFRESH rebuild: dry run against the fresh production copy.
+DRY_RUN=true
 STYLE_LIMIT=0
-MAX_ITEMS=0
+MAX_ITEMS=25
 SET_EXTERNAL_IDS=false
 RENAME_COLORS=true
