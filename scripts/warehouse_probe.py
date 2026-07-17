@@ -70,12 +70,22 @@ def probe_ss_live() -> None:
         if len(styles) >= 3:
             break
     print(f"probing styleIDs: {styles}")
+    skus = []
     seen = 0
     for p in ss._products_for_styles(styles):
         if seen >= 5:
             break
         seen += 1
+        skus.append(p.sku)
         print(f"  sku={p.sku} qty_available={p.qty_available} warehouses={p.warehouses!r}")
+
+    print("\n=== S&S live API check (per-SKU /Inventory/{sku} endpoint) ===")
+    for sku in skus:
+        inv = ss.get_inventory(sku)
+        if inv is None:
+            print(f"  sku={sku}: no inventory record")
+            continue
+        print(f"  sku={sku} qty_available={inv.qty_available} warehouses={inv.warehouses!r}")
 
 
 def main() -> int:

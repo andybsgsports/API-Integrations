@@ -1,2 +1,2 @@
 # Trigger file for warehouse-probe.yml push-trigger runs.
-# run: live-ss-api-check
+# run: per-sku-inventory-check
