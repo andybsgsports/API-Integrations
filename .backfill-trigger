@@ -1,7 +1,8 @@
 # Back-fill run parameters (read by sanmar-backfill.yml on push)
-# POST-REFRESH rebuild: dry run against the fresh production copy.
-DRY_RUN=true
+# POST-REFRESH rebuild: FULL run (same config as the approved original
+# run 3) -- all matched UPCs + guarded color renames. Sandbox.
+DRY_RUN=false
 STYLE_LIMIT=0
-MAX_ITEMS=25
+MAX_ITEMS=0
 SET_EXTERNAL_IDS=false
 RENAME_COLORS=true
