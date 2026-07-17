@@ -76,6 +76,16 @@ def _bool(raw: Any) -> bool:
     return bool(raw)
 
 
+def _map_price(raw: Any) -> Decimal | None:
+    """S&S publishes mapPrice 0.01 as a placeholder meaning "no MAP
+    restriction" -- writing literal pennies onto item records reads as bad
+    data, so treat anything at or below a cent as no MAP."""
+    value = _decimal(raw)
+    if value is None or value <= Decimal("0.01"):
+        return None
+    return value
+
+
 def _warehouses(raw: Any) -> tuple[WarehouseQty, ...]:
     if not isinstance(raw, list):
         return ()
@@ -104,15 +114,18 @@ def product_from_payload(row: dict[str, Any]) -> SsProduct:
         size_name=str(row.get("sizeName") or "").strip(),
         size_order=_int(row.get("sizeOrder")),
         gtin=str(row.get("gtin") or "").strip(),
-        weight=_decimal(row.get("weight")),
-        case_size=_int(row.get("caseSize")) or None,
+        # Live /Products payloads key these unitWeight / caseQty / retailPrice
+        # (verified against the real API); the older names are kept as
+        # fallbacks for saved snapshots.
+        weight=_decimal(row.get("unitWeight") or row.get("weight")),
+        case_size=_int(row.get("caseQty") or row.get("caseSize")) or None,
         piece_price=_decimal(row.get("piecePrice")),
         dozen_price=_decimal(row.get("dozenPrice")),
         case_price=_decimal(row.get("casePrice")),
         sale_price=_decimal(row.get("salePrice")),
         customer_price=_decimal(row.get("customerPrice")),
-        map_price=_decimal(row.get("mapPrice")),
-        msrp=_decimal(row.get("msrp")),
+        map_price=_map_price(row.get("mapPrice")),
+        msrp=_decimal(row.get("msrp") or row.get("retailPrice")),
         qty_available=_int(row.get("qty")),
         # ``/Products`` (filtered) keys this "warehouseAvailability"; the
         # per-SKU ``/Inventory/{sku}`` endpoint keys the same shape "warehouses".
