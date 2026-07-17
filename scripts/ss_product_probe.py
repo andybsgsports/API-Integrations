@@ -33,6 +33,15 @@ def main() -> int:
     item_id = os.environ.get("PROBE_ITEM_ID", "84171").strip()
     client = NetSuiteClient(get_config().netsuite)
 
+    print("=== 0. image-field coverage across all matched S&S items ===")
+    for col in ("custitem_ss_front_image_url", "custitem_ss_on_model_image_url"):
+        n = client.suiteql(f"SELECT COUNT(*) AS n FROM item WHERE {col} IS NOT NULL")
+        print(f"  {col:<36} populated on {n[0]['n']} items")
+    n = client.suiteql(
+        "SELECT COUNT(*) AS n FROM item WHERE custitem_ss_sku IS NOT NULL"
+    )
+    print(f"  (matched S&S items total: {n[0]['n']})")
+
     print(f"=== 1. sandbox item {item_id} ===")
     rows = client.suiteql(
         f"SELECT id, itemid, {', '.join(SS_COLS)} FROM item WHERE id = {int(item_id)}"

@@ -24,15 +24,18 @@ import requests
 
 BASE = "https://api.dc-onesource.com/xml"
 
-# brand -> candidate endpoint slugs, most likely first.
+# brand -> candidate endpoint slugs, most likely first. Round 1 confirmed
+# CHAMPRO / UNITEDSPORTSBRANDS / TWINCITYKNITTING; DCOS answers HTTP 200
+# with an EMPTY envelope for unknown slugs, so misses are indistinguishable
+# from not-entitled -- round 2 tries longer-form company names.
 BRAND_SLUGS: dict[str, list[str]] = {
-    "Champro": ["CHAMPRO", "CHAMPROSPORTS"],
-    "Schutt": ["SCHUTT", "SCHUTTSPORTS"],
-    "Champion": ["CHAMPION", "CHAMPIONTEAMWEAR", "CHAMPIONATHLETICWEAR"],
-    "United Sports Brand": ["UNITEDSPORTSBRANDS", "UNITEDSPORTSBRAND", "USB"],
-    "Richardson": ["RICHARDSON", "RICHARDSONSPORTS"],
-    "TKC Twin City": ["TWINCITY", "TCK", "TWINCITYKNITTING"],
-    "Cap America": ["CAPAMERICA", "CAP-AMERICA"],
+    "Champro": ["CHAMPRO"],
+    "Schutt": ["SCHUTTSPORTSINC", "ADAMSUSA", "SCHUTTSPORT", "SCHUTTATHLETIC"],
+    "Champion": ["CHAMPIONSPORTS", "CHAMPIONSPORTSINC", "CHAMPIONTEAMSPORTS"],
+    "United Sports Brand": ["UNITEDSPORTSBRANDS"],
+    "Richardson": ["RICHARDSONCAP", "RICHARDSONCAPS", "RICHARDSONHEADWEAR", "RICHARDSON112"],
+    "TKC Twin City": ["TWINCITYKNITTING"],
+    "Cap America": ["CAPAMERICAINC", "CAPAMERICAHEADWEAR", "CAPAM"],
 }
 
 SELLABLE = """<?xml version="1.0" encoding="UTF-8"?>

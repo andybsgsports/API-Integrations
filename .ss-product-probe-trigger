@@ -1,3 +1,3 @@
 # Trigger file for ss-product-probe.yml push-trigger runs.
-# run: probe-item-84171
-ITEM_ID=84171
+# run: image-coverage-plus-item-84083
+ITEM_ID=84083
