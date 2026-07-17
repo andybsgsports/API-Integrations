@@ -117,12 +117,29 @@ def momentec_copy() -> dict[str, dict]:
 
 def ss_copy() -> dict[str, dict]:
     products_file = Path(ss_config().download_dir) / "products.json"
+    # SKU-level style names are thin ("Colortone"); the style-level title is
+    # the real product name ("Multi-Color Tie-Dyed T-Shirt"). /Styles returns
+    # the whole list in one call; fall back to style names if it fails.
+    titles: dict[str, str] = {}
+    try:
+        from ss_activewear_netsuite.ss_activewear.client import SsClient
+
+        for s in SsClient(ss_config().ss_api).iter_styles():
+            if s.title:
+                titles[str(s.style_id)] = s.title
+        print(f"S&S style titles fetched: {len(titles):,}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"(S&S style titles unavailable, using style names: {str(exc)[:80]})")
+
     out: dict[str, dict] = {}
     for p in json.loads(products_file.read_text(encoding="utf-8")):
-        name = p.get("style_name") or ""
+        brand = p.get("brand_name") or ""
+        name = titles.get(str(p.get("style_id") or "")) or p.get("style_name") or ""
+        if brand and not name.lower().startswith(brand.lower()):
+            name = f"{brand} {name}".strip()
         out[p.get("sku") or ""] = _copy(
-            f"{p.get('brand_name', '')} {name}".strip(), p.get("brand_name") or "",
-            name, p.get("color_name") or "", p.get("size_name") or "",
+            name, brand,
+            p.get("style_name") or "", p.get("color_name") or "", p.get("size_name") or "",
             p.get("description") or "",
         )
     return out
