@@ -47,9 +47,11 @@ jobs:
             MAX_ITEMS="${{ github.event.inputs.max_items }}"
           fi
           [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          DEBUG=$(grep -E "^DEBUG=" .dcos-backfill-trigger 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \r')
           echo "DCOS_SUPPLIER=${SUPPLIER:-champro}" >> "$GITHUB_ENV"
           echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
           echo "MAX_ITEMS=${MAX_ITEMS:-25}" >> "$GITHUB_ENV"
+          echo "DCOS_DEBUG=${DEBUG:-false}" >> "$GITHUB_ENV"
           echo "Resolved: supplier=${SUPPLIER:-champro} dry_run=$DRY_RUN max_items=${MAX_ITEMS:-25}"
       - name: Write .env from repo secrets
         run: |
@@ -69,6 +71,7 @@ jobs:
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          DCOS_DEBUG: ${{ env.DCOS_DEBUG }}
         run: python scripts/dcos_backfill.py
       - name: Open issue on failure
         if: failure()

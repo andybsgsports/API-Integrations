@@ -184,6 +184,7 @@ def main() -> int:
     max_items = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
     client = NetSuiteClient(ns_config().netsuite)
 
+    debug = (os.environ.get("DCOS_DEBUG") or "").lower() == "true"
     styles = get_sellable_styles(base, key_id, key_pw)
     print(f"{sup['label']} sellable styles: {len(styles):,}")
     allowlist = load_allowlist(key)
@@ -192,6 +193,11 @@ def main() -> int:
         print(f"price-list allowlist: {len(allowlist):,} styles; "
               f"feed styles on the list: {len(on_list):,} "
               f"(list styles missing from feed: {len(allowlist) - len({s.upper() for s in on_list}):,})")
+        if debug:
+            feed_upper = {s.upper() for s in styles}
+            missing = sorted(allowlist - feed_upper)
+            print(f"  DEBUG feed styles sample: {styles[:25]}")
+            print(f"  DEBUG list styles missing from feed (sample): {missing[:25]}")
         styles = on_list
     else:
         print("no price-list allowlist found -- processing the full feed")
@@ -205,6 +211,35 @@ def main() -> int:
         )
         present.extend(str(r["vendorname"]) for r in rows)
     print(f"styles present by vendorname: {len(present):,}")
+
+    if debug:
+        # How are this supplier's items ACTUALLY keyed in NetSuite? Probe by
+        # itemid prefix (the STYLE-COLOR-SIZE naming convention) for a sample
+        # of allowlist styles, and dump feed part detail for a few styles.
+        probe_styles = (sorted(allowlist)[:400] if allowlist else styles[:400])
+        hits = 0
+        for s in probe_styles[:60]:
+            safe = _sql_escape(s)
+            rows = client.suiteql(
+                f"SELECT id, itemid, vendorname, upccode FROM item "
+                f"WHERE itemid LIKE '{safe}-%' AND rownum <= 3"
+            )
+            if rows:
+                hits += 1
+                if hits <= 8:
+                    for r in rows:
+                        print(f"  DEBUG itemid-prefix hit [{s}]: itemid={r.get('itemid')!r} "
+                              f"vendorname={r.get('vendorname')!r} upccode={r.get('upccode')!r}")
+        print(f"  DEBUG itemid-prefix: {hits}/60 sampled styles have 'STYLE-%' items")
+        for s in (present[:2] + [x for x in styles if x not in present][:1]):
+            try:
+                parts = get_parts(base, key_id, key_pw, s)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  DEBUG getProduct({s}) failed: {str(exc)[:80]}")
+                continue
+            with_gtin = sum(1 for p in parts if p.get("gtin"))
+            print(f"  DEBUG parts[{s}]: {len(parts)} parts, {with_gtin} with gtin; "
+                  f"sample: {[{k: p.get(k) for k in ('partId','gtin','colors','sizes')} for p in parts[:3]]}")
 
     options = OptionMaps(client)
     matched: dict[str, dict] = {}
