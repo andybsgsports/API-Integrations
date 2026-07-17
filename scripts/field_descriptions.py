@@ -135,6 +135,25 @@ DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
+# DC OneSource expansion suppliers (same key set as UA, no pricing fields).
+for _pfx, _name in (
+    ("champro", "Champro"),
+    ("usb", "United Sports Brands"),
+    ("tck", "Twin City (TCK)"),
+):
+    DESCRIPTIONS[f"custitem_{_pfx}_part_id"] = (
+        f"{_name}'s part ID for this exact size/color combination, from "
+        "their DC OneSource/PromoStandards feed."
+    )
+    DESCRIPTIONS[f"custitem_{_pfx}_style"] = f"{_name}'s style number for this product line."
+    DESCRIPTIONS[f"custitem_{_pfx}_gtin"] = (
+        f"This item's barcode (GTIN/UPC) as provided by {_name}."
+    )
+    DESCRIPTIONS[f"custitem_{_pfx}_qty_available"] = (
+        f"Total quantity of this item currently available from {_name} "
+        "(updated nightly)."
+    )
+
 # Per-warehouse quantity columns (one INTEGER field per supplier warehouse).
 for _no, (_sid, _label) in SANMAR_WHSE_FIELDS.items():
     _city = _label.removeprefix("SanMar Qty: ")

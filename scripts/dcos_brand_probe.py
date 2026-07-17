@@ -90,12 +90,44 @@ def probe_slug(slug: str, key_id: str, key_pw: str) -> tuple[str, int, int]:
     return "ERROR", 0, 0
 
 
+def check_outdoorcap_is_richardson(key_id: str, key_pw: str) -> None:
+    """The OUTDOORCAP endpoint answers our key with 1,491 products -- but
+    Outdoor Cap is its own headwear company, so before treating it as the
+    Richardson feed, intersect its sellable styles with the user's
+    Richardson price list."""
+    import csv
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "data" / "pricelist_richardson.csv"
+    if not path.exists():
+        return
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        wanted = {(r.get("style") or "").strip().upper()
+                  for r in csv.DictReader(fh)} - {""}
+    resp = requests.post(
+        f"{BASE}/OUTDOORCAP/Product/2.0.0/soap",
+        data=SELLABLE.format(key_id=key_id, key_pw=key_pw).encode(),
+        headers={"Content-Type": "text/xml; charset=utf-8",
+                 "SOAPAction": "getProductSellable"},
+        timeout=300,
+    )
+    feed = sorted(set(re.findall(r"<\s*(?:\w+:)?productId\s*>([^<]+)<", resp.text)))
+    hits = [s for s in feed if s.upper() in wanted]
+    print("\n=== OUTDOORCAP identity check vs Richardson price list ===")
+    print(f"feed styles: {len(feed):,}; Richardson price-list styles: {len(wanted):,}; "
+          f"overlap: {len(hits):,}")
+    print(f"feed sample: {feed[:12]}")
+    if hits:
+        print(f"overlap sample: {hits[:12]}")
+
+
 def main() -> int:
     key_id = os.environ.get("DCOS_KEY_ID", "")
     key_pw = os.environ.get("DCOS_KEY_PASSWORD", "")
     if not key_id or not key_pw:
         print("DCOS_KEY_ID / DCOS_KEY_PASSWORD not set")
         return 1
+    check_outdoorcap_is_richardson(key_id, key_pw)
 
     confirmed: dict[str, tuple[str, int, int]] = {}
     for brand, slugs in BRAND_SLUGS.items():

@@ -87,6 +87,20 @@ FIELDS += [
     for sid, label in list(SANMAR_WHSE_FIELDS.values()) + list(SS_WHSE_FIELDS.values())
 ]
 
+# DC OneSource supplier expansion (see scripts/dcos_backfill.py): same key
+# set as UA, no pricing fields (price lists are reference-only for now).
+for _prefix, _label in (
+    ("champro", "Champro"),
+    ("usb", "USB"),
+    ("tck", "TCK"),
+):
+    FIELDS += [
+        (f"custitem_{_prefix}_part_id", f"{_label} Part ID", "TEXT", ""),
+        (f"custitem_{_prefix}_style", f"{_label} Style", "TEXT", ""),
+        (f"custitem_{_prefix}_gtin", f"{_label} GTIN", "TEXT", ""),
+        (f"custitem_{_prefix}_qty_available", f"{_label} Qty Available", "INTEGER", ""),
+    ]
+
 
 def field_exists(client: NetSuiteClient, scriptid: str) -> bool:
     try:

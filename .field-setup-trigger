@@ -1,4 +1,3 @@
-# run: delete-single-dc-qty-by-whse-fields
+# run: create-dcos-expansion-fields
 FIELD_CREATE=false
 SOAP_CREATE=true
-SOAP_DELETE_SCRIPTIDS=custitem_mtec_qty_by_whse,custitem_ua_qty_by_whse
