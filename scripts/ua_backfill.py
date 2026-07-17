@@ -37,7 +37,7 @@ BASE_PRICE_LEVEL = "1"  # same identifier set reconcile.py uses
 
 FIELDS = [
     "custitem_ua_part_id", "custitem_ua_style", "custitem_ua_gtin",
-    "custitem_ua_qty_available", "custitem_ua_qty_by_whse",
+    "custitem_ua_qty_available",
 ]
 
 
@@ -161,7 +161,9 @@ def get_style_pricing(key_id: str, key_pw: str, style: str) -> dict[str, float]:
     return out
 
 
-def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, tuple[int, str]]:
+def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, int]:
+    """partId -> total quantity. DC OneSource reports a single fulfillment
+    location, so the total IS the per-warehouse number -- no breakdown kept."""
     body = (
         f'<ns:GetInventoryLevelsRequest xmlns:ns="{INV_NS}" '
         f'xmlns:shar="{INV_NS}SharedObjects/">'
@@ -173,25 +175,21 @@ def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, tuple[int, 
         text = _soap(f"{BASE}/INV/2.0.0/soap", "getInventoryLevels", body)
     except Exception:  # noqa: BLE001
         return {}
-    out: dict[str, tuple[int, str]] = {}
+    out: dict[str, int] = {}
     root = ET.fromstring(text)
     for el in root.iter():
         if _strip(el.tag) != "PartInventory":
             continue
-        pid, qty, whse = "", 0, []
+        pid, qty = "", 0
         for sub in el.iter():
             t = _strip(sub.tag)
             v = (sub.text or "").strip()
             if t == "partId" and v:
                 pid = v
-            elif t == "quantityAvailable":
-                pass
             elif t == "value" and v.replace(".", "").isdigit() and not qty:
                 qty = int(float(v))
-            elif t == "inventoryLocationId" and v:
-                whse.append(v)
         if pid:
-            out[pid] = (qty, "\n".join(whse))
+            out[pid] = qty
     return out
 
 
@@ -266,13 +264,12 @@ def main() -> int:
                     if rid:
                         break
             if rid and rid not in matched:
-                qty, whse = inv.get(part["partId"], (None, ""))
+                qty = inv.get(part["partId"])
                 matched[rid] = {
                     "custitem_ua_part_id": part["partId"],
                     "custitem_ua_style": style,
                     "custitem_ua_gtin": part.get("gtin", ""),
                     "custitem_ua_qty_available": qty,
-                    "custitem_ua_qty_by_whse": whse,
                 }
                 list_price = prices.get(part["partId"])
                 if list_price is not None:

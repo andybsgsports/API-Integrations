@@ -116,10 +116,6 @@ DESCRIPTIONS: dict[str, str] = {
         "Total quantity of this item currently available from Momentec Brands "
         "(updated nightly)."
     ),
-    "custitem_mtec_qty_by_whse": (
-        "Breakdown of available quantity by individual Momentec Brands "
-        "warehouse (updated nightly)."
-    ),
     "custitem_mtec_front_image_url": (
         "Link to this item's product photo, hosted on Momentec Brands' site."
     ),
@@ -132,10 +128,6 @@ DESCRIPTIONS: dict[str, str] = {
     "custitem_ua_gtin": "This item's barcode (GTIN/UPC) as provided by Under Armour.",
     "custitem_ua_qty_available": (
         "Total quantity of this item currently available from Under Armour "
-        "(updated nightly)."
-    ),
-    "custitem_ua_qty_by_whse": (
-        "Breakdown of available quantity by individual Under Armour warehouse "
         "(updated nightly)."
     ),
     "custitem_ua_front_image_url": (

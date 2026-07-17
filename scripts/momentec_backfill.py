@@ -32,7 +32,6 @@ FIELDS = [
     "custitem_mtec_cost",
     "custitem_mtec_case_size",
     "custitem_mtec_qty_available",
-    "custitem_mtec_qty_by_whse",
     "custitem_mtec_front_image_url",
 ]
 
@@ -48,10 +47,10 @@ def fetch(url: str, dest: Path) -> Path:
     return dest
 
 
-def load_inventory(path: Path) -> tuple[dict[str, int], dict[str, str]]:
+def load_inventory(path: Path) -> dict[str, int]:
+    """SKU -> total quantity. Momentec ships from a single warehouse, so the
+    total IS the per-warehouse number -- no separate breakdown kept."""
     total: dict[str, int] = {}
-    parts: dict[str, list[str]] = {}
-    seen: dict[str, bool] = {}
     with path.open(encoding="utf-8-sig", errors="replace", newline="") as fh:
         for row in csv.DictReader(fh):
             sku = (row.get("Item_SKU") or "").strip()
@@ -61,16 +60,8 @@ def load_inventory(path: Path) -> tuple[dict[str, int], dict[str, str]]:
                 qty = int(float(row.get("Item_Qty") or 0))
             except ValueError:
                 continue
-            whse = (row.get("WarehouseID") or "").strip()
             total[sku] = total.get(sku, 0) + qty
-            seen[sku] = True
-            # One warehouse per line, zero-stock locations hidden.
-            if qty:
-                parts.setdefault(sku, []).append(f"{whse}: {qty:,}")
-    return total, {
-        k: "\n".join(parts[k]) if k in parts else "0 at all warehouses"
-        for k in seen
-    }
+    return total
 
 
 def load_front_images(path: Path) -> dict[str, str]:
@@ -120,7 +111,7 @@ def main() -> int:
         fetch(cfg.products_url, dl / "product-data-std-all.csv"),
         fetch(cfg.sublimation_url, dl / "sublimation-product-data-std-all.csv"),
     ])
-    inv_total, inv_whse = load_inventory(
+    inv_total = load_inventory(
         fetch(cfg.inventory_url, dl / "ASG_inventory_data.csv")
     )
     images = load_front_images(fetch(cfg.images_url, dl / "product-images-all.csv"))
@@ -163,7 +154,6 @@ def main() -> int:
             put("custitem_mtec_case_size",
                 int(sku.case_pack_qty) if str(sku.case_pack_qty).isdigit() else None)
             put("custitem_mtec_qty_available", inv_total.get(sku.item_sku))
-            put("custitem_mtec_qty_by_whse", inv_whse.get(sku.item_sku, ""))
             put("custitem_mtec_front_image_url",
                 images.get(style_color) or sku.main_image_url)
 

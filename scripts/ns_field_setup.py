@@ -65,7 +65,8 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_mtec_cost", "Momentec Cost", "CURRENCY", ""),
     ("custitem_mtec_case_size", "Momentec Case Pack Qty", "INTEGER", ""),
     ("custitem_mtec_qty_available", "Momentec Qty Available", "INTEGER", ""),
-    ("custitem_mtec_qty_by_whse", "Momentec Qty By Warehouse", "TEXTAREA", ""),
+    # Momentec Qty By Warehouse intentionally absent: they ship from a single
+    # warehouse, so Qty Available IS the per-warehouse number (user request).
     ("custitem_mtec_front_image_url", "Momentec Front Image URL", "URL", ""),
     # Under Armour (DC OneSource)
     ("custitem_ua_part_id", "UA Part ID", "TEXT", ""),
@@ -74,7 +75,8 @@ FIELDS: list[tuple[str, str, str, str]] = [
     # UA MSRP/Cost intentionally absent: pricing lives on the native fields
     # (Base Price = UA list price, Purchase Price/cost = UA net cost).
     ("custitem_ua_qty_available", "UA Qty Available", "INTEGER", ""),
-    ("custitem_ua_qty_by_whse", "UA Qty By Warehouse", "TEXTAREA", ""),
+    # UA Qty By Warehouse intentionally absent: DC OneSource reports a single
+    # fulfillment location, so Qty Available IS the per-warehouse number.
     ("custitem_ua_front_image_url", "UA Front Image URL", "URL", ""),
 ]
 

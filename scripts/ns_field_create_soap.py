@@ -124,6 +124,22 @@ def main() -> int:
             print(f"delete internalId {did}: {'OK' if ok else 'FAILED'}")
             if not ok:
                 print(text[:800])
+    # Delete by scriptid: resolve internalId with a read-only get first
+    # (SOAP delete only accepts internalId).
+    for sid in (os.environ.get("SOAP_DELETE_SCRIPTIDS") or "").split(","):
+        sid = sid.strip()
+        if not sid:
+            continue
+        from ns_field_describe_all import get_field  # lazy: avoids cycle at import
+        import re as _re
+        m = _re.search(r'internalId="(\d+)"', get_field(cfg, sid))
+        if not m:
+            print(f"delete {sid}: SKIPPED (no internalId in get response -- already gone?)")
+            continue
+        ok, text = delete_field(cfg, m.group(1))
+        print(f"delete {sid} (internalId {m.group(1)}): {'OK' if ok else 'FAILED'}")
+        if not ok:
+            print(text[:800])
     # Re-runnable: only attempt fields the audit says are missing.
     rest = NetSuiteClient(cfg)
     todo = [
