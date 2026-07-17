@@ -1,8 +1,12 @@
 """Enforce metadata on every custitem_* field this project writes, via
 SOAP (REST 404s on itemcustomfield entirely). Runs on CI.
 
-Two properties are kept in line for each field:
-* Description -- the Field Help text (from field_descriptions.py).
+Three properties are kept in line for each field (text from
+field_descriptions.py):
+* Help -- what the Field Help popup on item records actually displays.
+* Description -- the admin-facing note on the field definition page.
+  (These are separate NetSuite slots; the popup reads Help, not
+  Description -- confirmed live after filling only Description.)
 * Display Type -- "Inline Text": these fields are feed-managed, so they
   render as read-only text on item records instead of editable inputs.
 
@@ -34,12 +38,15 @@ DISPLAY_TYPE = "_inlineText"
 
 
 def update_field(cfg, internal_id: str, description: str, display_type: str) -> str:
+    # Element order follows the ItemCustomField schema sequence:
+    # description < displayType < help.
     ns = f"urn:customization_{VERSION}.setup.webservices.netsuite.com"
     body = f"""
     <platformMsgs:update xmlns:setupCustom="{ns}">
       <platformMsgs:record xsi:type="setupCustom:ItemCustomField" internalId="{internal_id}">
         <setupCustom:description>{escape(description)}</setupCustom:description>
         <setupCustom:displayType>{display_type}</setupCustom:displayType>
+        <setupCustom:help>{escape(description)}</setupCustom:help>
       </platformMsgs:record>
     </platformMsgs:update>"""
     return post(cfg, "update", body)
@@ -71,11 +78,14 @@ def main() -> int:
         internal_id = m.group(1)
         cur_desc = _tag_value(text, "description")
         cur_display = _tag_value(text, "displayType")
+        cur_help = _tag_value(text, "help")
         diffs = []
         if cur_desc != description:
             diffs.append("description")
         if cur_display != DISPLAY_TYPE:
             diffs.append(f"displayType {cur_display or '?'} -> {DISPLAY_TYPE}")
+        if cur_help != description:
+            diffs.append("help")
         if not diffs:
             unchanged += 1
             continue
