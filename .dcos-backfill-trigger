@@ -1,0 +1,5 @@
+# Trigger file for dcos-backfill.yml push-trigger runs.
+# run: champro-DRY
+SUPPLIER=champro
+DRY_RUN=true
+MAX_ITEMS=0

@@ -1,2 +1,2 @@
-# run: describe-per-warehouse-fields
+# run: describe-dcos-expansion-fields
 DRY_RUN=false
