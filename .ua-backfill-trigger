@@ -1,4 +1,4 @@
-# run: post-refresh-dry
-DRY_RUN=true
-MAX_ITEMS=25
+# run: post-refresh-FULL
+DRY_RUN=false
+MAX_ITEMS=0
 UA_COST_PCT=40
