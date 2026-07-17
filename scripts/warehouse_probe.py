@@ -14,6 +14,7 @@ item counts, ahead of designing one custom field per warehouse.
 
 from __future__ import annotations
 
+import os
 import re
 
 from sanmar_netsuite.config import get_config
@@ -113,7 +114,10 @@ def main() -> int:
 
     collect(client, "custitem_sanmar_qty_by_whse", "SanMar sandbox data", "custitem_sanmar_style")
     collect(client, "custitem_ss_qty_by_whse", "S&S sandbox data", "custitem_ss_sku")
-    probe_ss_live(client)
+    collect(client, "custitem_mtec_qty_by_whse", "Momentec sandbox data", "custitem_mtec_item_sku")
+    collect(client, "custitem_ua_qty_by_whse", "UA sandbox data", "custitem_ua_part_id")
+    if (os.environ.get("SS_LIVE_PROBE") or "").lower() == "true":
+        probe_ss_live(client)
     return 0
 
 
