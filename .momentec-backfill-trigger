@@ -1,3 +1,3 @@
-# full-refresh pass step 2/6 — Momentec update (live, diff-aware)
-DRY_RUN=false
-MAX_ITEMS=0
+# run: dry-run-native-pricing
+DRY_RUN=true
+MAX_ITEMS=25
