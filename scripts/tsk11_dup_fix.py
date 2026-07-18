@@ -223,6 +223,9 @@ def main() -> int:
             cogs = str((rec.get("cogsAccount") or {}).get("id") or "")
             if asset and asset == cogs and HEALTHY_ASSET["id"]:
                 body["assetAccount"] = {"id": HEALTHY_ASSET["id"]}
+                # bare account change 500s on items with posted inventory;
+                # explicitly declining the transaction re-post may unblock it
+                body["updateExistingTranAccounts"] = False
                 desc_bits.append(
                     f"fix assetAccount {asset} -> {HEALTHY_ASSET['id']} "
                     f"(was duplicated with cogsAccount)")
