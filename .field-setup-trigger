@@ -1,3 +1,3 @@
-# run: create-capamerica-fields
+# run: create-mizuno-fields
 FIELD_CREATE=false
 SOAP_CREATE=true

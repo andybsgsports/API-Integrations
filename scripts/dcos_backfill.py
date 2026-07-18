@@ -53,6 +53,8 @@ SUPPLIERS: dict[str, dict[str, str]] = {
             "style_source": "part"},
     "capamerica": {"slug": "CAP", "prefix": "capamerica", "label": "Cap America",
                    "style_source": "product"},
+    "mizuno": {"slug": "MIZUNOUSA", "prefix": "mizuno", "label": "Mizuno",
+               "style_source": "product"},
 }
 
 
