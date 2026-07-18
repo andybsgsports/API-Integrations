@@ -79,32 +79,26 @@ def main() -> int:
         if not allow_write:
             written += 1
             continue
-        try:
-            client.update_record("inventoryItem", item_id, {COLOR_FIELD: {"id": canonical}})
-            written += 1
-        except Exception as exc:  # noqa: BLE001
-            # Matrix children may expose the option under the matrixoption
-            # alias, or want a bare id -- try both before counting a failure.
-            recovered = False
-            for body in (
-                {f"matrixoption{COLOR_FIELD}": {"id": canonical}},
-                {COLOR_FIELD: int(canonical)},
-            ):
-                try:
-                    client.update_record("inventoryItem", item_id, body)
-                    written += 1
-                    recovered = True
-                    if samples <= 10:
-                        print(f"  recovered with body {body}")
-                    break
-                except Exception:  # noqa: BLE001
-                    continue
-            if recovered:
-                continue
+        # Matrix children expose the color under the matrixoption alias (the
+        # bare custitem field is rejected with "Invalid value"); the bare
+        # field stays as fallback for any non-matrix item.
+        last_exc: Exception | None = None
+        for body in (
+            {f"matrixoption{COLOR_FIELD}": {"id": canonical}},
+            {COLOR_FIELD: {"id": canonical}},
+        ):
+            try:
+                client.update_record("inventoryItem", item_id, body)
+                written += 1
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        if last_exc is not None:
             failures += 1
             if failures <= 10:
-                detail = getattr(exc, "payload", "")
-                print(f"  FAILED item {item_id}: {str(exc)[:150]} :: {str(detail)[:600]}")
+                detail = getattr(last_exc, "payload", "")
+                print(f"  FAILED item {item_id}: {str(last_exc)[:150]} :: {str(detail)[:600]}")
 
     verb = "repointed" if allow_write else "WOULD repoint (dry run)"
     print(f"\ncolor consolidation: {verb} {written} item(s); considered: {considered}; "

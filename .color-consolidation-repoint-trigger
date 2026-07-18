@@ -5,5 +5,6 @@
 # run: dry-run-null-safe-rows
 # run: live-smoke-25
 # run: live-smoke-25-alt-shapes
+# run: FULL-live
 DRY_RUN=false
-MAX_ITEMS=25
+MAX_ITEMS=0
