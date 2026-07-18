@@ -35,7 +35,7 @@ BRAND_SLUGS: dict[str, list[str]] = {
     "Schutt": ["CERTORSPORTS-SC", "CERTORSPORTSSC", "CERTORSPORTS_SC", "SCHUTT-SC"],
     "Champion": ["CHAMPIONSPORTS", "CHAMPION-SPORTS", "CHAMPIONSPORT"],
     "United Sports Brand": ["UNITEDSPORTSBRANDS"],
-    "Richardson": ["OUTDOORCAP"],
+    "Richardson": ["RICHARDSONSPO"],
     "TKC Twin City": ["TWINCITYKNITTING"],
     "Cap America": ["CAP"],
 }
