@@ -55,9 +55,14 @@ def main() -> int:
     for i in range(0, len(retire_ids), 100):
         chunk = retire_ids[i : i + 100]
         in_list = ", ".join(chunk)
-        for r in client.suiteql(
-            f"SELECT id, {COLOR_FIELD} AS c FROM item WHERE {COLOR_FIELD} IN ({in_list})"
-        ):
+        query = f"SELECT id, {COLOR_FIELD} AS c FROM item WHERE {COLOR_FIELD} IN ({in_list})"
+        try:
+            rows = client.suiteql(query)
+        except Exception as exc:  # noqa: BLE001
+            print(f"QUERY FAILED: {query!r}")
+            print(f"  {str(exc)[:200]} :: {str(getattr(exc, 'payload', ''))[:500]}")
+            raise
+        for r in rows:
             item_id, retire_id = str(r["id"]), str(r["c"])
             canonical = plan.get(retire_id)
             if canonical is None:
