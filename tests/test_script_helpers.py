@@ -135,16 +135,16 @@ class TestPerWarehouseFields:
         return {"sku": "B0001", "style_name": "G500", "qty_available": 7}
 
     def test_no_inventory_rows_leaves_columns_unset(self):
-        from warehouse_fields import SS_QTY_FIELDS
         from ss_backfill import payload_for
+        from warehouse_fields import SS_QTY_FIELDS
 
         want = payload_for(self._product())
         assert not any(f in want for f in SS_QTY_FIELDS)
         assert "custitem_ss_qty_by_whse" not in want  # empty text is skipped
 
     def test_rows_fill_matched_columns_and_zero_fill_rest(self):
-        from warehouse_fields import SS_WHSE_FIELDS, SS_QTY_FIELDS
         from ss_backfill import payload_for
+        from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
         rows = [
             {"warehouseAbbr": "IL", "qty": 12},
@@ -169,6 +169,7 @@ class TestPerWarehouseFields:
 
     def test_sanmar_map_covers_constants_table(self):
         from warehouse_fields import SANMAR_WHSE_FIELDS
+
         from sanmar_netsuite.sanmar import constants as C
 
         assert set(SANMAR_WHSE_FIELDS) == set(C.WAREHOUSES)

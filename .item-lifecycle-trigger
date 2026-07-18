@@ -1,0 +1,4 @@
+# Trigger file for item-lifecycle.yml push-trigger runs.
+# run: first-dry-run
+DRY_RUN=true
+MAX_ITEMS=0

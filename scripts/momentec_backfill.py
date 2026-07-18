@@ -22,6 +22,7 @@ from momentec_netsuite.config import get_config
 from momentec_netsuite.feeds import parse_product_data
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 
 FIELDS = [
@@ -128,7 +129,7 @@ def main() -> int:
         by_item.setdefault(r.ns_id, r)
 
     ids = sorted(by_item)
-    cols = ", ".join(FIELDS)
+    cols = ", ".join(FIELDS + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
@@ -165,6 +166,7 @@ def main() -> int:
                 price=_num(sku.msrp), cost=_num(sku.cost),
                 weight=_num(sku.weight), same=_same,
             )
+            stamp(body, row, "momentec")
             if not body:
                 unchanged += 1
                 continue

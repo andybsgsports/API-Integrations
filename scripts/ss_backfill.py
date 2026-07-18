@@ -27,6 +27,7 @@ from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 from ss_activewear_netsuite.config import get_config as ss_config
@@ -268,7 +269,7 @@ def main() -> int:
 
     # -- write phase (diff-aware)
     ids = sorted(matched)
-    cols = ", ".join(FIELDS)
+    cols = ", ".join(FIELDS + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 200):
         chunk = ids[i : i + 200]
@@ -299,6 +300,7 @@ def main() -> int:
                 body, row, base_by_rid, rid,
                 price=price, cost=cost, weight=weight, same=_same,
             )
+            stamp(body, row, "ss")
             if not body:
                 unchanged += 1
                 continue

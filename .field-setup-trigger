@@ -1,3 +1,4 @@
 # run: create-ripit-baden-fields
+# run: create-lifecycle-heartbeat-fields
 FIELD_CREATE=false
 SOAP_CREATE=true

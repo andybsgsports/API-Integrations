@@ -105,6 +105,14 @@ for _prefix, _label in (
         (f"custitem_{_prefix}_qty_available", f"{_label} Qty Available", "INTEGER", ""),
     ]
 
+# Item lifecycle (auto-inactivate discontinued / auto-create new): every feed
+# writer stamps these on the items it matches, and item_lifecycle.py
+# inactivates items whose stamp goes stale past the grace period.
+FIELDS += [
+    ("custitem_feed_source", "Feed Source", "TEXT", ""),
+    ("custitem_feed_last_seen", "Feed Last Seen", "DATE", ""),
+]
+
 
 def field_exists(client: NetSuiteClient, scriptid: str) -> bool:
     try:

@@ -28,6 +28,7 @@ import requests
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 
@@ -440,7 +441,7 @@ def main() -> int:
     print(f"matched items: {len(matched):,}")
 
     ids = sorted(matched)
-    cols = ", ".join(fields)
+    cols = ", ".join(fields + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
@@ -455,6 +456,7 @@ def main() -> int:
             gtin = matched.get(rid, {}).get(f"custitem_{prefix}_gtin", "")
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
+            stamp(body, row, key)
             if not body:
                 unchanged += 1
                 continue

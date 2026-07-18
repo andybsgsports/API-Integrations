@@ -31,6 +31,7 @@ TYPE_MAP = {
     "FLOAT": "_decimalNumber",
     "CHECKBOX": "_checkBox",
     "URL": "_hyperlink",
+    "DATE": "_date",
 }
 
 

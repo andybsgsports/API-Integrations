@@ -158,6 +158,18 @@ for _pfx, _name in (
         "(updated nightly)."
     )
 
+# Item lifecycle heartbeat (stamped by every feed writer, consumed by
+# item_lifecycle.py to auto-inactivate discontinued items).
+DESCRIPTIONS["custitem_feed_source"] = (
+    "Which supplier feed maintains this item (e.g. sanmar, ss, momentec, ua, "
+    "champro). Stamped automatically by the nightly syncs."
+)
+DESCRIPTIONS["custitem_feed_last_seen"] = (
+    "The last date this item appeared in its supplier's feed. When this goes "
+    "stale past the grace period, the item is automatically made inactive "
+    "(discontinued)."
+)
+
 # Per-warehouse quantity columns (one INTEGER field per supplier warehouse).
 for _no, (_sid, _label) in SANMAR_WHSE_FIELDS.items():
     _city = _label.removeprefix("SanMar Qty: ")

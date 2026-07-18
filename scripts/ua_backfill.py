@@ -26,6 +26,7 @@ import requests
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 
@@ -280,7 +281,7 @@ def main() -> int:
 
     print(f"items with a feed price: {len(price_by_rid):,}")
     ids = sorted(matched)
-    cols = ", ".join(FIELDS)
+    cols = ", ".join(FIELDS + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
@@ -323,6 +324,7 @@ def main() -> int:
                     cost = round(list_price * cost_pct / 100.0, 2)
                     if not _same(row.get("cost"), cost):
                         body["cost"] = cost
+            stamp(body, row, "ua")
             if not body:
                 unchanged += 1
                 continue

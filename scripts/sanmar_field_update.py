@@ -19,6 +19,7 @@ from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.sanmar import constants as C
 from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
@@ -164,7 +165,7 @@ def main() -> int:
     print(f"feed SKUs with GTIN: {len(payloads):,}")
 
     client = NetSuiteClient(cfg.netsuite)
-    cols = ", ".join(FIELD_ORDER)
+    cols = ", ".join(FIELD_ORDER + SEEN_FIELDS)
     gtins = sorted(payloads)
     considered = written = unchanged = priced = failures = 0
     for i in range(0, len(gtins), 250):
@@ -188,6 +189,7 @@ def main() -> int:
                 body, row, base_by_rid, str(row["id"]),
                 price=price, cost=cost, weight=weight, same=_same,
             )
+            stamp(body, row, "sanmar")
             if not body:
                 unchanged += 1
                 continue
