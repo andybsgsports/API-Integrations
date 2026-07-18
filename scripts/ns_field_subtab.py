@@ -82,6 +82,10 @@ def main() -> int:
         if not ref:
             print(f"anchor {anchor}: no <subtab> in its definition "
                   "(is it actually on a subtab?) -- skipping")
+            # dump the raw field definition so we can see how it's placed
+            body_start = text.find("readResponse")
+            print("  ---- raw get (record slice) ----")
+            print(text[body_start:body_start + 2000] if body_start >= 0 else text[:2000])
             failures += 1
             continue
         subtab_id, subtab_type = ref
