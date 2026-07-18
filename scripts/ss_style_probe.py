@@ -20,6 +20,7 @@ import os
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, COLOR_LIST, SIZE_FIELD, SIZE_LIST
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.transform.sizes import normalize_size
 from ss_activewear_netsuite.config import get_config as ss_config
 from ss_activewear_netsuite.ss_activewear.client import SsClient
 
@@ -125,8 +126,11 @@ def main() -> int:
         pc = parse_kid(str(k.get("itemid") or ""))
         if pc:
             ns_by_combo[pc] = str(k.get("custitem_ss_sku") or "").strip()
-    ss_combos = {((p.color_name or "").strip().lower(),
-                  normalize_size((p.size_name or "").strip()).lower()) for p in prods}
+    ss_combos = {
+        ((p.color_name or "").strip().lower(),
+         normalize_size((p.size_name or "").strip()).lower())
+        for p in prods
+    }
     shared = [c for c in ss_combos if c in ns_by_combo]
     gap = [c for c in shared if not ns_by_combo[c]]
     print("\n=== cross-check: S&S SKU has NetSuite child but DIDN'T match ===")
