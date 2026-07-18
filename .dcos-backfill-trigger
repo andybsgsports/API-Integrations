@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: mizuno-FULL
-SUPPLIER=mizuno
+# run: manual-nightly-2026-07-18-retry-champro
+SUPPLIER=champro
 DRY_RUN=false
 MAX_ITEMS=0
 DEBUG=false
