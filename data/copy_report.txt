@@ -1,37 +1,29 @@
 queried columns: displayname, description, purchasedescription
-supplier-matched items: 5,738
-custitem_sanmar_unique_key: copy for 160,877 feed SKUs
+supplier-matched items: 5,739
+custitem_sanmar_unique_key: copy for 161,013 feed SKUs
 custitem_mtec_item_sku: copy for 103,587 feed SKUs
-S&S style titles fetched: 5,659
-custitem_ss_sku: copy for 195,483 feed SKUs
-  sample item 203360 [custitem_ss_sku]:
-    displayName: 'Award Jacket' -> "Badger Men's FitFlex Performance T-Shirt"
-    salesDescription: 'Award Jacket' -> "Badger Men's FitFlex Performance T-Shirt"
-    purchaseDescription: 'Award Jacket' -> "Badger Men's FitFlex Performance T-Shirt"
-  sample item 214500 [custitem_mtec_item_sku]:
-    salesDescription: 'Pacific Headwear Trucker Snapback Cap' -> 'Trucker Snapback Cap'
-    purchaseDescription: 'Pacific Headwear Trucker Snapback Cap' -> 'Trucker Snapback Cap'
-  sample item 214498 [custitem_mtec_item_sku]:
-    salesDescription: 'Pacific Headwear Trucker Snapback Cap' -> 'Trucker Snapback Cap'
-    purchaseDescription: 'Pacific Headwear Trucker Snapback Cap' -> 'Trucker Snapback Cap'
-  sample item 214499 [custitem_mtec_item_sku]:
-    salesDescription: 'Pacific Headwear Trucker Snapback Cap' -> 'Trucker Snapback Cap'
-    purchaseDescription: 'Pacific Headwear Trucker Snapback Cap' -> 'Trucker Snapback Cap'
-  sample item 151902 [custitem_sanmar_unique_key]:
-    displayName: 'DryBlend Pullover Hooded Sweatshirt' -> 'Gildan - DryBlend Pullover Hooded Sweatshirt'
-    salesDescription: 'DryBlend Pullover Hooded Sweatshirt' -> 'Gildan - DryBlend Pullover Hooded Sweatshirt'
-    purchaseDescription: 'DryBlend Pullover Hooded Sweatshirt' -> 'Gildan - DryBlend Pullover Hooded Sweatshirt'
-  sample item 217745 [custitem_sanmar_unique_key]:
-    displayName: 'Lightweight Hooded Sweatshirt' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-  sample item 217747 [custitem_sanmar_unique_key]:
-    displayName: 'Lightweight Hooded Sweatshirt' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-  sample item 207459 [custitem_ss_sku]:
-    displayName: "Women's Benton Springs Fleece Vest" -> 'Columbia Women’s Benton Springs™ Fleece Vest'
-    salesDescription: "Columbia Women's Benton Springs Fleece Vest" -> 'Columbia Women’s Benton Springs™ Fleece Vest'
-    purchaseDescription: "Columbia Women's Benton Springs Fleece Vest" -> 'Columbia Women’s Benton Springs™ Fleece Vest'
-  sample item 207461 [custitem_ss_sku]:
-    displayName: "Women's Benton Springs Fleece Vest" -> 'Columbia Women’s Benton Springs™ Fleece Vest'
-    salesDescription: "Columbia Women's Benton Springs Fleece Vest" -> 'Columbia Women’s Benton Springs™ Fleece Vest'
-    purchaseDescription: "Columbia Women's Benton Springs Fleece Vest" -> 'Columbia Women’s Benton Springs™ Fleece Vest'
+S&S style titles fetched: 5,655
+custitem_ss_sku: copy for 195,422 feed SKUs
+  sample item 132911 [custitem_mtec_item_sku]:
+    salesDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
+    purchaseDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
+  sample item 209014 [custitem_mtec_item_sku]:
+    salesDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
+    purchaseDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
+  sample item 209073 [custitem_mtec_item_sku]:
+    salesDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
+    purchaseDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
+  sample item 199482 [custitem_sanmar_unique_key]:
+    displayName: 'DISCONTINUED Nike Dri-FIT Micro Pique Polo' -> 'Nike Dri-FIT Micro Pique Polo'
+    salesDescription: 'Nike Dri Fit Golf Polo' -> 'Nike Dri-FIT Micro Pique Polo'
+    purchaseDescription: 'Nike Dri Fit Golf Polo' -> 'Nike Dri-FIT Micro Pique Polo'
+  sample item 199901 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan® Heavy Cotton\x99 Toddler T-Shirt' -> 'Gildan Heavy Cotton Toddler T-Shirt'
+    salesDescription: 'Toddler Heavy Cotton T-Shirt' -> 'Gildan Heavy Cotton Toddler T-Shirt'
+    purchaseDescription: 'Toddler Heavy Cotton T-Shirt' -> 'Gildan Heavy Cotton Toddler T-Shirt'
+  sample item 25219 [custitem_sanmar_unique_key]:
+    displayName: 'Jerzees Youth NuBlend Crewneck Sweatshirt' -> 'Jerzees - Youth NuBlend Crewneck Sweatshirt'
+    salesDescription: 'Youth Nublend Crew Sweatshirt' -> 'Jerzees - Youth NuBlend Crewneck Sweatshirt'
+    purchaseDescription: 'Youth Nublend Crew Sweatshirt' -> 'Jerzees - Youth NuBlend Crewneck Sweatshirt'
 
-description update: wrote 4792 item(s); unchanged: 946; no feed copy: 0; failures: 0
+description update: wrote 56 item(s); unchanged: 5683; no feed copy: 0; failures: 0
