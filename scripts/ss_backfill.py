@@ -108,6 +108,7 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     put("custitem_ss_size_name", p.get("size_name"))
     put("custitem_ss_gtin", p.get("gtin"))
     put("custitem_ss_brand", p.get("brand_name"))
+    put("manufacturer", p.get("brand_name"))  # native Manufacturer = Brand
     put("custitem_ss_map", num("map_price"))
     put("custitem_ss_msrp", num("msrp"))
     put("custitem_ss_piece_price", num("piece_price"))
@@ -276,7 +277,8 @@ def main() -> int:
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         base_by_rid = read_base_prices(client, in_list)
         for row in client.suiteql(
-            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, manufacturer, {cols} "
+            f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             p = matched.get(rid)

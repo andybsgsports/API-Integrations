@@ -135,7 +135,8 @@ def main() -> int:
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         rows = client.suiteql(
-            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, manufacturer, {cols} "
+            f"FROM item WHERE id IN ({in_list})"
         )
         base_by_rid = read_base_prices(client, in_list)
         for row in rows:
@@ -157,6 +158,7 @@ def main() -> int:
             put("custitem_mtec_qty_available", inv_total.get(sku.item_sku))
             put("custitem_mtec_front_image_url",
                 images.get(style_color) or sku.main_image_url)
+            put("manufacturer", sku.brand)  # native Manufacturer = Brand
 
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             if not str(row.get("upccode") or "").strip() and sku.gtin:

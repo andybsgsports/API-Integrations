@@ -134,6 +134,7 @@ def build_payloads(
             # image lives on custitem_atlas_item_image (the real NetSuite
             # Image-type field) instead.
             put("custitem_sanmar_front_image_url", images.back_url() if images else None)
+            put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry
                 natives[sku.gtin] = (
@@ -172,7 +173,8 @@ def main() -> int:
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         rows = client.suiteql(
-            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE upccode IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, manufacturer, {cols} "
+            f"FROM item WHERE upccode IN ({in_list})"
         )
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
         base_by_rid = read_base_prices(client, id_list)
