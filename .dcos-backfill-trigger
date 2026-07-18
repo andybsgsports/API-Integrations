@@ -1,5 +1,5 @@
-# run: mfr-rest-2026-07-18-capamerica
-SUPPLIER=capamerica
+# run: mfr-rest-2026-07-18-mizuno
+SUPPLIER=mizuno
 DRY_RUN=false
 MAX_ITEMS=0
 DEBUG=false
