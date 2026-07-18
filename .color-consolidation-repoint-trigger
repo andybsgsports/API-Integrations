@@ -10,5 +10,6 @@
 # run: FULL-live-skip-inactive-and-retire-values
 # run: FULL-live-retire-final-3-abbrev-collision
 # run: verification-dry-run-post-replica-lag
+# run: verification-dry-run-identify-sticky-8
 DRY_RUN=true
 MAX_ITEMS=0

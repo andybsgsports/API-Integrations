@@ -87,6 +87,15 @@ def main() -> int:
         if samples < 10:
             samples += 1
             print(f"  sample: item {item_id} color {retire_id} -> {canonical}")
+            if not allow_write:
+                try:
+                    who = client.suiteql(
+                        "SELECT id, itemid, parent, isinactive, matrixtype "
+                        f"FROM item WHERE id = {int(item_id)}"
+                    )
+                    print(f"    identity: {who}")
+                except Exception as exc2:  # noqa: BLE001
+                    print(f"    identity lookup failed: {str(exc2)[:120]}")
         if not allow_write:
             written += 1
             continue
