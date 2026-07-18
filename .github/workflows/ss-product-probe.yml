@@ -57,3 +57,7 @@ jobs:
         run: python scripts/ns_item_dump.py
       - name: Probe S&S warehouse code -> full name
         run: python scripts/ss_warehouse_probe.py
+      - name: Compare item's stored qty vs live S&S /Inventory
+        env:
+          ITEM_ID: ${{ env.PROBE_ITEM_ID }}
+        run: python scripts/ss_item_inventory_probe.py

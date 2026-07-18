@@ -1,3 +1,3 @@
-# Probe S&S API warehouse qtys + dump NetSuite item fields.
-# run: gildan8000-black-med-2026-07-18
+# Compare item 84084 stored qty vs live S&S /Inventory for its real SKU.
+# run: gildan8000-black-med-inv-compare-2026-07-18b
 ITEM_ID=84084
