@@ -1,0 +1,6 @@
+# Trigger file for dcos-item-create.yml push-trigger runs.
+# run: ripit-dry-run-first
+SUPPLIER=ripit
+DRY_RUN=true
+MAX_STYLES=0
+MAX_ITEMS=0
