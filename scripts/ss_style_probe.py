@@ -70,31 +70,29 @@ def main() -> int:
     print(f"\n=== S&S /Products?styleid={style_id} ===")
     prods = list(ss.iter_products(style_id=style_id))
     print(f"  {len(prods)} SKU(s)")
-    gtin_hit = style_hit = optmatch = 0
+
+    colors = sorted({(p.color_name or "").strip() for p in prods})
+    sizes = sorted({(p.size_name or "").strip() for p in prods})
+    print(f"\n  distinct S&S colorName values ({len(colors)}):")
+    for c in colors:
+        star = "  <-- item option is 'Royal'" if "royal" in c.lower() else ""
+        print(f"    {c!r}{star}")
+    print(f"\n  distinct S&S sizeName values ({len(sizes)}):")
+    for s in sizes:
+        star = "  <-- item option is 'Small'" if s.upper() in ("S", "SMALL") else ""
+        print(f"    {s!r}{star}")
+
+    print("\n  the Royal/Small-ish SKU(s), verbatim:")
     for p in prods:
         cname = (p.color_name or "").strip()
         sname = (p.size_name or "").strip()
-        is_royal_small = "royal" in cname.lower() and sname.upper() in ("S", "SMALL")
-        mark = "   <<< Royal/Small" if is_royal_small else ""
-        if str(p.gtin).strip() == ns_upc and ns_upc:
-            gtin_hit += 1
-            mark += "  [GTIN==item.upc]"
-        if (p.style_name or "").upper() == ns_vendor.upper():
-            style_hit += 1
-        if cname.lower() == color_nm.lower() and sname.upper() in (
-            size_nm.upper(), size_nm[:1].upper()
-        ):
-            optmatch += 1
-            mark += "  [color+size == item options]"
-        if is_royal_small or mark:
-            print(f"    sku={p.sku} gtin={p.gtin!r} style={p.style_name!r} "
-                  f"color={cname!r} size={sname!r}{mark}")
+        if "royal" in cname.lower() and sname.upper() in ("S", "SMALL"):
+            print(f"    sku={p.sku!r} gtin={p.gtin!r} style={p.style_name!r} "
+                  f"color={cname!r} size={sname!r}")
 
-    print("\n=== why it isn't matching ===")
-    print(f"  SKUs whose gtin == item.upccode ({ns_upc!r}): {gtin_hit}")
-    print(f"  SKUs whose styleName == item.vendorname ({ns_vendor!r}): {style_hit}")
-    print(f"  SKUs whose color+size names == item's options "
-          f"({color_nm!r}/{size_nm!r}): {optmatch}")
+    print(f"\n  gtin format check -- item.upccode={ns_upc!r}, first 5 S&S gtins:")
+    for p in prods[:5]:
+        print(f"    {p.gtin!r}  (color={p.color_name!r} size={p.size_name!r})")
     return 0
 
 
