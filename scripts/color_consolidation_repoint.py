@@ -19,22 +19,24 @@ import os
 from pathlib import Path
 
 from sanmar_netsuite.config import get_config
-from sanmar_netsuite.netsuite.adopt import COLOR_FIELD
+from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, COLOR_LIST
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def load_plan() -> dict[str, str]:
-    """retire_id -> canonical_id, only rows with items to move."""
-    out: dict[str, str] = {}
+def load_plan() -> tuple[dict[str, str], list[str]]:
+    """(retire_id -> canonical_id for rows with items, ALL retire_ids)."""
+    with_items: dict[str, str] = {}
+    all_retired: list[str] = []
     with (ROOT / "data" / "color_consolidation_plan.csv").open(
         encoding="utf-8", newline=""
     ) as fh:
         for r in csv.DictReader(fh):
+            all_retired.append(r["retire_id"])
             if int(r["items_to_repoint"] or 0) > 0:
-                out[r["retire_id"]] = r["canonical_id"]
-    return out
+                with_items[r["retire_id"]] = r["canonical_id"]
+    return with_items, all_retired
 
 
 def main() -> int:
@@ -43,9 +45,9 @@ def main() -> int:
     max_items = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
     client = NetSuiteClient(cfg.netsuite)
 
-    plan = load_plan()
-    print(f"retired values with items to repoint: {len(plan):,}")
-    if not plan:
+    plan, all_retired = load_plan()
+    print(f"retired values: {len(all_retired):,} ({len(plan):,} with items to repoint)")
+    if not all_retired:
         print("nothing to do")
         return 0
 
@@ -56,15 +58,24 @@ def main() -> int:
     # (the WHERE doesn't actually filter -- all rows come back and SuiteQL
     # omits null columns from row JSON, hence .get below)
     rows = client.suiteql(
-        f"SELECT id, {COLOR_FIELD} AS c FROM item WHERE {COLOR_FIELD} IS NOT NULL"
+        f"SELECT id, {COLOR_FIELD} AS c, isinactive FROM item "
+        f"WHERE {COLOR_FIELD} IS NOT NULL"
     )
     print(f"item rows fetched: {len(rows):,}")
     todo = []
+    skipped_inactive = 0
     for r in rows:
         c = str(r.get("c") or "")
-        if c in plan:
-            todo.append((str(r["id"]), c))
-    print(f"items pointing at a retired value: {len(todo):,}")
+        if c not in plan:
+            continue
+        # Inactive matrix children reject option writes (INVALID_VALUE) --
+        # leave them on the retired value; it stays resolvable, just inactive.
+        if str(r.get("isinactive") or "F") == "T":
+            skipped_inactive += 1
+            continue
+        todo.append((str(r["id"]), c))
+    print(f"items pointing at a retired value: {len(todo):,} "
+          f"(inactive items skipped: {skipped_inactive})")
 
     considered = written = failures = 0
     samples = 0
@@ -111,7 +122,35 @@ def main() -> int:
     verb = "repointed" if allow_write else "WOULD repoint (dry run)"
     print(f"\ncolor consolidation: {verb} {written} item(s); considered: {considered}; "
           f"failures: {failures}")
-    return 1 if failures else 0
+
+    # Phase 2: retire the duplicate list values themselves (mark inactive) so
+    # name->id resolution can never hand them out again. Skipped while phase 1
+    # is capped or failing -- values must be safe to hide first.
+    if failures or (max_items and len(todo) > max_items):
+        print("phase 2 (retire list values) skipped: repointing incomplete")
+        return 1 if failures else 0
+    lv_rows = client.suiteql(f"SELECT id, isinactive FROM {COLOR_LIST}")
+    active_retired = [
+        str(r["id"]) for r in lv_rows
+        if str(r["id"]) in set(all_retired) and str(r.get("isinactive") or "F") != "T"
+    ]
+    print(f"retired list values still active: {len(active_retired):,}")
+    lv_written = lv_failures = 0
+    for vid in active_retired:
+        if not allow_write:
+            lv_written += 1
+            continue
+        try:
+            client.update_record(COLOR_LIST, vid, {"isInactive": True})
+            lv_written += 1
+        except Exception as exc:  # noqa: BLE001
+            lv_failures += 1
+            if lv_failures <= 10:
+                detail = getattr(exc, "payload", "")
+                print(f"  RETIRE FAILED value {vid}: {str(exc)[:150]} :: {str(detail)[:400]}")
+    lv_verb = "inactivated" if allow_write else "WOULD inactivate (dry run)"
+    print(f"list-value retirement: {lv_verb} {lv_written} value(s); failures: {lv_failures}")
+    return 1 if (failures or lv_failures) else 0
 
 
 if __name__ == "__main__":
