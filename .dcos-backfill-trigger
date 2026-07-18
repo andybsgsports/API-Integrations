@@ -1,7 +1,7 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: ripit-DRY
-SUPPLIER=ripit
+# run: baden-DRY
+SUPPLIER=baden
 DRY_RUN=true
 MAX_ITEMS=0
 DEBUG=true
-DEBUG_HINT=rip-it
+DEBUG_HINT=baden
