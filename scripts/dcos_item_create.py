@@ -102,6 +102,22 @@ def resolve_parent_refs(client: NetSuiteClient) -> dict[str, dict]:
             refs["taxSchedule"] = {"id": str(rows[0]["id"])}
     except Exception:  # noqa: BLE001 - table not query-exposed in every account
         pass
+    if "taxSchedule" not in refs:
+        # the taxschedule table isn't query-exposed here (smoke run proved it,
+        # via 'Please enter value(s) for: Tax Schedule') -- borrow the ref
+        # every existing item already carries
+        try:
+            rows = client.suiteql(
+                "SELECT id FROM item WHERE isinactive = 'F' AND rownum <= 1"
+            )
+            rec = client.get_record("inventoryItem", str(rows[0]["id"]))
+            ts = (rec.get("taxSchedule") or {}).get("id")
+            if ts:
+                refs["taxSchedule"] = {"id": str(ts)}
+        except Exception as exc:  # noqa: BLE001
+            print(f"  taxSchedule fallback failed ({str(exc)[:80]})")
+    if "taxSchedule" not in refs:
+        raise RuntimeError("could not resolve a Tax Schedule id (parents need one)")
     return refs
 
 
