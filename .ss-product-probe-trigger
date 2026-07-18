@@ -1,4 +1,5 @@
 # Trigger file for ss-product-probe.yml push-trigger runs.
 # run: styleid-6124-ground-truth
-# run: dump-actual-color-size-gtin-values
+# run: dump-actual-values
+# run: check-which-695HBM-children-matched
 ITEM_ID=84083

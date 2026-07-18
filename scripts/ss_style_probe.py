@@ -93,6 +93,21 @@ def main() -> int:
     print(f"\n  gtin format check -- item.upccode={ns_upc!r}, first 5 S&S gtins:")
     for p in prods[:5]:
         print(f"    {p.gtin!r}  (color={p.color_name!r} size={p.size_name!r})")
+
+    # -- did the sync match the OTHER children of this style? ---------------
+    print(f"\n=== NetSuite {ns_vendor!r} children: which got S&S data? ===")
+    safe = ns_vendor.replace("'", "''")
+    kids = client.suiteql(
+        "SELECT itemid, custitem_ss_sku, custitem_ss_qty_available "
+        f"FROM item WHERE vendorname = '{safe}' ORDER BY itemid"
+    )
+    matched_kids = [k for k in kids if str(k.get("custitem_ss_sku") or "").strip()]
+    print(f"  {len(kids)} children under vendorname {ns_vendor!r}; "
+          f"{len(matched_kids)} have an S&S SKU")
+    for k in kids[:40]:
+        sku = str(k.get("custitem_ss_sku") or "").strip()
+        tag = f"ss_sku={sku}" if sku else "(no S&S data)"
+        print(f"    {k.get('itemid'):<32} {tag}")
     return 0
 
 
