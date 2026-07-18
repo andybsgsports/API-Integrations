@@ -1,7 +1,7 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: mizuno-DRY
-SUPPLIER=mizuno
+# run: ripit-DRY
+SUPPLIER=ripit
 DRY_RUN=true
 MAX_ITEMS=0
 DEBUG=true
-DEBUG_HINT=mizuno
+DEBUG_HINT=rip-it

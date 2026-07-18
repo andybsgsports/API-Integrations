@@ -408,7 +408,15 @@ def main() -> int:
             # In part mode the partId's last token is the size (TCK's
             # 'TSK11-026-L') -- require it to agree with the itemid's size
             # segment so same-color sizes don't collapse onto one part.
-            part_colors = {c.strip().lower() for c in part["colors"] if c.strip()}
+            # Mizuno decorates color names with codes and hand prefixes
+            # ('BLACK (9090)', 'LEFT HAND: BLACK-TAN (F981)') -- strip them.
+            part_colors = set()
+            for c in part["colors"]:
+                c = re.sub(r"\(.*?\)", "", c)
+                c = re.sub(r"^(?:LEFT|RIGHT)\s+HAND:\s*", "", c, flags=re.I)
+                c = c.strip().lower()
+                if c:
+                    part_colors.add(c)
             psize = ""
             if part_mode:
                 toks = part["partId"].split("-")
