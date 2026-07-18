@@ -32,8 +32,8 @@ BRAND_SLUGS: dict[str, list[str]] = {
     # Supplier codes below are the ones the user read out of their DC
     # OneSource account -- no more guessing.
     "Champro": ["CHAMPRO"],
-    "Schutt": ["CERTORSPORTS-SC"],
-    "Champion": ["CHAMPIONSPORTS"],
+    "Schutt": ["CERTORSPORTS-SC", "CERTORSPORTSSC", "CERTORSPORTS_SC", "SCHUTT-SC"],
+    "Champion": ["CHAMPIONSPORTS", "CHAMPION-SPORTS", "CHAMPIONSPORT"],
     "United Sports Brand": ["UNITEDSPORTSBRANDS"],
     "Richardson": ["OUTDOORCAP"],
     "TKC Twin City": ["TWINCITYKNITTING"],

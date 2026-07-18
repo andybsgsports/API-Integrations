@@ -51,6 +51,8 @@ SUPPLIERS: dict[str, dict[str, str]] = {
             "label": "United Sports Brands", "style_source": "part"},
     "tck": {"slug": "TWINCITYKNITTING", "prefix": "tck", "label": "Twin City",
             "style_source": "part"},
+    "capamerica": {"slug": "CAP", "prefix": "capamerica", "label": "Cap America",
+                   "style_source": "product"},
 }
 
 

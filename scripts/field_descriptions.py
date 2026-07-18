@@ -140,6 +140,7 @@ for _pfx, _name in (
     ("champro", "Champro"),
     ("usb", "United Sports Brands"),
     ("tck", "Twin City (TCK)"),
+    ("capamerica", "Cap America"),
 ):
     DESCRIPTIONS[f"custitem_{_pfx}_part_id"] = (
         f"{_name}'s part ID for this exact size/color combination, from "
