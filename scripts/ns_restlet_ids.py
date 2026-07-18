@@ -11,7 +11,6 @@ from __future__ import annotations
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
-
 KEYWORDS = ("matrix", "sanmar", "bsg", "child", "grid", "item")
 
 
