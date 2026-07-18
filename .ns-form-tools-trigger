@@ -1,0 +1,3 @@
+# run: subtab-dry-run-probe-the-subtab-id
+TOOL=subtab
+DRY_RUN=true
