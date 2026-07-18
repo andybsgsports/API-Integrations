@@ -137,7 +137,8 @@ def main() -> int:
     print(f"  S&S combos: {len(ss_combos)}; NetSuite child combos: {len(ns_by_combo)}; "
           f"shared: {len(shared)}; of shared, UNMATCHED (real gap): {len(gap)}")
     for c in sorted(gap):
-        print(f"    GAP: color={c[0]!r} size={c[1]!r} (S&S has it, NetSuite child exists, no match)")
+        print(f"    GAP: color={c[0]!r} size={c[1]!r} "
+              "(S&S has it, NetSuite child exists, no match)")
     return 0
 
 
