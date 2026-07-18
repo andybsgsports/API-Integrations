@@ -2,4 +2,5 @@
 # run: dry-run-first
 # run: LIVE-rename-3
 # run: dry-run-suffix-search
+# run: dry-run-sibling-option-diagnostic
 DRY_RUN=true

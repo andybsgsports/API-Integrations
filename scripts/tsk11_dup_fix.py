@@ -17,6 +17,7 @@ Honors ``SYNC_DRY_RUN``.
 from __future__ import annotations
 
 from sanmar_netsuite.config import get_config
+from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, COLOR_LIST, SIZE_FIELD, SIZE_LIST
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.repository import _sql_escape
 
@@ -74,6 +75,50 @@ def main() -> int:
         print(f"  id {r['id']:>7}  qty {qty_of(r):>4g}  inactive {r.get('isinactive')}  "
               f"{str(r.get('itemid'))!r}")
 
+    # The live rename failed with a 'duplicate' rejection even though nothing
+    # holds the target names -- suspect a duplicate matrix option COMBINATION
+    # under the same parent (consolidation repointed color values). Dump every
+    # sibling with its color/size option so the collision is visible.
+    ids = [str(r["id"]) for r in rows]
+    if ids:
+        parent_of = {
+            str(r["id"]): str(r.get("parent") or "")
+            for r in client.suiteql(
+                f"SELECT id, parent FROM item WHERE id IN ({', '.join(ids)})"
+            )
+        }
+        parent_ids = sorted({p for p in parent_of.values() if p})
+        print(f"\nparents of the 3 items: {parent_of}")
+        if parent_ids:
+            sibs = client.suiteql(
+                f"SELECT id, itemid, isinactive, {qty_col} AS qty, "
+                f"{COLOR_FIELD} AS c, {SIZE_FIELD} AS s "
+                f"FROM item WHERE parent IN ({', '.join(parent_ids)})"
+            )
+            opt_ids = {str(r.get("c")) for r in sibs if r.get("c")}
+            size_ids = {str(r.get("s")) for r in sibs if r.get("s")}
+            color_name = {
+                str(r["id"]): str(r.get("name") or "")
+                for r in client.suiteql(
+                    f"SELECT id, name FROM {COLOR_LIST} "
+                    f"WHERE id IN ({', '.join(sorted(opt_ids)) or '0'})"
+                )
+            }
+            size_name = {
+                str(r["id"]): str(r.get("name") or "")
+                for r in client.suiteql(
+                    f"SELECT id, name FROM {SIZE_LIST} "
+                    f"WHERE id IN ({', '.join(sorted(size_ids)) or '0'})"
+                )
+            }
+            print(f"siblings under parent(s) {parent_ids}: {len(sibs)}")
+            for r in sorted(sibs, key=lambda r: str(r.get("itemid"))):
+                c = color_name.get(str(r.get("c")), str(r.get("c") or "-"))
+                s = size_name.get(str(r.get("s")), str(r.get("s") or "-"))
+                print(f"  id {r['id']:>7}  qty {qty_of(r):>4g}  "
+                      f"inactive {r.get('isinactive')}  color {c!r:<22} "
+                      f"size {s!r:<12} {str(r.get('itemid'))!r}")
+
     def endswith(r: dict, name: str) -> bool:
         return str(r.get("itemid") or "").strip().upper().endswith(name.upper())
 
@@ -125,7 +170,7 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 detail = getattr(exc, "payload", "")
-                print(f"  FAILED: {str(exc)[:100]} :: {str(detail)[:200]}")
+                print(f"  FAILED: {str(exc)[:120]} :: {str(detail)[:1200]}")
 
     verb = "applied" if allow_write else "WOULD apply (dry run)"
     print(f"\ntsk11 dup fix: {verb} {written} update(s); flagged for human: {flagged}; "
