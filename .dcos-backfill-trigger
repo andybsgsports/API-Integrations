@@ -1,5 +1,5 @@
-# run: mfr-rest-2026-07-18-tck
-SUPPLIER=tck
+# run: mfr-rest-2026-07-18-capamerica
+SUPPLIER=capamerica
 DRY_RUN=false
 MAX_ITEMS=0
 DEBUG=false
