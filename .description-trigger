@@ -1,3 +1,4 @@
 # run: post-refresh-FULL
 DRY_RUN=false
 MAX_ITEMS=0
+# run: manual-nightly-2026-07-18-retry
