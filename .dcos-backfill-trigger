@@ -1,7 +1,7 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: usb-DRY-2-part-mode
-SUPPLIER=usb
+# run: capamerica-DRY
+SUPPLIER=capamerica
 DRY_RUN=true
 MAX_ITEMS=0
 DEBUG=true
-DEBUG_HINT=mcdavid
+DEBUG_HINT=cap america
