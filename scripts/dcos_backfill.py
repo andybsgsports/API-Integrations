@@ -55,6 +55,10 @@ SUPPLIERS: dict[str, dict[str, str]] = {
                    "style_source": "product"},
     "mizuno": {"slug": "MIZUNOUSA", "prefix": "mizuno", "label": "Mizuno",
                "style_source": "product"},
+    "ripit": {"slug": "RIPIT", "prefix": "ripit", "label": "Rip-It",
+              "style_source": "product"},
+    "baden": {"slug": "BADENSPORTSINC", "prefix": "baden", "label": "Baden",
+              "style_source": "product"},
 }
 
 

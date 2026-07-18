@@ -95,6 +95,8 @@ for _prefix, _label in (
     ("tck", "TCK"),
     ("capamerica", "Cap America"),
     ("mizuno", "Mizuno"),
+    ("ripit", "Rip-It"),
+    ("baden", "Baden"),
 ):
     FIELDS += [
         (f"custitem_{_prefix}_part_id", f"{_label} Part ID", "TEXT", ""),

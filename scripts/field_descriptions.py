@@ -142,6 +142,8 @@ for _pfx, _name in (
     ("tck", "Twin City (TCK)"),
     ("capamerica", "Cap America"),
     ("mizuno", "Mizuno"),
+    ("ripit", "Rip-It"),
+    ("baden", "Baden"),
 ):
     DESCRIPTIONS[f"custitem_{_pfx}_part_id"] = (
         f"{_name}'s part ID for this exact size/color combination, from "
