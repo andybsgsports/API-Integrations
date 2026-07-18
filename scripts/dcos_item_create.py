@@ -156,11 +156,21 @@ def main() -> int:
             skipped_styles += 1
             continue
         children = []
+        seen_combos: set[tuple[str, str]] = set()
+        collapsed = 0
         for part in parts:
             color = clean_color(part["colors"][0]) if part.get("colors") else ""
             size = normalize_size(part["sizes"][0]) if part.get("sizes") else ""
             if not color or not size:
                 continue
+            combo = (color.casefold(), size.casefold())
+            if combo in seen_combos:
+                # custom-order styles publish many parts per color (config
+                # variations a color/size matrix can't express) -- one
+                # representative child per combo, or they'd be duplicate names
+                collapsed += 1
+                continue
+            seen_combos.add(combo)
             children.append((part, color, size))
         if not children:
             print(f"  {style}: no parts with both color and size; skipping "
@@ -181,7 +191,8 @@ def main() -> int:
         styles_done += 1
         print(f"\n=== {style}: {len(children)} child(ren) "
               f"{[f'{c}-{s}' for _p, c, s in children][:6]}"
-              f"{' ...' if len(children) > 6 else ''}")
+              f"{' ...' if len(children) > 6 else ''}"
+              + (f"  [{collapsed} config variant(s) collapsed]" if collapsed else ""))
         if missing_opts:
             print(f"  would create option value(s): {sorted(set(missing_opts))}")
 
