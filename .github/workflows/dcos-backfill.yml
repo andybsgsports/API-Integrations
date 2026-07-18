@@ -5,10 +5,14 @@ permissions:
   issues: write
 
 on:
+  schedule:
+    # 15:00 UTC nightly, after parent-sync (14:00). The schedule branch runs
+    # every LIVE supplier in sequence (see the run step).
+    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       supplier:
-        description: "Supplier key (champro, usb, tck)"
+        description: "Supplier key (champro, usb, tck, capamerica, mizuno, ripit, baden)"
         required: true
         default: "champro"
       dry_run:
@@ -41,6 +45,8 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             get() { grep -E "^$1=" .dcos-backfill-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
             SUPPLIER=$(get SUPPLIER); DRY_RUN=$(get DRY_RUN); MAX_ITEMS=$(get MAX_ITEMS)
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            SUPPLIER="__nightly__"; DRY_RUN="false"; MAX_ITEMS="0"
           else
             SUPPLIER="${{ github.event.inputs.supplier }}"
             DRY_RUN="${{ github.event.inputs.dry_run }}"
@@ -75,7 +81,18 @@ jobs:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
           DCOS_DEBUG: ${{ env.DCOS_DEBUG }}
           DCOS_DEBUG_HINT: ${{ env.DCOS_DEBUG_HINT }}
-        run: python scripts/dcos_backfill.py
+        run: |
+          if [ "$DCOS_SUPPLIER" = "__nightly__" ]; then
+            # every supplier with live matches; failures don't stop the rest
+            rc=0
+            for s in champro tck capamerica mizuno; do
+              echo "===== nightly: $s ====="
+              DCOS_SUPPLIER=$s python scripts/dcos_backfill.py || rc=1
+            done
+            exit $rc
+          else
+            python scripts/dcos_backfill.py
+          fi
       - name: Open issue on failure
         if: failure()
         run: |

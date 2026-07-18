@@ -1,7 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: baden-DRY
-SUPPLIER=baden
+# run: mizuno-DRY-2-color-clean
+SUPPLIER=mizuno
 DRY_RUN=true
 MAX_ITEMS=0
-DEBUG=true
-DEBUG_HINT=baden
+DEBUG=false
