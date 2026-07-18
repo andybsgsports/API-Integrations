@@ -6,5 +6,6 @@
 # run: live-smoke-25
 # run: live-smoke-25-alt-shapes
 # run: FULL-live
+# run: FULL-live-residual-4-with-identity
 DRY_RUN=false
 MAX_ITEMS=0

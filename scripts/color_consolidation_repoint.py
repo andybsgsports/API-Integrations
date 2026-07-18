@@ -99,6 +99,14 @@ def main() -> int:
             if failures <= 10:
                 detail = getattr(last_exc, "payload", "")
                 print(f"  FAILED item {item_id}: {str(last_exc)[:150]} :: {str(detail)[:600]}")
+                try:
+                    who = client.suiteql(
+                        "SELECT id, itemid, parent, isinactive, matrixtype "
+                        f"FROM item WHERE id = {int(item_id)}"
+                    )
+                    print(f"    identity: {who}")
+                except Exception as exc2:  # noqa: BLE001
+                    print(f"    identity lookup failed: {str(exc2)[:120]}")
 
     verb = "repointed" if allow_write else "WOULD repoint (dry run)"
     print(f"\ncolor consolidation: {verb} {written} item(s); considered: {considered}; "
