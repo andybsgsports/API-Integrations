@@ -88,6 +88,25 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"     style probe failed ({str(exc)[:80]})")
 
+        # (c) catalog search: does S&S carry this Russell hoodie at all,
+        # under a different (S&S-assigned) style code?
+        print("\n  -- S&S /Styles catalog search (Russell / Dri-Power / Hoodie) --")
+        try:
+            hits = []
+            for st in ss.iter_styles():
+                brand = (st.brand_name or "").lower()
+                title = (st.title or st.style_name or "").lower()
+                if "russell" in brand or "dri-power" in title or (
+                    "695" in (st.style_name or "")
+                ):
+                    hits.append(st)
+            print(f"     {len(hits)} candidate S&S style(s):")
+            for st in hits[:20]:
+                print(f"       styleID={st.style_id} name={st.style_name!r} "
+                      f"brand={st.brand_name!r} title={st.title!r}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"     styles search failed ({str(exc)[:100]})")
+
     # ---- Q2: what image fields does S&S actually return? ------------------
     print(f"\n=== Q2: image fields for matched item {matched} ===")
     it2 = item_row(client, matched)

@@ -133,8 +133,16 @@ def product_from_payload(row: dict[str, Any]) -> SsProduct:
         is_closeout=_bool(row.get("isCloseout")),
         is_discontinued=_bool(row.get("isDiscontinued")),
         front_image_url=str(row.get("colorFrontImage") or row.get("frontImage") or "").strip(),
+        # S&S only populates on-model shots for some products (basics like
+        # Gildan 8000 have none). When the true on-model image is blank, fall
+        # back to the back image -- a real second-angle product shot -- so the
+        # field always resolves to an image, then side as a last resort.
         on_model_image_url=str(
-            row.get("colorOnModelFrontImage") or row.get("onModelFrontImage") or ""
+            row.get("colorOnModelFrontImage")
+            or row.get("onModelFrontImage")
+            or row.get("colorBackImage")
+            or row.get("colorSideImage")
+            or ""
         ).strip(),
         description=str(row.get("description") or "").strip(),
         category_name=str(row.get("categoryName") or "").strip(),
