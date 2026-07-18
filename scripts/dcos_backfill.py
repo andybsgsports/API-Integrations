@@ -38,11 +38,19 @@ INV_NS = "http://www.promostandards.org/WSDL/Inventory/2.0.0/"
 # supplier key -> endpoint slug, custitem prefix, display label. Slugs were
 # confirmed live via scripts/dcos_brand_probe.py. The allowlist CSV is the
 # user's current price list (styles only); absent file = no filtering.
+#
+# style_source: where the catalog style code lives. "product" = the feed's
+# productId IS the style (Champro). "part" = productIds are display names /
+# bare numbers and the style is the partId's first dash segment (TCK's
+# 'TSK11-026-L', USB's 'SD10100-60512-OSFA-R') -- allowlist filtering and
+# NetSuite matching then happen per part.
 SUPPLIERS: dict[str, dict[str, str]] = {
-    "champro": {"slug": "CHAMPRO", "prefix": "champro", "label": "Champro"},
+    "champro": {"slug": "CHAMPRO", "prefix": "champro", "label": "Champro",
+                "style_source": "product"},
     "usb": {"slug": "UNITEDSPORTSBRANDS", "prefix": "usb",
-            "label": "United Sports Brands"},
-    "tck": {"slug": "TWINCITYKNITTING", "prefix": "tck", "label": "Twin City"},
+            "label": "United Sports Brands", "style_source": "part"},
+    "tck": {"slug": "TWINCITYKNITTING", "prefix": "tck", "label": "Twin City",
+            "style_source": "part"},
 }
 
 
@@ -219,21 +227,24 @@ def main() -> int:
     else:
         print("no price-list allowlist found -- processing the full feed")
 
-    # Which feed styles have NetSuite items? Check every expanded member
-    # (vendorname carries the member style, e.g. 'A014', not the range id).
-    style_of_member = {mem: s for s in styles for mem in members_of[s]}
-    present_members: set[str] = set()
-    all_members = sorted(style_of_member)
-    for i in range(0, len(all_members), 300):
-        chunk = all_members[i : i + 300]
-        in_list = ", ".join(f"'{_sql_escape(v)}'" for v in chunk)
-        rows = client.suiteql(
-            f"SELECT DISTINCT vendorname FROM item WHERE UPPER(vendorname) IN ({in_list})"
-        )
-        present_members.update(str(r["vendorname"]).upper() for r in rows)
-    present = sorted({style_of_member[m] for m in present_members})
-    print(f"feed styles with NetSuite items (by vendorname, incl. range "
-          f"members): {len(present):,} ({len(present_members):,} member styles)")
+    part_mode = sup.get("style_source") == "part"
+    present: list[str] = []
+    if not part_mode:
+        # Which feed styles have NetSuite items? Check every expanded member
+        # (vendorname carries the member style, e.g. 'A014', not the range id).
+        style_of_member = {mem: s for s in styles for mem in members_of[s]}
+        present_members: set[str] = set()
+        all_members = sorted(style_of_member)
+        for i in range(0, len(all_members), 300):
+            chunk = all_members[i : i + 300]
+            in_list = ", ".join(f"'{_sql_escape(v)}'" for v in chunk)
+            rows = client.suiteql(
+                f"SELECT DISTINCT vendorname FROM item WHERE UPPER(vendorname) IN ({in_list})"
+            )
+            present_members.update(str(r["vendorname"]).upper() for r in rows)
+        present = sorted({style_of_member[m] for m in present_members})
+        print(f"feed styles with NetSuite items (by vendorname, incl. range "
+              f"members): {len(present):,} ({len(present_members):,} member styles)")
 
     hint = (os.environ.get("DCOS_DEBUG_HINT") or "").strip().lower()
     if debug and hint:
@@ -281,16 +292,47 @@ def main() -> int:
             print(f"  DEBUG parts[{s}]: {len(parts)} parts, {with_gtin} with gtin; "
                   f"sample: {[{k: p.get(k) for k in ('partId','gtin','colors','sizes')} for p in parts[:3]]}")
 
+    # -- collect (style, parts, inv) work units per style_source mode --------
+    units: list[tuple[str, list[dict], dict[str, int]]] = []
+    if part_mode:
+        # productIds aren't styles (TCK: product names; USB: bare numbers) --
+        # harvest every feed product's parts and regroup by the partId's
+        # first dash segment, allowlist-filtered.
+        by_style: dict[str, list[dict]] = {}
+        inv_all: dict[str, int] = {}
+        feed_products = sorted(members_of)
+        for n, product in enumerate(feed_products, 1):
+            try:
+                parts = get_parts(base, key_id, key_pw, product)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  getProduct failed for {product}: {str(exc)[:100]}")
+                continue
+            inv_all.update(get_inventory(base, key_id, key_pw, product))
+            for p in parts:
+                st = p["partId"].split("-")[0].strip().upper()
+                if not st or (allowlist is not None and st not in allowlist):
+                    continue
+                by_style.setdefault(st, []).append(p)
+            if n % 25 == 0:
+                print(f"  ...{n}/{len(feed_products)} feed products harvested; "
+                      f"{len(by_style)} allowlisted styles so far")
+        print(f"part-derived styles on the price list: {len(by_style):,}")
+        units = [(st, ps, inv_all) for st, ps in sorted(by_style.items())]
+    else:
+        for style in sorted(present):
+            try:
+                parts = get_parts(base, key_id, key_pw, style)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  getProduct failed for {style}: {str(exc)[:100]}")
+                continue
+            units.append((style, parts, get_inventory(base, key_id, key_pw, style)))
+
     options = OptionMaps(client)
     matched: dict[str, dict] = {}
-    for n, style in enumerate(sorted(present), 1):
-        try:
-            parts = get_parts(base, key_id, key_pw, style)
-        except Exception as exc:  # noqa: BLE001
-            print(f"  getProduct failed for {style}: {str(exc)[:100]}")
-            continue
-        inv = get_inventory(base, key_id, key_pw, style)
-        in_list = ", ".join(f"'{_sql_escape(m)}'" for m in members_of[style])
+    for n, (style, parts, inv) in enumerate(units, 1):
+        in_list = ", ".join(
+            f"'{_sql_escape(m)}'" for m in members_of.get(style, [style])
+        )
         rows = client.suiteql(
             f"SELECT id, itemid, upccode, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
             f"FROM item WHERE UPPER(vendorname) IN ({in_list})"
@@ -300,12 +342,16 @@ def main() -> int:
             (str(r.get("color") or ""), str(r.get("size") or "")): str(r["id"])
             for r in rows if r.get("color") and r.get("size")
         }
-        # itemid 'STYLE-COLOR[-SIZE]' -> color segment, for feeds without
-        # GTINs (Champro): match part color names against the name segment.
-        seg_color = {
-            str(r["id"]): str(r.get("itemid") or "").split("-")[1].strip().lower()
-            for r in rows if "-" in str(r.get("itemid") or "")
-        }
+        # itemid 'STYLE-COLOR[-SIZE]' -> (color, size) segments, for feeds
+        # without GTINs: match part color names against the name segment.
+        seg_info: dict[str, tuple[str, str]] = {}
+        for r in rows:
+            toks = str(r.get("itemid") or "").split("-", 2)
+            if len(toks) >= 2:
+                seg_info[str(r["id"])] = (
+                    toks[1].strip().lower(),
+                    toks[2].strip() if len(toks) >= 3 else "",
+                )
 
         def claim(rid: str, part: dict) -> None:
             if rid and rid not in matched:
@@ -333,19 +379,31 @@ def main() -> int:
             if rid:
                 claim(rid, part)
                 continue
-            # color-segment pass: every item whose itemid color matches
+            # color-segment pass: every item whose itemid color matches.
+            # In part mode the partId's last token is the size (TCK's
+            # 'TSK11-026-L') -- require it to agree with the itemid's size
+            # segment so same-color sizes don't collapse onto one part.
             part_colors = {c.strip().lower() for c in part["colors"] if c.strip()}
+            psize = ""
+            if part_mode:
+                toks = part["partId"].split("-")
+                if len(toks) >= 3:
+                    psize = normalize_size(toks[-1]).strip().lower()
             if part_colors:
-                for iid, seg in seg_color.items():
-                    if seg in part_colors:
-                        claim(iid, part)
+                for iid, (cseg, sseg) in seg_info.items():
+                    if cseg not in part_colors:
+                        continue
+                    if (psize and sseg
+                            and normalize_size(sseg).strip().lower() != psize):
+                        continue
+                    claim(iid, part)
         if len(parts) == 1:
             # single-part style (one price/qty for the whole style): the part
             # applies to every item of the style not claimed above.
             for r in rows:
                 claim(str(r["id"]), parts[0])
         if n % 50 == 0:
-            print(f"  ...{n}/{len(present)} styles processed; matched so far {len(matched):,}")
+            print(f"  ...{n}/{len(units)} styles processed; matched so far {len(matched):,}")
     print(f"matched items: {len(matched):,}")
 
     ids = sorted(matched)
