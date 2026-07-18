@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: manual-nightly-2026-07-18-retry-champro
-SUPPLIER=champro
+# run: manual-nightly-2026-07-18-retry-tck
+SUPPLIER=tck
 DRY_RUN=false
 MAX_ITEMS=0
 DEBUG=false
