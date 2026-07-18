@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: tck-DRY-3-part-mode
+# run: tck-DRY-4-unit-debug
 SUPPLIER=tck
 DRY_RUN=true
 MAX_ITEMS=0
-DEBUG=false
+DEBUG=true

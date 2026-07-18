@@ -317,6 +317,8 @@ def main() -> int:
                 print(f"  ...{n}/{len(feed_products)} feed products harvested; "
                       f"{len(by_style)} allowlisted styles so far")
         print(f"part-derived styles on the price list: {len(by_style):,}")
+        if debug:
+            print(f"  DEBUG part-derived styles: {sorted(by_style)}")
         units = [(st, ps, inv_all) for st, ps in sorted(by_style.items())]
     else:
         for style in sorted(present):
@@ -352,6 +354,12 @@ def main() -> int:
                     toks[1].strip().lower(),
                     toks[2].strip() if len(toks) >= 3 else "",
                 )
+        if debug and n <= 12:
+            sample = (f"; item sample: {rows[0].get('itemid')!r} "
+                      f"vendorname={rows[0].get('vendorname')!r}") if rows else ""
+            print(f"  DEBUG unit[{style}]: {len(parts)} parts "
+                  f"(partIds: {[p['partId'] for p in parts[:3]]}); "
+                  f"{len(rows)} NetSuite items{sample}")
 
         def claim(rid: str, part: dict) -> None:
             if rid and rid not in matched:
