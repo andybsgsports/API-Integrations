@@ -8,5 +8,6 @@
 # run: FULL-live
 # run: FULL-live-residual-4-with-identity
 # run: FULL-live-skip-inactive-and-retire-values
+# run: FULL-live-retire-final-3-abbrev-collision
 DRY_RUN=false
 MAX_ITEMS=0

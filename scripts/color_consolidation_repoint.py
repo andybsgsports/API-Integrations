@@ -144,6 +144,19 @@ def main() -> int:
             client.update_record(COLOR_LIST, vid, {"isInactive": True})
             lv_written += 1
         except Exception as exc:  # noqa: BLE001
+            # Inactivation re-validates the abbreviation, which duplicates the
+            # canonical twin's -- uniquify it in the same PATCH and retry.
+            if "already uses that abbreviation" in str(getattr(exc, "payload", "")):
+                try:
+                    client.update_record(
+                        COLOR_LIST, vid,
+                        {"isInactive": True, "abbreviation": f"zz{vid}"},
+                    )
+                    lv_written += 1
+                    print(f"  retired value {vid} with uniquified abbreviation zz{vid}")
+                    continue
+                except Exception as exc2:  # noqa: BLE001
+                    exc = exc2
             lv_failures += 1
             if lv_failures <= 10:
                 detail = getattr(exc, "payload", "")
