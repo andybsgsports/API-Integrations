@@ -39,8 +39,10 @@ jobs:
             DRY_RUN="${{ github.event.inputs.dry_run }}"
           fi
           [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          DIFF=$(grep -E "^DIFF=" .tsk11-dup-fix-trigger 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \r')
           echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
-          echo "Resolved: dry_run=$DRY_RUN"
+          echo "TSK11_DIFF=${DIFF:-false}" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$DRY_RUN diff=${DIFF:-false}"
 
       - name: Write .env from repo secrets
         run: |
@@ -58,6 +60,8 @@ jobs:
         run: python scripts/ns_auth_check.py
 
       - name: Run TSK11 duplicate fix
+        env:
+          TSK11_DIFF: ${{ env.TSK11_DIFF }}
         run: python scripts/tsk11_dup_fix.py
 
       - name: Open issue on failure

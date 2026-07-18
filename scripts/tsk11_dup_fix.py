@@ -16,6 +16,8 @@ Honors ``SYNC_DRY_RUN``.
 
 from __future__ import annotations
 
+import os
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, COLOR_LIST, SIZE_FIELD, SIZE_LIST
 from sanmar_netsuite.netsuite.client import NetSuiteClient
@@ -63,10 +65,54 @@ def qty_of(row: dict | None) -> float:
         return 0.0
 
 
+def account_diff(client: NetSuiteClient) -> None:
+    """Full-record GET of one broken item vs one healthy sibling.
+
+    Every PATCH on the 3 items fails record validation with 'You may not use
+    duplicate accounts on an item' -- an accounting misconfiguration on the
+    records themselves. Diff the account-ish fields against a sibling that
+    saves fine (94020, TSK11-Black-Large) to find the duplicate.
+    """
+    records = {}
+    for label, rid in (("BROKEN 97565 (Crd)", "97565"), ("HEALTHY 94020 (Black)", "94020")):
+        try:
+            records[label] = client.get_record("inventoryItem", rid)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  GET {rid} failed: {str(exc)[:120]}")
+            return
+
+    def summarize(rec: dict) -> dict[str, str]:
+        out = {}
+        for k, v in sorted(rec.items()):
+            if "account" not in k.lower():
+                continue
+            if isinstance(v, dict):
+                out[k] = f"{v.get('id')}:{v.get('refName', '')}"
+            else:
+                out[k] = str(v)
+        return out
+
+    sums = {label: summarize(rec) for label, rec in records.items()}
+    keys = sorted(set().union(*[s.keys() for s in sums.values()]))
+    print("\n=== account-field diff (broken vs healthy) ===")
+    for k in keys:
+        vals = [sums[label].get(k, "<absent>") for label in sums]
+        marker = "  <<< DIFFERS" if len(set(vals)) > 1 else ""
+        print(f"  {k:<32} broken={vals[0]:<40} healthy={vals[1]}{marker}")
+    b_keys, h_keys = (set(records[label].keys()) for label in records)
+    only_b, only_h = sorted(b_keys - h_keys), sorted(h_keys - b_keys)
+    if only_b:
+        print(f"  top-level keys only on broken: {only_b}")
+    if only_h:
+        print(f"  top-level keys only on healthy: {only_h}")
+
+
 def main() -> int:
     cfg = get_config()
     allow_write = not cfg.sync.dry_run
     client = NetSuiteClient(cfg.netsuite)
+    if (os.environ.get("TSK11_DIFF") or "").lower() == "true":
+        account_diff(client)
 
     all_names = [n for pair in PAIRS for n in pair]
     rows, qty_col = fetch(client, all_names)

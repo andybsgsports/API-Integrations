@@ -4,4 +4,6 @@
 # run: dry-run-suffix-search
 # run: dry-run-sibling-option-diagnostic
 # run: LIVE-capture-full-error
-DRY_RUN=false
+# run: dry-run-account-diff
+DRY_RUN=true
+DIFF=true
