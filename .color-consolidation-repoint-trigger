@@ -13,5 +13,6 @@
 # run: verification-dry-run-identify-sticky-8
 # run: FULL-live-standalone-items-bare-field
 # run: FULL-live-standalone-items-bare-int
+# run: FULL-live-standalone-items-multiselect-shape
 DRY_RUN=false
 MAX_ITEMS=0

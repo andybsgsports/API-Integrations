@@ -106,10 +106,9 @@ def main() -> int:
         if matrixtype == "CHILD":
             bodies = [{f"matrixoption{COLOR_FIELD}": {"id": canonical}}]
         else:
-            bodies = [
-                {COLOR_FIELD: {"id": canonical}},
-                {COLOR_FIELD: int(canonical)},
-            ]
+            # The field is a Multiple Select ("List,MultiSelect") on
+            # non-matrix items -- REST wants the items-array shape.
+            bodies = [{COLOR_FIELD: {"items": [{"id": canonical}]}}]
         last_exc: Exception | None = None
         for body in bodies:
             try:
