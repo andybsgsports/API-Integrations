@@ -49,3 +49,5 @@ jobs:
         run: python scripts/ss_product_probe.py
       - name: Run S&S diagnose (unmatched item + image fields)
         run: python scripts/ss_diagnose.py
+      - name: Run S&S style probe (styleID ground truth)
+        run: python scripts/ss_style_probe.py
