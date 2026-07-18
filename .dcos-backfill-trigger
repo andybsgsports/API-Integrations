@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: capamerica-SMOKE
+# run: capamerica-FULL
 SUPPLIER=capamerica
 DRY_RUN=false
-MAX_ITEMS=25
+MAX_ITEMS=0
 DEBUG=false
