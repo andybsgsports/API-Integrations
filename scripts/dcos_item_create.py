@@ -162,9 +162,17 @@ def main() -> int:
             break
         safe = _sql_escape(style)
         existing = client.suiteql(
-            f"SELECT id FROM item WHERE vendorname = '{safe}' OR itemid = '{safe}'"
+            f"SELECT id, itemid FROM item WHERE vendorname = '{safe}' OR itemid = '{safe}'"
         )
-        if existing:
+        # A childless parent (e.g. from a run that failed at the child step)
+        # must NOT skip the style -- reuse it and create its children. Only a
+        # style that already has children (itemid 'STYLE-Color-Size') is done.
+        existing_parent_id = next(
+            (str(r["id"]) for r in existing
+             if str(r.get("itemid") or "").strip() == style),
+            None,
+        )
+        if any(str(r.get("itemid") or "").strip() != style for r in existing):
             skipped_styles += 1
             continue
 
@@ -220,24 +228,29 @@ def main() -> int:
             created_children += len(children)
             continue
 
-        if parent_refs is None:
-            parent_refs = resolve_parent_refs(client)
-        parent_body = {
-            "itemId": style,
-            "vendorName": style,
-            "matrixType": "PARENT",
-            "isInactive": False,
-            **parent_refs,
-        }
-        try:
-            pid = client.create_record("inventoryItem", parent_body)
-            created_parents += 1
-            print(f"  parent created: id {pid or '?'}")
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            detail = getattr(exc, "payload", "")
-            print(f"  PARENT FAILED {style}: {str(exc)[:120]} :: {str(detail)[:400]}")
-            continue
+        if existing_parent_id:
+            # a prior run created the parent but failed at the child step;
+            # the RESTlet resolves the parent by name, so just create children
+            print(f"  parent already exists: id {existing_parent_id} (reusing)")
+        else:
+            if parent_refs is None:
+                parent_refs = resolve_parent_refs(client)
+            parent_body = {
+                "itemId": style,
+                "vendorName": style,
+                "matrixType": "PARENT",
+                "isInactive": False,
+                **parent_refs,
+            }
+            try:
+                pid = client.create_record("inventoryItem", parent_body)
+                created_parents += 1
+                print(f"  parent created: id {pid or '?'}")
+            except Exception as exc:  # noqa: BLE001
+                failures += 1
+                detail = getattr(exc, "payload", "")
+                print(f"  PARENT FAILED {style}: {str(exc)[:120]} :: {str(detail)[:400]}")
+                continue
 
         payloads = []
         for part, color, size in children:

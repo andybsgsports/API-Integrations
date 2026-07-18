@@ -4,7 +4,9 @@
 # run: ripit-LIVE-smoke-1-style (user approved)
 # run: ripit-LIVE-smoke-retry-taxschedule-fix (same user-approved smoke)
 # run: ripit-LIVE-smoke-retry-2-invtpart-filter
+# parked at dry-run: children need NETSUITE_MATRIX_SCRIPT_ID /
+# NETSUITE_MATRIX_DEPLOY_ID repo secrets before the live smoke can create them.
 SUPPLIER=ripit
-DRY_RUN=false
-MAX_STYLES=1
-MAX_ITEMS=10
+DRY_RUN=true
+MAX_STYLES=0
+MAX_ITEMS=0
