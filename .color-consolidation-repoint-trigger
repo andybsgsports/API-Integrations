@@ -11,5 +11,6 @@
 # run: FULL-live-retire-final-3-abbrev-collision
 # run: verification-dry-run-post-replica-lag
 # run: verification-dry-run-identify-sticky-8
-DRY_RUN=true
+# run: FULL-live-standalone-items-bare-field
+DRY_RUN=false
 MAX_ITEMS=0

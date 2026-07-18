@@ -58,7 +58,7 @@ def main() -> int:
     # (the WHERE doesn't actually filter -- all rows come back and SuiteQL
     # omits null columns from row JSON, hence .get below)
     rows = client.suiteql(
-        f"SELECT id, {COLOR_FIELD} AS c, isinactive FROM item "
+        f"SELECT id, {COLOR_FIELD} AS c, isinactive, matrixtype FROM item "
         f"WHERE {COLOR_FIELD} IS NOT NULL"
     )
     print(f"item rows fetched: {len(rows):,}")
@@ -73,13 +73,13 @@ def main() -> int:
         if str(r.get("isinactive") or "F") == "T":
             skipped_inactive += 1
             continue
-        todo.append((str(r["id"]), c))
+        todo.append((str(r["id"]), c, str(r.get("matrixtype") or "")))
     print(f"items pointing at a retired value: {len(todo):,} "
           f"(inactive items skipped: {skipped_inactive})")
 
     considered = written = failures = 0
     samples = 0
-    for item_id, retire_id in todo:
+    for item_id, retire_id, matrixtype in todo:
         canonical = plan[retire_id]
         if max_items and considered >= max_items:
             continue
@@ -99,21 +99,20 @@ def main() -> int:
         if not allow_write:
             written += 1
             continue
-        # Matrix children expose the color under the matrixoption alias (the
-        # bare custitem field is rejected with "Invalid value"); the bare
-        # field stays as fallback for any non-matrix item.
+        # Matrix children only accept the matrixoption alias (bare custitem
+        # is rejected); standalone items only accept the bare field (the
+        # matrixoption alias returns 204 but silently writes nothing). Pick
+        # by matrixtype -- a blind fallback can't tell those cases apart.
+        if matrixtype == "CHILD":
+            body = {f"matrixoption{COLOR_FIELD}": {"id": canonical}}
+        else:
+            body = {COLOR_FIELD: {"id": canonical}}
         last_exc: Exception | None = None
-        for body in (
-            {f"matrixoption{COLOR_FIELD}": {"id": canonical}},
-            {COLOR_FIELD: {"id": canonical}},
-        ):
-            try:
-                client.update_record("inventoryItem", item_id, body)
-                written += 1
-                last_exc = None
-                break
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
+        try:
+            client.update_record("inventoryItem", item_id, body)
+            written += 1
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
         if last_exc is not None:
             failures += 1
             if failures <= 10:
