@@ -28,20 +28,22 @@ SANMAR_WHSE_FIELDS: dict[str, tuple[str, str]] = {
     "31": ("custitem_sanmar_qty_richmond", "SanMar Qty: Richmond, VA"),
 }
 
-# warehouseAbbr -> (scriptid, label); codes as S&S's API reports them.
+# warehouseAbbr -> (scriptid, label). Codes are as S&S's /Inventory API
+# reports them; the city/state each maps to was confirmed with the user
+# (S&S publishes no code->name table and its API returns only the abbr).
 SS_WHSE_FIELDS: dict[str, tuple[str, str]] = {
-    "IL": ("custitem_ss_qty_il", "S&S Qty: IL"),
-    "KS": ("custitem_ss_qty_ks", "S&S Qty: KS"),
-    "GA": ("custitem_ss_qty_ga", "S&S Qty: GA"),
-    "TX": ("custitem_ss_qty_tx", "S&S Qty: TX"),
-    "NV": ("custitem_ss_qty_nv", "S&S Qty: NV"),
-    "OH": ("custitem_ss_qty_oh", "S&S Qty: OH"),
-    "PA": ("custitem_ss_qty_pa", "S&S Qty: PA"),
-    "CN": ("custitem_ss_qty_cn", "S&S Qty: CN"),
-    "FO": ("custitem_ss_qty_fo", "S&S Qty: FO"),
-    "MA": ("custitem_ss_qty_ma", "S&S Qty: MA"),
-    "DS": ("custitem_ss_qty_ds", "S&S Qty: DS"),
-    "CC": ("custitem_ss_qty_cc", "S&S Qty: CC"),
+    "IL": ("custitem_ss_qty_il", "S&S Qty: Lockport, IL"),
+    "KS": ("custitem_ss_qty_ks", "S&S Qty: Olathe, KS"),
+    "GA": ("custitem_ss_qty_ga", "S&S Qty: McDonough, GA"),
+    "TX": ("custitem_ss_qty_tx", "S&S Qty: Fort Worth, TX"),
+    "NV": ("custitem_ss_qty_nv", "S&S Qty: Reno, NV"),
+    "OH": ("custitem_ss_qty_oh", "S&S Qty: West Chester, OH"),
+    "PA": ("custitem_ss_qty_pa", "S&S Qty: Reading, PA"),
+    "CN": ("custitem_ss_qty_cn", "S&S Qty: Fresno, CA"),
+    "FO": ("custitem_ss_qty_fo", "S&S Qty: Orlando, FL"),
+    "MA": ("custitem_ss_qty_ma", "S&S Qty: Middleboro, MA"),
+    "DS": ("custitem_ss_qty_ds", "S&S Qty: Drop Ship"),
+    "CC": ("custitem_ss_qty_cc", "S&S Qty: Bolingbrook, IL"),
 }
 
 SANMAR_QTY_FIELDS: list[str] = [sid for sid, _ in SANMAR_WHSE_FIELDS.values()]
