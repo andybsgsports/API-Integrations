@@ -47,3 +47,5 @@ jobs:
           EOF2
       - name: Run S&S product data probe (read-only)
         run: python scripts/ss_product_probe.py
+      - name: Run S&S diagnose (unmatched item + image fields)
+        run: python scripts/ss_diagnose.py
