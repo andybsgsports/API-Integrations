@@ -2,5 +2,6 @@
 # run: dry-run-first
 # run: dry-run-retry-with-diagnostics
 # run: dry-run-fetch-all-filter-local
+# run: dry-run-null-safe-rows
 DRY_RUN=true
 MAX_ITEMS=0

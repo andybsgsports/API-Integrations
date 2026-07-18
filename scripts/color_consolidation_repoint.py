@@ -53,13 +53,17 @@ def main() -> int:
     # unsupported search") -- custom-field equality filters don't translate.
     # IS NOT NULL does work (proven by the planner), so pull every colored
     # item and filter against the plan here.
+    # (the WHERE doesn't actually filter -- all rows come back and SuiteQL
+    # omits null columns from row JSON, hence .get below)
     rows = client.suiteql(
         f"SELECT id, {COLOR_FIELD} AS c FROM item WHERE {COLOR_FIELD} IS NOT NULL"
     )
-    print(f"items with a color option: {len(rows):,}")
-    todo = [
-        (str(r["id"]), str(r["c"])) for r in rows if str(r["c"]) in plan
-    ]
+    print(f"item rows fetched: {len(rows):,}")
+    todo = []
+    for r in rows:
+        c = str(r.get("c") or "")
+        if c in plan:
+            todo.append((str(r["id"]), c))
     print(f"items pointing at a retired value: {len(todo):,}")
 
     considered = written = failures = 0
