@@ -1,5 +1,6 @@
 # Trigger file for color-consolidation-repoint.yml push-trigger runs.
 # run: dry-run-first
 # run: dry-run-retry-with-diagnostics
+# run: dry-run-fetch-all-filter-local
 DRY_RUN=true
 MAX_ITEMS=0

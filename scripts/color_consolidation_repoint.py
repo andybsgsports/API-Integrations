@@ -49,41 +49,40 @@ def main() -> int:
         print("nothing to do")
         return 0
 
-    retire_ids = sorted(plan)
+    # WHERE {COLOR_FIELD} IN (...) is rejected by SuiteQL ("Invalid or
+    # unsupported search") -- custom-field equality filters don't translate.
+    # IS NOT NULL does work (proven by the planner), so pull every colored
+    # item and filter against the plan here.
+    rows = client.suiteql(
+        f"SELECT id, {COLOR_FIELD} AS c FROM item WHERE {COLOR_FIELD} IS NOT NULL"
+    )
+    print(f"items with a color option: {len(rows):,}")
+    todo = [
+        (str(r["id"]), str(r["c"])) for r in rows if str(r["c"]) in plan
+    ]
+    print(f"items pointing at a retired value: {len(todo):,}")
+
     considered = written = failures = 0
     samples = 0
-    for i in range(0, len(retire_ids), 100):
-        chunk = retire_ids[i : i + 100]
-        in_list = ", ".join(chunk)
-        query = f"SELECT id, {COLOR_FIELD} AS c FROM item WHERE {COLOR_FIELD} IN ({in_list})"
+    for item_id, retire_id in todo:
+        canonical = plan[retire_id]
+        if max_items and considered >= max_items:
+            continue
+        considered += 1
+        if samples < 10:
+            samples += 1
+            print(f"  sample: item {item_id} color {retire_id} -> {canonical}")
+        if not allow_write:
+            written += 1
+            continue
         try:
-            rows = client.suiteql(query)
+            client.update_record("inventoryItem", item_id, {COLOR_FIELD: {"id": canonical}})
+            written += 1
         except Exception as exc:  # noqa: BLE001
-            print(f"QUERY FAILED: {query!r}")
-            print(f"  {str(exc)[:200]} :: {str(getattr(exc, 'payload', ''))[:500]}")
-            raise
-        for r in rows:
-            item_id, retire_id = str(r["id"]), str(r["c"])
-            canonical = plan.get(retire_id)
-            if canonical is None:
-                continue
-            if max_items and considered >= max_items:
-                continue
-            considered += 1
-            if samples < 10:
-                samples += 1
-                print(f"  sample: item {item_id} color {retire_id} -> {canonical}")
-            if not allow_write:
-                written += 1
-                continue
-            try:
-                client.update_record("inventoryItem", item_id, {COLOR_FIELD: {"id": canonical}})
-                written += 1
-            except Exception as exc:  # noqa: BLE001
-                failures += 1
-                if failures <= 10:
-                    detail = getattr(exc, "payload", "")
-                    print(f"  FAILED item {item_id}: {str(exc)[:100]} :: {str(detail)[:200]}")
+            failures += 1
+            if failures <= 10:
+                detail = getattr(exc, "payload", "")
+                print(f"  FAILED item {item_id}: {str(exc)[:100]} :: {str(detail)[:200]}")
 
     verb = "repointed" if allow_write else "WOULD repoint (dry run)"
     print(f"\ncolor consolidation: {verb} {written} item(s); considered: {considered}; "
