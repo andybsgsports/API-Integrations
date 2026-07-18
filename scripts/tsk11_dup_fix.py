@@ -107,12 +107,23 @@ def account_diff(client: NetSuiteClient) -> None:
         print(f"  top-level keys only on healthy: {only_h}")
 
 
+# Filled at run time from the healthy sibling (TSK11-Black-Large, id 94020):
+# the asset account every non-broken TSK11 child uses.
+HEALTHY_ASSET: dict[str, str] = {"id": ""}
+
+
 def main() -> int:
     cfg = get_config()
     allow_write = not cfg.sync.dry_run
     client = NetSuiteClient(cfg.netsuite)
     if (os.environ.get("TSK11_DIFF") or "").lower() == "true":
         account_diff(client)
+    try:
+        healthy = client.get_record("inventoryItem", "94020")
+        HEALTHY_ASSET["id"] = str((healthy.get("assetAccount") or {}).get("id") or "")
+        print(f"healthy sibling assetAccount: {HEALTHY_ASSET['id']}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"healthy sibling GET failed ({str(exc)[:80]}); account repair disabled")
 
     all_names = [n for pair in PAIRS for n in pair]
     rows, qty_col = fetch(client, all_names)
@@ -199,12 +210,33 @@ def main() -> int:
             plan.append((str(loser["id"]),
                          {"itemId": f"{loser_plain}-DUP", "isInactive": True},
                          f"retire {loser['itemid']!r} -> '{loser_plain}-DUP' (inactive)"))
+        # These records fail EVERY save with 'You may not use duplicate
+        # accounts on an item': their assetAccount equals their cogsAccount
+        # (128/128) while every healthy sibling is 127/128. Repair the asset
+        # account (to the healthy sibling's) in the same PATCH as the rename,
+        # or nothing can ever be written to them again.
+        body: dict = {}
+        desc_bits: list[str] = []
+        try:
+            rec = client.get_record("inventoryItem", str(keeper["id"]))
+            asset = str((rec.get("assetAccount") or {}).get("id") or "")
+            cogs = str((rec.get("cogsAccount") or {}).get("id") or "")
+            if asset and asset == cogs and HEALTHY_ASSET["id"]:
+                body["assetAccount"] = {"id": HEALTHY_ASSET["id"]}
+                desc_bits.append(
+                    f"fix assetAccount {asset} -> {HEALTHY_ASSET['id']} "
+                    f"(was duplicated with cogsAccount)")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  keeper record GET failed ({str(exc)[:80]}); "
+                  "skipping account repair")
         keeper_plain = str(keeper["itemid"]).split(" : ")[-1].strip()
         if keeper_plain.upper() == abbrev.upper():
-            plan.append((str(keeper["id"]), {"itemId": canonical},
-                         f"rename keeper {abbrev!r} -> {canonical!r}"))
+            body["itemId"] = canonical
+            desc_bits.append(f"rename {abbrev!r} -> {canonical!r}")
         else:
             print(f"  keeper already holds the canonical name (id {keeper['id']})")
+        if body:
+            plan.append((str(keeper["id"]), body, "; ".join(desc_bits)))
         for rid, body, desc in plan:
             print(f"  {'would ' if not allow_write else ''}{desc}")
             if not allow_write:

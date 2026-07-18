@@ -5,5 +5,6 @@
 # run: dry-run-sibling-option-diagnostic
 # run: LIVE-capture-full-error
 # run: dry-run-account-diff
-DRY_RUN=true
-DIFF=true
+# run: LIVE-account-repair-plus-rename
+DRY_RUN=false
+DIFF=false
