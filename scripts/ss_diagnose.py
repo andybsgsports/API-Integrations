@@ -14,7 +14,6 @@ Env: SS_ITEM_UNMATCHED (default 5389), SS_ITEM_MATCHED (default 84083).
 
 from __future__ import annotations
 
-import json
 import os
 
 from sanmar_netsuite.config import get_config
