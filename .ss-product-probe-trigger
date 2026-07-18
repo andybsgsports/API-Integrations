@@ -1,5 +1,3 @@
 # Trigger file for ss-product-probe.yml push-trigger runs.
-# run: styleid-6124
-# run: definitive-crosscheck
-# run: fix-normalize-import
+# run: dump-warehouse-and-brand-fields-on-royal-medium
 ITEM_ID=84083

@@ -51,3 +51,7 @@ jobs:
         run: python scripts/ss_diagnose.py
       - name: Run S&S style probe (styleID ground truth)
         run: python scripts/ss_style_probe.py
+      - name: Dump item warehouse/brand fields
+        env:
+          ITEM_DUMP_ID: ${{ env.PROBE_ITEM_ID }}
+        run: python scripts/ns_item_dump.py
