@@ -104,10 +104,36 @@ def main() -> int:
     matched_kids = [k for k in kids if str(k.get("custitem_ss_sku") or "").strip()]
     print(f"  {len(kids)} children under vendorname {ns_vendor!r}; "
           f"{len(matched_kids)} have an S&S SKU")
-    for k in kids[:40]:
-        sku = str(k.get("custitem_ss_sku") or "").strip()
-        tag = f"ss_sku={sku}" if sku else "(no S&S data)"
-        print(f"    {k.get('itemid'):<32} {tag}")
+
+    # every Royal SKU S&S returns, all sizes -- is Royal/Small really absent?
+    print("\n=== every S&S Royal SKU (all sizes) ===")
+    royals = [p for p in prods if "royal" in (p.color_name or "").lower()]
+    for p in sorted(royals, key=lambda p: (p.size_name or "")):
+        print(f"    color={p.color_name!r} size={p.size_name!r} gtin={p.gtin!r} sku={p.sku!r}")
+
+    # DEFINITIVE cross-check: of the color+size combos S&S actually stocks,
+    # how many have a NetSuite child, and did that child match? A gap here =
+    # real matcher bug; zero gap = it's purely S&S stock availability.
+    def parse_kid(itemid: str) -> tuple[str, str] | None:
+        # 695HBM-<Color>-<Size>
+        rest = itemid[len(ns_vendor) + 1:] if itemid.startswith(ns_vendor + "-") else ""
+        parts = rest.rsplit("-", 1)
+        return (parts[0].lower(), parts[1].lower()) if len(parts) == 2 else None
+
+    ns_by_combo = {}
+    for k in kids:
+        pc = parse_kid(str(k.get("itemid") or ""))
+        if pc:
+            ns_by_combo[pc] = str(k.get("custitem_ss_sku") or "").strip()
+    ss_combos = {((p.color_name or "").strip().lower(),
+                  normalize_size((p.size_name or "").strip()).lower()) for p in prods}
+    shared = [c for c in ss_combos if c in ns_by_combo]
+    gap = [c for c in shared if not ns_by_combo[c]]
+    print("\n=== cross-check: S&S SKU has NetSuite child but DIDN'T match ===")
+    print(f"  S&S combos: {len(ss_combos)}; NetSuite child combos: {len(ns_by_combo)}; "
+          f"shared: {len(shared)}; of shared, UNMATCHED (real gap): {len(gap)}")
+    for c in sorted(gap):
+        print(f"    GAP: color={c[0]!r} size={c[1]!r} (S&S has it, NetSuite child exists, no match)")
     return 0
 
 

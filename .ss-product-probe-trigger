@@ -1,5 +1,4 @@
 # Trigger file for ss-product-probe.yml push-trigger runs.
-# run: styleid-6124-ground-truth
-# run: dump-actual-values
-# run: check-which-695HBM-children-matched
+# run: styleid-6124
+# run: definitive-crosscheck-and-all-royal-skus
 ITEM_ID=84083
