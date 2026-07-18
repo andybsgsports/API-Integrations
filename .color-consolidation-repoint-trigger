@@ -14,5 +14,6 @@
 # run: FULL-live-standalone-items-bare-field
 # run: FULL-live-standalone-items-bare-int
 # run: FULL-live-standalone-items-multiselect-shape
-DRY_RUN=false
+# run: final-verification-dry-run
+DRY_RUN=true
 MAX_ITEMS=0
