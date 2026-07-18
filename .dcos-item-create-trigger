@@ -1,7 +1,8 @@
 # Trigger file for dcos-item-create.yml push-trigger runs.
 # run: ripit-dry-run-first
 # run: ripit-dry-run-deduped
+# run: ripit-LIVE-smoke-1-style (user approved)
 SUPPLIER=ripit
-DRY_RUN=true
-MAX_STYLES=0
-MAX_ITEMS=0
+DRY_RUN=false
+MAX_STYLES=1
+MAX_ITEMS=10
