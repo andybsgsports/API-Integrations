@@ -3,6 +3,7 @@
 # run: ripit-dry-run-deduped
 # run: ripit-LIVE-smoke-1-style (user approved)
 # run: ripit-LIVE-smoke-retry-taxschedule-fix (same user-approved smoke)
+# run: ripit-LIVE-smoke-retry-2-invtpart-filter
 SUPPLIER=ripit
 DRY_RUN=false
 MAX_STYLES=1

@@ -107,8 +107,11 @@ def resolve_parent_refs(client: NetSuiteClient) -> dict[str, dict]:
         # via 'Please enter value(s) for: Tax Schedule') -- borrow the ref
         # every existing item already carries
         try:
+            # itemtype filter matters: the bare item table returns kits,
+            # services, etc., and GET /inventoryItem on those 400s
             rows = client.suiteql(
-                "SELECT id FROM item WHERE isinactive = 'F' AND rownum <= 1"
+                "SELECT id FROM item WHERE itemtype = 'InvtPart' "
+                "AND isinactive = 'F' AND rownum <= 1"
             )
             rec = client.get_record("inventoryItem", str(rows[0]["id"]))
             ts = (rec.get("taxSchedule") or {}).get("id")
