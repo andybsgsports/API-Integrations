@@ -1,1 +1,2 @@
 # run: first-plan
+# run: post-refresh-replan (sandbox ids now match production after rebuild)
