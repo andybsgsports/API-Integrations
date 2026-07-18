@@ -4,5 +4,6 @@
 # run: dry-run-fetch-all-filter-local
 # run: dry-run-null-safe-rows
 # run: live-smoke-25
+# run: live-smoke-25-alt-shapes
 DRY_RUN=false
 MAX_ITEMS=25
