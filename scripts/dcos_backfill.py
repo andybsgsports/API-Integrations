@@ -110,7 +110,9 @@ def get_parts(base: str, key_id: str, key_pw: str, style: str) -> list[dict]:
             v = (sub.text or "").strip()
             if t == "partId" and v:
                 part["partId"] = v
-            elif t == "gtin" and v:
+            elif t == "gtin" and len(v) >= 8 and v.isdigit():
+                # Cap America publishes '-' as a placeholder gtin; only keep
+                # values that look like real barcodes.
                 part["gtin"] = v
             elif t == "colorName" and v:
                 part["colors"].append(v)
