@@ -1,6 +1,7 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: tck-FULL
-SUPPLIER=tck
-DRY_RUN=false
+# run: usb-DRY-2-part-mode
+SUPPLIER=usb
+DRY_RUN=true
 MAX_ITEMS=0
-DEBUG=false
+DEBUG=true
+DEBUG_HINT=mcdavid
