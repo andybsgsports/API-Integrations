@@ -447,7 +447,8 @@ def main() -> int:
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         for row in client.suiteql(
-            f"SELECT id, upccode, manufacturer, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, manufacturer, custitem_ss_brand, {cols} "
+            f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             want = {k: v for k, v in matched.get(rid, {}).items()
@@ -456,8 +457,10 @@ def main() -> int:
             gtin = matched.get(rid, {}).get(f"custitem_{prefix}_gtin", "")
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
-            if not _same(row.get("manufacturer"), sup["label"]):
-                body["manufacturer"] = sup["label"]  # native Manufacturer = Brand
+            # native Manufacturer = Brand; S&S brand wins on multi-vendor items
+            if (not str(row.get("custitem_ss_brand") or "").strip()
+                    and not _same(row.get("manufacturer"), sup["label"])):
+                body["manufacturer"] = sup["label"]
             stamp(body, row, key)
             if not body:
                 unchanged += 1

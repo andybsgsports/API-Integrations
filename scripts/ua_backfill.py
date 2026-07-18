@@ -298,13 +298,16 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"  (base-price read failed, writing unconditionally: {str(exc)[:80]})")
         for row in client.suiteql(
-            f"SELECT id, upccode, cost, manufacturer, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, manufacturer, custitem_ss_brand, {cols} "
+            f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             want = {k: v for k, v in matched.get(rid, {}).items()
                     if v is not None and str(v).strip() != ""}
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
-            if not _same(row.get("manufacturer"), "Under Armour"):
+            # S&S brand wins the Manufacturer field on multi-vendor items.
+            if (not str(row.get("custitem_ss_brand") or "").strip()
+                    and not _same(row.get("manufacturer"), "Under Armour")):
                 body["manufacturer"] = "Under Armour"
             gtin = matched.get(rid, {}).get("custitem_ua_gtin", "")
             if not str(row.get("upccode") or "").strip() and gtin:

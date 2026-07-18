@@ -173,7 +173,7 @@ def main() -> int:
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         rows = client.suiteql(
-            f"SELECT id, upccode, cost, weight, manufacturer, {cols} "
+            f"SELECT id, upccode, cost, weight, manufacturer, custitem_ss_brand, {cols} "
             f"FROM item WHERE upccode IN ({in_list})"
         )
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
@@ -186,6 +186,9 @@ def main() -> int:
             body = {
                 f: v for f, v in want.items() if not _same(row.get(f), v)
             }
+            # S&S brand wins the Manufacturer field on multi-vendor items.
+            if "manufacturer" in body and str(row.get("custitem_ss_brand") or "").strip():
+                del body["manufacturer"]
             price, cost, weight = natives.get(gtin, (None, None, None))
             add_native_diffs(
                 body, row, base_by_rid, str(row["id"]),
