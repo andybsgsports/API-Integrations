@@ -1,0 +1,4 @@
+# Trigger file for color-consolidation-repoint.yml push-trigger runs.
+# run: dry-run-first
+DRY_RUN=true
+MAX_ITEMS=0
