@@ -310,7 +310,14 @@ def main() -> int:
             inv_all.update(get_inventory(base, key_id, key_pw, product))
             for p in parts:
                 st = p["partId"].split("-")[0].strip().upper()
-                if not st or (allowlist is not None and st not in allowlist):
+                if not st:
+                    continue
+                # TCK appends a numeric suffix to base styles ('TSK' on the
+                # price list -> 'TSK11' in partIds and NetSuite itemids), so
+                # accept the alpha base too.
+                base_st = re.sub(r"\d+$", "", st)
+                if allowlist is not None and st not in allowlist \
+                        and base_st not in allowlist:
                     continue
                 by_style.setdefault(st, []).append(p)
             if n % 25 == 0:
