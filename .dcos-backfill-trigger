@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: manual-nightly-2026-07-18-retry-capamerica
-SUPPLIER=capamerica
+# run: manual-nightly-2026-07-18-retry-mizuno
+SUPPLIER=mizuno
 DRY_RUN=false
 MAX_ITEMS=0
 DEBUG=false
