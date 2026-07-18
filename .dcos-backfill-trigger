@@ -1,6 +1,6 @@
 # Trigger file for dcos-backfill.yml push-trigger runs.
-# run: mizuno-DRY-2-color-clean
+# run: mizuno-FULL
 SUPPLIER=mizuno
-DRY_RUN=true
+DRY_RUN=false
 MAX_ITEMS=0
 DEBUG=false
