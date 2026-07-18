@@ -30,16 +30,26 @@ PAIRS = [
 QTY_COLUMNS = ("totalquantityonhand", "quantityonhand", "quantityavailable")
 
 
-def fetch(client: NetSuiteClient, names: list[str]) -> tuple[dict[str, dict], str]:
-    in_list = ", ".join(f"'{_sql_escape(n)}'" for n in names)
+def fetch(client: NetSuiteClient, names: list[str]) -> tuple[list[dict], str]:
+    """All records whose itemid equals OR ends with any of the names.
+
+    The live rename run proved exact itemid matching misses the blockers:
+    NetSuite rejected every rename as a duplicate name while
+    ``itemid = 'TSK11-Cardinal-Large'`` found nothing -- matrix children
+    store parent-prefixed itemids ('TSK11 : TSK11-Cardinal-Large') but the
+    uniqueness check compares the child segment. A suffix LIKE exposes them.
+    """
+    conds = " OR ".join(
+        f"UPPER(itemid) LIKE UPPER('%{_sql_escape(n)}')" for n in names
+    )
     last_err = ""
     for qty_col in QTY_COLUMNS:
         try:
             rows = client.suiteql(
                 f"SELECT id, itemid, isinactive, upccode, {qty_col} AS qty "
-                f"FROM item WHERE itemid IN ({in_list})"
+                f"FROM item WHERE {conds}"
             )
-            return {str(r["itemid"]): r for r in rows}, qty_col
+            return rows, qty_col
         except Exception as exc:  # noqa: BLE001 - unknown column, try the next
             last_err = str(exc)[:80]
     raise RuntimeError(f"no usable inventory column ({last_err})")
@@ -58,27 +68,29 @@ def main() -> int:
     client = NetSuiteClient(cfg.netsuite)
 
     all_names = [n for pair in PAIRS for n in pair]
-    by_name, qty_col = fetch(client, all_names)
-    print(f"inventory column: {qty_col}; records found: {len(by_name)}/6")
+    rows, qty_col = fetch(client, all_names)
+    print(f"inventory column: {qty_col}; records found by suffix search: {len(rows)}")
+    for r in rows:
+        print(f"  id {r['id']:>7}  qty {qty_of(r):>4g}  inactive {r.get('isinactive')}  "
+              f"{str(r.get('itemid'))!r}")
+
+    def endswith(r: dict, name: str) -> bool:
+        return str(r.get("itemid") or "").strip().upper().endswith(name.upper())
 
     flagged = failures = written = 0
     for abbrev, canonical in PAIRS:
-        a, c = by_name.get(abbrev), by_name.get(canonical)
+        holders_a = [r for r in rows if endswith(r, abbrev)]
+        holders_c = [r for r in rows if endswith(r, canonical)]
         print(f"\n=== {abbrev!r} vs {canonical!r}")
-        for label, r in (("abbrev", a), ("canonical", c)):
-            if r is None:
-                print(f"  {label:<10} MISSING")
-            else:
-                print(f"  {label:<10} id {r['id']}  qty {qty_of(r):g}  "
-                      f"inactive {r.get('isinactive')}  upc {r.get('upccode') or '-'}")
-        if a is None and c is None:
-            print("  -> neither record found; nothing to do")
+        if len(holders_a) != 1 or len(holders_c) > 1:
+            flagged += 1
+            print(f"  -> FLAGGED: unexpected record counts (abbrev x{len(holders_a)}, "
+                  f"canonical x{len(holders_c)}) -- needs a human")
             continue
-        if a is None:
-            print("  -> abbreviated record already gone; nothing to do")
-            continue
+        a = holders_a[0]
+        c = holders_c[0] if holders_c else None
         if c is None:
-            # target name is free after all -- just rename the abbreviated one
+            # target name genuinely free -- just rename the abbreviated one
             keeper, loser = a, None
         else:
             qa, qc = qty_of(a), qty_of(c)
@@ -88,12 +100,16 @@ def main() -> int:
                       f"canonical {qc:g}) -- needs a human")
                 continue
             keeper, loser = (a, c) if qa > 0 else (c, a)
+        # matrix children come back parent-prefixed ('TSK11 : <name>'); the
+        # writable itemId is only the child segment.
         plan = []
         if loser is not None:
+            loser_plain = str(loser["itemid"]).split(" : ")[-1].strip()
             plan.append((str(loser["id"]),
-                         {"itemId": f"{loser['itemid']}-DUP", "isInactive": True},
-                         f"retire {loser['itemid']!r} -> '{loser['itemid']}-DUP' (inactive)"))
-        if str(keeper["itemid"]) == abbrev:
+                         {"itemId": f"{loser_plain}-DUP", "isInactive": True},
+                         f"retire {loser['itemid']!r} -> '{loser_plain}-DUP' (inactive)"))
+        keeper_plain = str(keeper["itemid"]).split(" : ")[-1].strip()
+        if keeper_plain.upper() == abbrev.upper():
             plan.append((str(keeper["id"]), {"itemId": canonical},
                          f"rename keeper {abbrev!r} -> {canonical!r}"))
         else:

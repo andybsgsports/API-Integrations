@@ -1,4 +1,5 @@
 # Trigger file for tsk11-dup-fix.yml push-trigger runs.
 # run: dry-run-first
 # run: LIVE-rename-3
-DRY_RUN=false
+# run: dry-run-suffix-search
+DRY_RUN=true
