@@ -55,3 +55,5 @@ jobs:
         env:
           ITEM_DUMP_ID: ${{ env.PROBE_ITEM_ID }}
         run: python scripts/ns_item_dump.py
+      - name: Probe S&S warehouse code -> full name
+        run: python scripts/ss_warehouse_probe.py
