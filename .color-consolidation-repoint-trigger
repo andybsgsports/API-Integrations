@@ -12,5 +12,6 @@
 # run: verification-dry-run-post-replica-lag
 # run: verification-dry-run-identify-sticky-8
 # run: FULL-live-standalone-items-bare-field
+# run: FULL-live-standalone-items-bare-int
 DRY_RUN=false
 MAX_ITEMS=0

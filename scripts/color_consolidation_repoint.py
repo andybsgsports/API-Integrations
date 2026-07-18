@@ -104,15 +104,21 @@ def main() -> int:
         # matrixoption alias returns 204 but silently writes nothing). Pick
         # by matrixtype -- a blind fallback can't tell those cases apart.
         if matrixtype == "CHILD":
-            body = {f"matrixoption{COLOR_FIELD}": {"id": canonical}}
+            bodies = [{f"matrixoption{COLOR_FIELD}": {"id": canonical}}]
         else:
-            body = {COLOR_FIELD: {"id": canonical}}
+            bodies = [
+                {COLOR_FIELD: {"id": canonical}},
+                {COLOR_FIELD: int(canonical)},
+            ]
         last_exc: Exception | None = None
-        try:
-            client.update_record("inventoryItem", item_id, body)
-            written += 1
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
+        for body in bodies:
+            try:
+                client.update_record("inventoryItem", item_id, body)
+                written += 1
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
         if last_exc is not None:
             failures += 1
             if failures <= 10:
