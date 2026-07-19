@@ -24,7 +24,7 @@ import os
 import re
 from xml.etree import ElementTree as ET
 
-import httpx
+import requests
 
 from ss_activewear_netsuite.config import get_config as ss_config
 from ss_activewear_netsuite.ss_activewear.client import SsClient
@@ -73,12 +73,12 @@ def _findall(el, name):
     return [d for d in el.iter() if _local(d.tag) == name]
 
 
-def discover_endpoint(client: httpx.Client) -> list[str]:
+def discover_endpoint(client: requests.Session) -> list[str]:
     """Return candidate endpoints, front-loading any the WSDL advertises."""
     working = []
     for base in ENDPOINT_CANDIDATES:
         try:
-            r = client.get(base + "?wsdl", timeout=25)
+            r = client.get(base + "?wsdl", timeout=25, allow_redirects=True)
         except Exception as exc:  # noqa: BLE001
             print(f"  WSDL {base}?wsdl -> {type(exc).__name__}: {str(exc)[:80]}")
             continue
@@ -92,11 +92,12 @@ def discover_endpoint(client: httpx.Client) -> list[str]:
     return working + [c for c in ENDPOINT_CANDIDATES if c not in working]
 
 
-def call_inventory(client: httpx.Client, url: str, body: str) -> httpx.Response | None:
+def call_inventory(client: requests.Session, url: str, body: str) -> requests.Response | None:
     for action in ("getInventoryLevels", ""):
         headers = {"Content-Type": "text/xml; charset=utf-8", "SOAPAction": action}
         try:
-            r = client.post(url, content=body.encode(), headers=headers, timeout=40)
+            r = client.post(url, data=body.encode(), headers=headers, timeout=40,
+                            allow_redirects=True)
         except Exception as exc:  # noqa: BLE001
             print(f"  POST {url} (action={action!r}) -> {type(exc).__name__}: {str(exc)[:80]}")
             continue
@@ -151,7 +152,7 @@ def main() -> int:
                    if p.strip()]
     compare_sku = os.environ.get("SS_PS_COMPARE_SKU") or "B06560504"
 
-    client = httpx.Client(follow_redirects=True)
+    client = requests.Session()
     print("=== discovering PromoStandards Inventory 2.0.0 endpoint ===")
     endpoints = discover_endpoint(client)
 
