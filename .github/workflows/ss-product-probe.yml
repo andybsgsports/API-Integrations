@@ -61,3 +61,5 @@ jobs:
         env:
           ITEM_ID: ${{ env.PROBE_ITEM_ID }}
         run: python scripts/ss_item_inventory_probe.py
+      - name: Probe PromoStandards Inventory 2.0.0 vs REST
+        run: python scripts/ss_promostandards_probe.py

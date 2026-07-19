@@ -1,3 +1,3 @@
-# Compare item 84084 stored qty vs live S&S /Inventory for its real SKU.
-# run: gildan8000-black-med-inv-compare-2026-07-18b
+# Probe PromoStandards Inventory 2.0.0 vs REST /Inventory for the flat-500 style.
+# run: promostandards-inv-compare-2026-07-18
 ITEM_ID=84084
