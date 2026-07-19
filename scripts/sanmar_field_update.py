@@ -43,6 +43,16 @@ FIELD_ORDER = [
     "custitem_sanmar_front_image_url",
 ] + SANMAR_QTY_FIELDS
 
+# SanMar's sanmar_dip.txt inventory file caps Quantity at 1500 per warehouse
+# (documented in the SanMar FTP Integration Guide; raised from 500 in July
+# 2025). A warehouse with more than 1500 on hand reports as exactly 1500.
+# We use dip.txt (SanMar's recommended inventory source), so we inherit the
+# cap; track hits so it's visible in the feed log. Real on-hand above 1500 is
+# only available via SanMar's PromoStandards/Web Service inventory API.
+INVENTORY_CAP_VALUE = 1500
+CAP_SKUS: set[str] = set()
+CAP_STATS: dict[str, int] = {"locations": 0}
+
 
 def _dl(cfg, name: str) -> Path:
     path = Path(cfg.sftp.download_dir) / name
@@ -80,6 +90,9 @@ def build_payloads(
             # feed clears to 0 instead of keeping yesterday's count.
             qtys = {sid: 0 for sid in (s for s, _ in SANMAR_WHSE_FIELDS.values())}
             for w in rec.warehouses:
+                if w.quantity >= INVENTORY_CAP_VALUE:
+                    CAP_STATS["locations"] += 1
+                    CAP_SKUS.add(rec.unique_key)
                 hit = SANMAR_WHSE_FIELDS.get(str(w.warehouse_no))
                 if hit:
                     qtys[hit[0]] = qtys[hit[0]] + w.quantity
@@ -201,6 +214,15 @@ def main() -> int:
                 if failures <= 10:
                     print(f"  FAILED item {row['id']}: {str(exc)[:150]}")
 
+    if CAP_STATS["locations"]:
+        print(
+            f"NOTE: SanMar inventory cap -- {CAP_STATS['locations']} warehouse "
+            f"location(s) across {len(CAP_SKUS)} SKU(s) reported exactly "
+            f"{INVENTORY_CAP_VALUE} (sanmar_dip.txt caps Quantity at "
+            f"{INVENTORY_CAP_VALUE}/warehouse; true on-hand may be higher). "
+            f"Uncapped depth is only available via SanMar's Web Service / "
+            f"PromoStandards inventory API."
+        )
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "

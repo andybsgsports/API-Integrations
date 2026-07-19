@@ -45,7 +45,9 @@ DESCRIPTIONS: dict[str, str] = {
     ),
     "custitem_sanmar_qty_available": (
         "Total quantity of this item currently available across all SanMar "
-        "warehouses (updated nightly)."
+        "warehouses (updated nightly). Note: SanMar's inventory file caps each "
+        "warehouse at 1,500, so this total can understate actual availability "
+        "-- true on-hand may be higher."
     ),
     "custitem_sanmar_front_image_url": (
         "Despite the field name, this holds a link to this item's BACK-view "
@@ -169,7 +171,9 @@ for _no, (_sid, _label) in SANMAR_WHSE_FIELDS.items():
     _city = _label.removeprefix("SanMar Qty: ")
     DESCRIPTIONS[_sid] = (
         f"Quantity of this item currently available at SanMar's {_city} "
-        f"warehouse (warehouse #{_no}, updated nightly)."
+        f"warehouse (warehouse #{_no}, updated nightly). Note: SanMar's "
+        f"inventory file caps this at 1,500 -- a value of 1,500 can mean "
+        f"1,500 or more (actual on-hand may be higher)."
     )
 for _abbr, (_sid, _label) in SS_WHSE_FIELDS.items():
     _city = _label.removeprefix("S&S Qty: ")
