@@ -63,3 +63,7 @@ jobs:
         run: python scripts/ss_item_inventory_probe.py
       - name: Probe PromoStandards Inventory 2.0.0 vs REST
         run: python scripts/ss_promostandards_probe.py
+      - name: Diagnose why an item got no S&S data
+        env:
+          ITEM_ID: ${{ env.PROBE_ITEM_ID }}
+        run: python scripts/ss_match_diag.py
