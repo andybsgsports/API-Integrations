@@ -1,3 +1,2 @@
-# Relabel custitem_mtec_front_image_url -> Momentec Back Image URL.
-# run: mtec-back-label-2026-07-19
-DRY_RUN=false
+# reset to dry
+DRY_RUN=true

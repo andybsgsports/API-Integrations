@@ -1,3 +1,2 @@
-# Update mtec back-image description.
-# run: mtec-back-desc-2026-07-19
-DRY_RUN=false
+# reset to dry
+DRY_RUN=true
