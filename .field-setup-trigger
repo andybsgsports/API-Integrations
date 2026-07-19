@@ -1,5 +1,3 @@
-# Retire the 2 Qty-By-Warehouse text blobs; create the 6 new S&S warehouse fields.
-# run: whse-fields-2026-07-19
+# Field create/delete complete; neutralized (audit-only if re-pushed).
 FIELD_CREATE=false
-SOAP_CREATE=true
-SOAP_DELETE_SCRIPTIDS=custitem_ss_qty_by_whse,custitem_sanmar_qty_by_whse
+SOAP_CREATE=false

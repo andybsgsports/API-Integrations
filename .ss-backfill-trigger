@@ -1,3 +1,4 @@
-# run: manufacturer-backfill-2026-07-18
+# Smoke: verify writer works after retiring qty_by_whse + adding 6 fields.
+# run: post-blob-smoke-2026-07-19
 DRY_RUN=false
-MAX_ITEMS=0
+MAX_ITEMS=25
