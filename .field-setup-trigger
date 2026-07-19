@@ -1,3 +1,4 @@
-# Field created; neutralized.
+# Create custitem_mtec_instock_guaranteed.
+# run: mtec-instock-2026-07-19
 FIELD_CREATE=false
-SOAP_CREATE=false
+SOAP_CREATE=true

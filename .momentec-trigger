@@ -1,1 +1,2 @@
-run 5 — probe with style->vendorname coverage
+# Run the /v2/Style cart_price probe (MOMENTEC_LOGON_ID/PASSWORD now set).
+# run: mtec-cartprice-probe-2026-07-19
