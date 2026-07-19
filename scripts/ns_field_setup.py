@@ -66,6 +66,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     # Momentec Qty By Warehouse intentionally absent: they ship from a single
     # warehouse, so Qty Available IS the per-warehouse number (user request).
     ("custitem_mtec_front_image_url", "Momentec Front Image URL", "URL", ""),
+    ("custitem_mtec_size_guide", "Momentec Size Guide", "URL", ""),
     # Under Armour (DC OneSource)
     ("custitem_ua_part_id", "UA Part ID", "TEXT", ""),
     ("custitem_ua_style", "UA Style", "TEXT", ""),

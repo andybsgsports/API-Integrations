@@ -115,6 +115,11 @@ DESCRIPTIONS: dict[str, str] = {
     "custitem_mtec_front_image_url": (
         "Link to this item's product photo, hosted on Momentec Brands' site."
     ),
+    "custitem_mtec_size_guide": (
+        "Link to the size / fit guide for this item, from Momentec's product "
+        "feed. Currently a single shared sizing chart across brands; will "
+        "reflect a brand-specific guide automatically if the feed provides one."
+    ),
     # Under Armour (DC OneSource / PromoStandards)
     "custitem_ua_part_id": (
         "Under Armour's part ID for this exact size/color combination, from "

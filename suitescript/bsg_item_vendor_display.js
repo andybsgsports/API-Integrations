@@ -65,7 +65,8 @@ define([], function () {
       fields: [
         'custitem_mtec_item_sku', 'custitem_mtec_style', 'custitem_mtec_gtin',
         'custitem_mtec_msrp', 'custitem_mtec_cost', 'custitem_mtec_case_size',
-        'custitem_mtec_qty_available', 'custitem_mtec_front_image_url'
+        'custitem_mtec_qty_available', 'custitem_mtec_front_image_url',
+        'custitem_mtec_size_guide'
       ]
     },
     {

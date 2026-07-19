@@ -49,6 +49,7 @@ def iter_product_rows(path: Path) -> Iterator[MomentecSku]:
                 weight=_clean(row.get("Weight")),
                 case_pack_qty=_clean(row.get("Case_Pack_Qty")),
                 country_of_origin=_clean(row.get("Country_Of_Origin")),
+                size_chart_url=_clean(row.get("Size_Chart_Image_URL")),
             )
 
 

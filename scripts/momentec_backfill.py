@@ -16,13 +16,15 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from momentec_netsuite.adopt import match_momentec
 from native_pricing import add_native_diffs, read_base_prices
+
+from momentec_netsuite.adopt import match_momentec
 from momentec_netsuite.config import get_config
 from momentec_netsuite.feeds import parse_product_data
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS
+from sanmar_netsuite.netsuite.feed_seen import stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 
 FIELDS = [
@@ -34,6 +36,7 @@ FIELDS = [
     "custitem_mtec_case_size",
     "custitem_mtec_qty_available",
     "custitem_mtec_front_image_url",
+    "custitem_mtec_size_guide",
 ]
 
 
@@ -158,6 +161,10 @@ def main() -> int:
             put("custitem_mtec_qty_available", inv_total.get(sku.item_sku))
             put("custitem_mtec_front_image_url",
                 images.get(style_color) or sku.main_image_url)
+            guide = sku.size_chart_url
+            if guide.startswith("http://"):
+                guide = "https://" + guide[len("http://"):]
+            put("custitem_mtec_size_guide", guide)
             put("manufacturer", sku.brand)  # native Manufacturer = Brand
 
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}

@@ -34,6 +34,10 @@ class MomentecSku:
     weight: str
     case_pack_qty: str
     country_of_origin: str
+    # Fit/size guide URL from the feed's Size_Chart_Image_URL column. Today
+    # it's a single generic chart for every brand; kept per-SKU so brand- or
+    # style-specific guides flow through automatically if the feed adds them.
+    size_chart_url: str = ""
 
     @property
     def color_code(self) -> str:
