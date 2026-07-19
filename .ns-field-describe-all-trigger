@@ -1,3 +1,2 @@
-# Deploy SanMar 1500-cap note to Field Help.
-# run: sanmar-cap-note-2026-07-19
-DRY_RUN=false
+# Descriptions deployed; reset to dry.
+DRY_RUN=true
