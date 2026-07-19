@@ -42,5 +42,5 @@ jobs:
 
       - name: Probe /v2/Style negotiated cart_price (needs MOMENTEC_LOGON_ID/PASSWORD)
         env:
-          MOMENTEC_PROBE_STYLES: ${{ vars.MOMENTEC_PROBE_STYLES || '790' }}
+          MOMENTEC_PROBE_STYLES: ${{ vars.MOMENTEC_PROBE_STYLES || '790,412000,510000,227130,410400,1425,560000,020000' }}
         run: python scripts/momentec_style_probe.py || echo "style probe returned non-zero (missing creds or API error) -- see output above"
