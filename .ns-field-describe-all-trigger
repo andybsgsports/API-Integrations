@@ -1,2 +1,3 @@
-# run: describe-mizuno-ripit-baden-fields
+# Describe/help for 6 new S&S warehouse fields + S&S 500-cap note on existing.
+# run: whse-desc-2026-07-19
 DRY_RUN=false
