@@ -1,4 +1,3 @@
-# Create custitem_mtec_size_guide.
-# run: mtec-size-guide-2026-07-19
+# Field created; neutralized.
 FIELD_CREATE=false
-SOAP_CREATE=true
+SOAP_CREATE=false
