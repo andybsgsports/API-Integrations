@@ -28,9 +28,16 @@ SANMAR_WHSE_FIELDS: dict[str, tuple[str, str]] = {
     "31": ("custitem_sanmar_qty_richmond", "SanMar Qty: Richmond, VA"),
 }
 
-# warehouseAbbr -> (scriptid, label). Codes are as S&S's /Inventory API
-# reports them; the city/state each maps to was confirmed with the user
-# (S&S publishes no code->name table and its API returns only the abbr).
+# warehouseAbbr -> (scriptid, label). Codes are as S&S's REST /Inventory API
+# reports them. Every city/state below was verified against S&S's own
+# PromoStandards Inventory 2.0.0 service, which -- unlike REST -- returns each
+# location's inventoryLocationName + Address (IL->Lockport, KS->Olathe,
+# GA->McDonough, TX->Fort Worth, NV->Reno, OH->West Chester, PA->Reading,
+# CN->Fresno, FO->Orlando, MA->Middleboro, DS->Dropship, CC->Bolingbrook).
+# PromoStandards also exposes locations REST omits (FL Pompano Beach, NJ
+# Robbinsville, GD Duluth, KC Edwardsville, PH Lewisberry, TD Dallas); they
+# read 0 for this account today, so they have no dedicated field yet and fall
+# through to UNKNOWN_WHSE logging if they ever carry stock.
 SS_WHSE_FIELDS: dict[str, tuple[str, str]] = {
     "IL": ("custitem_ss_qty_il", "S&S Qty: Lockport, IL"),
     "KS": ("custitem_ss_qty_ks", "S&S Qty: Olathe, KS"),

@@ -27,7 +27,8 @@ from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS
+from sanmar_netsuite.netsuite.feed_seen import stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 from ss_activewear_netsuite.config import get_config as ss_config
@@ -47,6 +48,16 @@ FIELDS = [
 # Feed warehouseAbbr values with no dedicated field, collected during payload
 # builds and reported once at the end (they still land in the text breakdown).
 UNKNOWN_WHSE: set[str] = set()
+
+# S&S caps this account's API inventory at 500 units per location: any location
+# with >=500 on hand reports as exactly 500 (verified via both the REST and
+# PromoStandards endpoints -- e.g. a location with 498 comes through as 498 but
+# anything >=500 flattens to 500). We can't see past it in code; it's an S&S
+# account-entitlement setting. Track how often we hit it so the cap is visible
+# in the feed log (real availability may be far higher until S&S lifts it).
+INVENTORY_CAP_VALUE = 500
+CAP_SKUS: set[str] = set()
+CAP_STATS: dict[str, int] = {"locations": 0}
 
 
 def _put_into(want: dict[str, object]):
@@ -129,9 +140,13 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
         qtys = {sid: 0 for sid in SS_QTY_FIELDS}
         for w in whse_rows:
             abbr = str(w.get("warehouseAbbr") or "").strip()
+            qty = int(w.get("qty") or 0)
+            if qty >= INVENTORY_CAP_VALUE:
+                CAP_STATS["locations"] += 1
+                CAP_SKUS.add(str(p.get("sku") or ""))
             hit = SS_WHSE_FIELDS.get(abbr)
             if hit:
-                qtys[hit[0]] += int(w.get("qty") or 0)
+                qtys[hit[0]] += qty
             elif abbr:
                 UNKNOWN_WHSE.add(abbr)
         want.update(qtys)
@@ -328,6 +343,15 @@ def main() -> int:
     if UNKNOWN_WHSE:
         print(f"WARNING: feed warehouse code(s) with no dedicated field "
               f"(still in the text breakdown): {sorted(UNKNOWN_WHSE)}")
+    if CAP_STATS["locations"]:
+        print(
+            f"WARNING: S&S inventory cap hit -- {CAP_STATS['locations']} "
+            f"warehouse location(s) across {len(CAP_SKUS)} SKU(s) reported "
+            f"exactly {INVENTORY_CAP_VALUE} (S&S caps this account's API "
+            f"inventory at {INVENTORY_CAP_VALUE}/location; true on-hand may be "
+            f"higher). Ask S&S to enable full inventory visibility to see real "
+            f"quantities above {INVENTORY_CAP_VALUE}."
+        )
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
