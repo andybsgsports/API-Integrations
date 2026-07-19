@@ -1,3 +1,3 @@
-# PromoStandards Inventory 2.0.0 vs REST /Inventory (requests fix).
-# run: promostandards-inv-compare-2026-07-19b
+# Enhanced PromoStandards probe: authoritative code/name/city/state + endpoint.
+# run: promostandards-whse-map-2026-07-19
 ITEM_ID=84084

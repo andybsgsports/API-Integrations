@@ -110,34 +110,37 @@ def call_inventory(client: requests.Session, url: str, body: str) -> requests.Re
     return None
 
 
+# code -> (name, city, region/state); filled across every part we parse so we
+# end with the authoritative, deduped warehouse identity list.
+WHSE_MAP: dict[str, tuple[str, str, str]] = {}
+
+
+def _txt(el, name) -> str:
+    d = _find(el, name)
+    return (d.text or "").strip() if d is not None and d.text else ""
+
+
 def parse_and_print(xml_text: str) -> None:
     root = ET.fromstring(xml_text.encode())
     parts = _findall(root, "PartInventory")
     print(f"  PromoStandards returned {len(parts)} part(s)")
     for p in parts[:6]:
-        pid = _find(p, "partId")
-        color = _find(p, "partColor")
-        size = _find(p, "labelSize")
+        pid = _txt(p, "partId")
+        head = f"    part {pid}  {_txt(p, 'partColor')}/{_txt(p, 'labelSize')}"
         qa = _find(p, "quantityAvailable")
-        qa_val = _find(qa, "value") if qa is not None else None
-        c = color.text if color is not None else ""
-        s = size.text if size is not None else ""
-        head = f"    part {pid.text if pid is not None else '?'}"
-        head += f"  {c}/{s}"
-        head += f"  total={qa_val.text if qa_val is not None else '?'}"
+        head += f"  total={_txt(qa, 'value') if qa is not None else '?'}"
         print(head)
         for loc in _findall(p, "InventoryLocation"):
-            lid = _find(loc, "inventoryLocationId")
-            lname = _find(loc, "inventoryLocationName")
-            city = _find(loc, "city")
+            code = _txt(loc, "inventoryLocationId")
+            name = _txt(loc, "inventoryLocationName")
+            addr = _find(loc, "Address")
+            city = _txt(addr, "city") if addr is not None else ""
+            region = _txt(addr, "region") if addr is not None else ""
             q = _find(loc, "inventoryLocationQuantity")
-            qv = _find(q, "value") if q is not None else None
-            print(
-                f"        {(lid.text if lid is not None else '?'):<4} "
-                f"{(lname.text if lname is not None else ''):<14} "
-                f"{(city.text if city is not None else ''):<14} "
-                f"qty={qv.text if qv is not None else '?'}"
-            )
+            qty = _txt(q, "value") if q is not None else "?"
+            if code:
+                WHSE_MAP[code] = (name, city, region)
+            print(f"        {code:<4} {name:<14} {city:<14} {region:<4} qty={qty}")
 
 
 def main() -> int:
@@ -156,6 +159,7 @@ def main() -> int:
     print("=== discovering PromoStandards Inventory 2.0.0 endpoint ===")
     endpoints = discover_endpoint(client)
 
+    working_endpoint = ""
     for pid in product_ids:
         print(f"\n=== GetInventoryLevels 2.0.0 for productId {pid} ===")
         body = soap_envelope(account, key, pid)
@@ -163,6 +167,7 @@ def main() -> int:
         for url in endpoints:
             got = call_inventory(client, url, body)
             if got is not None:
+                working_endpoint = url
                 print(f"  >>> endpoint that worked: {url}")
                 break
         if got is None:
@@ -173,6 +178,12 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"  parse error: {type(exc).__name__}: {str(exc)[:120]}")
             print(got.text[:800])
+
+    print("\n=== AUTHORITATIVE WAREHOUSE MAP (deduped across parts) ===")
+    print(f"  working endpoint: {working_endpoint or '(none found)'}")
+    for code in sorted(WHSE_MAP):
+        name, city, region = WHSE_MAP[code]
+        print(f"  {code:<4} name={name!r:<16} city={city!r:<16} region={region!r}")
 
     print(f"\n=== REST /Inventory/{compare_sku} (what we use today) ===")
     ss = SsClient(cfg)
