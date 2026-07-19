@@ -1,4 +1,4 @@
-# Full Momentec run: apply Manufacturer=brand NAME, In-Stock Guaranteed flag, size guide.
-# run: mtec-mfr-instock-2026-07-19
+# Populate back images into custitem_mtec_front_image_url.
+# run: mtec-backimg-2026-07-19
 DRY_RUN=false
 MAX_ITEMS=0
