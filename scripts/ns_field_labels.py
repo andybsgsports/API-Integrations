@@ -24,12 +24,18 @@ from warehouse_fields import SANMAR_WHSE_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
 
-# scriptid -> desired label, across both supplier warehouse sets.
+# Non-warehouse fields whose live label needs correcting.
+EXTRA_LABELS: dict[str, str] = {
+    # holds the BACK image (front is on the main Item Image field)
+    "custitem_mtec_front_image_url": "Momentec Back Image URL",
+}
+
+# scriptid -> desired label, across both supplier warehouse sets + extras.
 DESIRED: dict[str, str] = {
     sid: label for sid, label in SS_WHSE_FIELDS.values()
 } | {
     sid: label for sid, label in SANMAR_WHSE_FIELDS.values()
-}
+} | EXTRA_LABELS
 
 
 def get_field(cfg, scriptid: str) -> str:

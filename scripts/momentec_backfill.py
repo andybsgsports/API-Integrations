@@ -95,12 +95,13 @@ def load_inventory(path: Path) -> dict[str, int]:
     return total
 
 
-def load_front_images(path: Path) -> dict[str, str]:
-    """style_color (e.g. 020000.B080) -> front image URL."""
+def load_images_by_angle(path: Path, prefix: str) -> dict[str, str]:
+    """style_color (e.g. 020000.B080) -> first image URL whose View_Angle
+    starts with ``prefix`` (e.g. "front" or "back")."""
     out: dict[str, str] = {}
     with path.open(encoding="utf-8-sig", errors="replace", newline="") as fh:
         for row in csv.DictReader(fh):
-            if (row.get("View_Angle") or "").strip().lower() == "front":
+            if (row.get("View_Angle") or "").strip().lower().startswith(prefix):
                 sc = (row.get("Style_Color") or "").strip()
                 if sc and sc not in out:
                     out[sc] = (row.get("Image_Url") or "").strip()
@@ -145,7 +146,11 @@ def main() -> int:
     inv_total = load_inventory(
         fetch(cfg.inventory_url, dl / "ASG_inventory_data.csv")
     )
-    images = load_front_images(fetch(cfg.images_url, dl / "product-images-all.csv"))
+    # Back image only: the FRONT view is already shown on the item's main
+    # Item Image field (custitem_atlas_item_image), so this field carries the
+    # back view instead of duplicating the front.
+    back_images = load_images_by_angle(
+        fetch(cfg.images_url, dl / "product-images-all.csv"), "back")
     sku_by_id = {k.item_sku: k for s in styles for k in s.skus}
     print(f"feed: {len(sku_by_id):,} SKUs; inventory rows for {len(inv_total):,} SKUs")
 
@@ -186,8 +191,7 @@ def main() -> int:
             put("custitem_mtec_case_size",
                 int(sku.case_pack_qty) if str(sku.case_pack_qty).isdigit() else None)
             put("custitem_mtec_qty_available", inv_total.get(sku.item_sku))
-            put("custitem_mtec_front_image_url",
-                images.get(style_color) or sku.main_image_url)
+            put("custitem_mtec_front_image_url", back_images.get(style_color))
             guide = sku.size_chart_url
             if guide.startswith("http://"):
                 guide = "https://" + guide[len("http://"):]

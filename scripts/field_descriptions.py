@@ -113,7 +113,9 @@ DESCRIPTIONS: dict[str, str] = {
         "(updated nightly)."
     ),
     "custitem_mtec_front_image_url": (
-        "Link to this item's product photo, hosted on Momentec Brands' site."
+        "Despite the field id, this holds a link to this item's BACK-view "
+        "product photo, hosted on Momentec Brands' site. (The front-view photo "
+        "is shown directly on this record's Item Image field instead.)"
     ),
     "custitem_mtec_size_guide": (
         "Link to the size / fit guide for this item, from Momentec's product "
