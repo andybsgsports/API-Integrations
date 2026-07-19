@@ -1,3 +1,4 @@
-# run: mfr-rest-2026-07-18
+# Populate custitem_mtec_size_guide (+ verify writer after adding the field).
+# run: mtec-size-guide-smoke-2026-07-19
 DRY_RUN=false
-MAX_ITEMS=0
+MAX_ITEMS=60
