@@ -40,7 +40,7 @@ FIELDS = [
     "custitem_ss_gtin", "custitem_ss_brand", "custitem_ss_map",
     "custitem_ss_msrp", "custitem_ss_piece_price", "custitem_ss_dozen_price",
     "custitem_ss_case_price", "custitem_ss_case_size", "custitem_ss_weight",
-    "custitem_ss_qty_available", "custitem_ss_qty_by_whse",
+    "custitem_ss_qty_available",
     "custitem_ss_is_closeout", "custitem_ss_is_discontinued",
     "custitem_ss_front_image_url", "custitem_ss_on_model_image_url",
 ] + SS_QTY_FIELDS
@@ -97,14 +97,6 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     never carries one -- its ``warehouses`` list is always empty)."""
     want: dict[str, object] = {}
     put = _put_into(want)
-    rows = whse_rows if whse_rows is not None else (p.get("warehouses") or [])
-    # One warehouse per line, zero-stock locations hidden (readability).
-    lines = [
-        f"{w.get('warehouseAbbr', '')}: {int(w.get('qty') or 0):,}"
-        for w in rows
-        if int(w.get("qty") or 0)
-    ]
-    whse = "\n".join(lines) if lines else ("0 at all warehouses" if rows else "")
     def num(key):
         v = p.get(key)
         try:
@@ -129,7 +121,6 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     put("custitem_ss_case_size", int(case_size) if case_size else None)
     put("custitem_ss_weight", num("weight"))
     put("custitem_ss_qty_available", int(p.get("qty_available") or 0))
-    put("custitem_ss_qty_by_whse", whse)
     want["custitem_ss_is_closeout"] = bool(p.get("is_closeout"))
     want["custitem_ss_is_discontinued"] = bool(p.get("is_discontinued"))
     put("custitem_ss_front_image_url", _abs_url(p.get("front_image_url")))

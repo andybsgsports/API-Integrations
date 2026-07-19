@@ -31,7 +31,7 @@ define([], function () {
         'custitem_sanmar_mf_color', 'custitem_sanmar_gtin', 'custitem_sanmar_map',
         'custitem_sanmar_msrp', 'custitem_sanmar_case_price',
         'custitem_sanmar_case_size', 'custitem_sanmar_status',
-        'custitem_sanmar_qty_available', 'custitem_sanmar_qty_by_whse',
+        'custitem_sanmar_qty_available',
         'custitem_sanmar_front_image_url', 'custitem_sanmar_qty_seattle',
         'custitem_sanmar_qty_cincinnati', 'custitem_sanmar_qty_dallas',
         'custitem_sanmar_qty_reno', 'custitem_sanmar_qty_robbinsville',
@@ -48,13 +48,15 @@ define([], function () {
         'custitem_ss_size_order', 'custitem_ss_gtin', 'custitem_ss_brand',
         'custitem_ss_map', 'custitem_ss_msrp', 'custitem_ss_piece_price',
         'custitem_ss_dozen_price', 'custitem_ss_case_price', 'custitem_ss_case_size',
-        'custitem_ss_weight', 'custitem_ss_qty_available', 'custitem_ss_qty_by_whse',
+        'custitem_ss_weight', 'custitem_ss_qty_available',
         'custitem_ss_is_closeout', 'custitem_ss_is_discontinued',
         'custitem_ss_front_image_url', 'custitem_ss_on_model_image_url',
         'custitem_ss_qty_il', 'custitem_ss_qty_ks', 'custitem_ss_qty_ga',
         'custitem_ss_qty_tx', 'custitem_ss_qty_nv', 'custitem_ss_qty_oh',
         'custitem_ss_qty_pa', 'custitem_ss_qty_cn', 'custitem_ss_qty_fo',
-        'custitem_ss_qty_ma', 'custitem_ss_qty_ds', 'custitem_ss_qty_cc'
+        'custitem_ss_qty_ma', 'custitem_ss_qty_ds', 'custitem_ss_qty_cc',
+        'custitem_ss_qty_fl', 'custitem_ss_qty_nj', 'custitem_ss_qty_gd',
+        'custitem_ss_qty_kc', 'custitem_ss_qty_ph', 'custitem_ss_qty_td'
       ]
     },
     {

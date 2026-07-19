@@ -51,6 +51,15 @@ SS_WHSE_FIELDS: dict[str, tuple[str, str]] = {
     "MA": ("custitem_ss_qty_ma", "S&S Qty: Middleboro, MA"),
     "DS": ("custitem_ss_qty_ds", "S&S Qty: Drop Ship"),
     "CC": ("custitem_ss_qty_cc", "S&S Qty: Bolingbrook, IL"),
+    # Added from the PromoStandards warehouse list (0 stock for this account
+    # today, but part of S&S's active DC network -- captured so they populate
+    # if stock ever ships from them).
+    "FL": ("custitem_ss_qty_fl", "S&S Qty: Pompano Beach, FL"),
+    "NJ": ("custitem_ss_qty_nj", "S&S Qty: Robbinsville, NJ"),
+    "GD": ("custitem_ss_qty_gd", "S&S Qty: Duluth, GA"),
+    "KC": ("custitem_ss_qty_kc", "S&S Qty: Edwardsville, KS"),
+    "PH": ("custitem_ss_qty_ph", "S&S Qty: Lewisberry, PA"),
+    "TD": ("custitem_ss_qty_td", "S&S Qty: Dallas, TX"),
 }
 
 SANMAR_QTY_FIELDS: list[str] = [sid for sid, _ in SANMAR_WHSE_FIELDS.values()]

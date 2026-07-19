@@ -47,10 +47,6 @@ DESCRIPTIONS: dict[str, str] = {
         "Total quantity of this item currently available across all SanMar "
         "warehouses (updated nightly)."
     ),
-    "custitem_sanmar_qty_by_whse": (
-        "Breakdown of available quantity by individual SanMar warehouse "
-        "(updated nightly)."
-    ),
     "custitem_sanmar_front_image_url": (
         "Despite the field name, this holds a link to this item's BACK-view "
         "product photo, hosted on SanMar's site. (The front-view photo is "
@@ -81,11 +77,9 @@ DESCRIPTIONS: dict[str, str] = {
     "custitem_ss_weight": "This item's shipping weight as provided by S&S Activewear.",
     "custitem_ss_qty_available": (
         "Total quantity of this item currently available from S&S Activewear "
-        "(updated nightly)."
-    ),
-    "custitem_ss_qty_by_whse": (
-        "Breakdown of available quantity by individual S&S Activewear "
-        "warehouse (updated nightly)."
+        "(updated nightly). Note: S&S caps reported inventory at 500 per "
+        "location, so this total can understate actual availability -- true "
+        "on-hand may be higher until S&S enables full inventory visibility."
     ),
     "custitem_ss_is_closeout": (
         "Checked if S&S Activewear has marked this item as a closeout "
@@ -178,7 +172,10 @@ for _no, (_sid, _label) in SANMAR_WHSE_FIELDS.items():
         f"warehouse (warehouse #{_no}, updated nightly)."
     )
 for _abbr, (_sid, _label) in SS_WHSE_FIELDS.items():
+    _city = _label.removeprefix("S&S Qty: ")
     DESCRIPTIONS[_sid] = (
         f"Quantity of this item currently available at S&S Activewear's "
-        f"'{_abbr}' warehouse (their code, updated nightly)."
+        f"{_city} warehouse (code '{_abbr}', updated nightly). Note: S&S caps "
+        f"API inventory at 500 per location -- a value of 500 can mean 500 or "
+        f"more (actual on-hand may be higher)."
     )

@@ -19,7 +19,8 @@ from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS
+from sanmar_netsuite.netsuite.feed_seen import stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.sanmar import constants as C
 from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
@@ -39,7 +40,6 @@ FIELD_ORDER = [
     "custitem_sanmar_case_size",
     "custitem_sanmar_status",
     "custitem_sanmar_qty_available",
-    "custitem_sanmar_qty_by_whse",
     "custitem_sanmar_front_image_url",
 ] + SANMAR_QTY_FIELDS
 
@@ -70,22 +70,10 @@ def build_payloads(
     Values are typed (numbers as numbers) and empty values are omitted —
     NetSuite 400s on an empty string in a numeric/currency field.
     """
-    whse_by_key: dict[str, str] = {}
     total_by_key: dict[str, int] = {}
     qtys_by_key: dict[str, dict[str, int]] = {}
     unknown_whse: set[str] = set()
     for rec in inventory:
-        # One warehouse per line, zero-stock locations hidden -- the
-        # semicolon-joined single line was unreadable on item records.
-        lines = [
-            f"{w.warehouse_label or w.warehouse_no}: {w.quantity:,}"
-            for w in rec.warehouses
-            if w.quantity
-        ]
-        whse_by_key[rec.unique_key] = (
-            "\n".join(lines) if lines
-            else ("0 at all warehouses" if rec.warehouses else "")
-        )
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
         if rec.warehouses:
             # Zero-fill every column so a warehouse that drops out of the
@@ -100,7 +88,7 @@ def build_payloads(
             qtys_by_key[rec.unique_key] = qtys
     if unknown_whse:
         print(f"WARNING: feed warehouse number(s) with no dedicated field "
-              f"(still in the text breakdown): {sorted(unknown_whse)}")
+              f"(their qty is not surfaced on the item): {sorted(unknown_whse)}")
 
     payloads: dict[str, dict[str, object]] = {}
     natives: dict[str, tuple] = {}
@@ -126,7 +114,6 @@ def build_payloads(
             put("custitem_sanmar_case_size", None if sku.case_size is None else int(sku.case_size))
             put("custitem_sanmar_status", sku.product_status)
             put("custitem_sanmar_qty_available", None if qty is None else int(qty))
-            put("custitem_sanmar_qty_by_whse", whse_by_key.get(sku.unique_key, ""))
             for field, wqty in qtys_by_key.get(sku.unique_key, {}).items():
                 put(field, wqty)
             images = style.images_by_color.get(sku.color_name)

@@ -32,7 +32,6 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_sanmar_case_size", "SanMar Case Size", "INTEGER", ""),
     ("custitem_sanmar_status", "SanMar Product Status", "TEXT", ""),
     ("custitem_sanmar_qty_available", "SanMar Qty Available", "INTEGER", ""),
-    ("custitem_sanmar_qty_by_whse", "SanMar Qty By Warehouse", "TEXTAREA", ""),
     ("custitem_sanmar_front_image_url", "SanMar Front Image URL", "URL", ""),
     # S&S Activewear
     ("custitem_ss_sku", "S&S SKU", "TEXT", ""),
@@ -52,7 +51,6 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_ss_case_size", "S&S Case Size", "INTEGER", ""),
     ("custitem_ss_weight", "S&S Weight", "FLOAT", ""),
     ("custitem_ss_qty_available", "S&S Qty Available", "INTEGER", ""),
-    ("custitem_ss_qty_by_whse", "S&S Qty By Warehouse", "TEXTAREA", ""),
     ("custitem_ss_is_closeout", "S&S Is Closeout", "CHECKBOX", ""),
     ("custitem_ss_is_discontinued", "S&S Is Discontinued", "CHECKBOX", ""),
     ("custitem_ss_front_image_url", "S&S Front Image URL", "URL", ""),

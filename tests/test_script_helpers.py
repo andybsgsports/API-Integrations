@@ -140,7 +140,8 @@ class TestPerWarehouseFields:
 
         want = payload_for(self._product())
         assert not any(f in want for f in SS_QTY_FIELDS)
-        assert "custitem_ss_qty_by_whse" not in want  # empty text is skipped
+        # the retired text-blob field must never be written again
+        assert "custitem_ss_qty_by_whse" not in want
 
     def test_rows_fill_matched_columns_and_zero_fill_rest(self):
         from ss_backfill import payload_for
@@ -156,8 +157,8 @@ class TestPerWarehouseFields:
         # every other column zero-filled, so stale counts always clear
         assert all(want[f] == 0 for f in SS_QTY_FIELDS
                    if f not in (SS_WHSE_FIELDS["IL"][0],))
-        # text breakdown hides zero-stock rows
-        assert want["custitem_ss_qty_by_whse"] == "IL: 12"
+        # the retired text-blob field must never be written again
+        assert "custitem_ss_qty_by_whse" not in want
 
     def test_unknown_code_collected_not_dropped_silently(self):
         import ss_backfill

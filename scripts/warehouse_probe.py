@@ -112,10 +112,9 @@ def main() -> int:
     for no, label in C.WAREHOUSES.items():
         print(f"  {no:>3}  {label}")
 
-    collect(client, "custitem_sanmar_qty_by_whse", "SanMar sandbox data", "custitem_sanmar_style")
-    collect(client, "custitem_ss_qty_by_whse", "S&S sandbox data", "custitem_ss_sku")
-    # Momentec/UA each ship from a single location; their Qty By Warehouse
-    # fields were deleted (user request) -- Qty Available is the number.
+    # The *_qty_by_whse text-blob fields were retired once the per-warehouse
+    # integer columns existed, so there's no text breakdown left to scan; the
+    # live S&S probe below reads warehouse codes straight from the API instead.
     if (os.environ.get("SS_LIVE_PROBE") or "").lower() == "true":
         probe_ss_live(client)
     return 0

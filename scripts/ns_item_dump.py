@@ -20,8 +20,7 @@ from sanmar_netsuite.netsuite.client import NetSuiteClient
 def main() -> int:
     item_id = os.environ.get("ITEM_DUMP_ID", "84083").strip()
     client = NetSuiteClient(get_config().netsuite)
-    base = ["itemid", "manufacturer", "custitem_ss_brand", "custitem_ss_qty_available",
-            "custitem_ss_qty_by_whse"]
+    base = ["itemid", "manufacturer", "custitem_ss_brand", "custitem_ss_qty_available"]
     cols = base + SS_QTY_FIELDS + SANMAR_QTY_FIELDS
     # probe each column's existence individually so one missing field doesn't
     # blank the whole row
