@@ -120,6 +120,11 @@ DESCRIPTIONS: dict[str, str] = {
         "feed. Currently a single shared sizing chart across brands; will "
         "reflect a brand-specific guide automatically if the feed provides one."
     ),
+    "custitem_mtec_instock_guaranteed": (
+        "Checked if this item's style is part of Momentec's In-Stock "
+        "Guaranteed program (top-selling styles kept in stock year-round in "
+        "all colors, sizes, and genders)."
+    ),
     # Under Armour (DC OneSource / PromoStandards)
     "custitem_ua_part_id": (
         "Under Armour's part ID for this exact size/color combination, from "

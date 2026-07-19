@@ -37,7 +37,34 @@ FIELDS = [
     "custitem_mtec_qty_available",
     "custitem_mtec_front_image_url",
     "custitem_mtec_size_guide",
+    "custitem_mtec_instock_guaranteed",
 ]
+
+# Momentec's feed carries Brand as a numeric code (per the ASG feed spec's
+# Brand definition), so we translate it to the real brand name for the native
+# Manufacturer field. Unknown codes are logged, never written as a bare number.
+BRAND_NAMES = {
+    "10": "Augusta Sportswear",
+    "15": "High Five",
+    "17": "Holloway",
+    "18": "Pacific Headwear",
+    "60": "Russell Athletic",
+    "80": "Alleson Athletic",
+    "81": "Badger",
+    "87": "Alleson Athletic",
+    "88": "C2",
+}
+UNKNOWN_BRANDS: set[str] = set()
+
+# Styles Momentec guarantees in stock year-round (all colors/sizes/genders),
+# from their "In-Stock Guaranteed" program page. Matched against Parent_SKU.
+INSTOCK_GUARANTEED = {
+    "410400", "410200", "510000", "412000", "210700", "1426", "1425",
+    "560000", "522900", "520000", "512900", "512700", "416400", "416200",
+    "416000", "412400", "411900", "411600", "410700", "410300", "216200",
+    "211900", "211600", "210400", "210200", "322241", "322240", "1423",
+    "212000",
+}
 
 
 def fetch(url: str, dest: Path) -> Path:
@@ -165,7 +192,14 @@ def main() -> int:
             if guide.startswith("http://"):
                 guide = "https://" + guide[len("http://"):]
             put("custitem_mtec_size_guide", guide)
-            put("manufacturer", sku.brand)  # native Manufacturer = Brand
+            want["custitem_mtec_instock_guaranteed"] = (
+                sku.parent_sku in INSTOCK_GUARANTEED)
+            # native Manufacturer = brand NAME (feed gives a numeric code)
+            brand_name = BRAND_NAMES.get(sku.brand)
+            if brand_name:
+                put("manufacturer", brand_name)
+            elif sku.brand:
+                UNKNOWN_BRANDS.add(sku.brand)
 
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             # S&S brand wins the Manufacturer field on multi-vendor items.
@@ -200,6 +234,10 @@ def main() -> int:
                 if failures <= 10:
                     print(f"  FAILED item {rid}: {str(exc)[:150]}")
 
+    if UNKNOWN_BRANDS:
+        print(f"WARNING: unmapped Momentec brand code(s) -- Manufacturer left "
+              f"unchanged for these (add them to BRAND_NAMES): "
+              f"{sorted(UNKNOWN_BRANDS)}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nmomentec backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
