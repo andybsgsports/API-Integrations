@@ -1,6 +1,7 @@
-# LIVE image backfill including the new USB/TCK part-keyed coverage, so every
-# DC OneSource vendor now feeds the Item Image. Diff-aware (only fills empty
-# images), so this pass mainly adds USB/TCK + anything missed. Sandbox-gated.
-# run: images-live-usb-tck-2026-07-20
+# LIVE image backfill after the Champro CSV UPC fill: the 66 grouped/no-UPC
+# Champro items (incl. B041) now carry UPCs, so the champro_images.csv UPC->image
+# source can finally match them and set custitem_atlas_item_image. Diff-aware
+# (only fills empty images). Sandbox-gated.
+# run: images-live-champro-upc-2026-07-20
 DRY_RUN=false
 MAX_ITEMS=0
