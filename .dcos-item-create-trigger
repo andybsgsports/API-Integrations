@@ -1,7 +1,8 @@
-# Auto-create live smoke: RESTlet + matrix secrets confirmed working, and the
-# integration role now has 'Lists -> Tax Schedules'. Live, minimal scope
-# (1 style / 1 child) to confirm end-to-end create, then park back at dry.
+# Auto-create pilot: end-to-end LIVE smoke passed 2026-07-20 (run 29716929582)
+# — matrix RESTlet created 1 child under existing parent 220788, 0 failures,
+# now that the integration role has 'Lists -> Tax Schedules'. Parked at dry;
+# flip DRY_RUN=false to run live again.
 SUPPLIER=ripit
-DRY_RUN=false
+DRY_RUN=true
 MAX_STYLES=1
 MAX_ITEMS=1
