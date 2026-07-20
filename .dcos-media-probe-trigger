@@ -1,6 +1,7 @@
-# MediaContent service is NOT supported by DC OneSource (error 125 "Invalid
-# service provided"). Re-run to check whether image URLs instead ride along in
-# the Product Data response (getProduct tags + any http/image values).
-# run: product-image-scan-2026-07-20
-SUPPLIERS=champro
+# Check whether DC OneSource returns product images (primaryImageUrl in the
+# Product Data response) for ALL DCOS vendors -- especially USB and TCK, which
+# the image wiring skipped. Blank SUPPLIERS = all 7. The getProduct tag/URL
+# scan per supplier is the answer.
+# run: all-vendors-image-check-2026-07-20
+SUPPLIERS=usb,tck,capamerica,mizuno,ripit,baden,champro
 STYLES=
