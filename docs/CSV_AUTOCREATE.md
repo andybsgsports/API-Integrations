@@ -200,7 +200,12 @@ it. Use **`sanmar_new_children_part01.csv`** as the import file below.
 
 ### Full field mapping (CSV column → NetSuite field)
 
-**Map these** — the child-specific fields:
+The guiding rule, learned from live testing: **a matrix child inherits almost
+everything from its parent.** Map only the genuinely child-specific fields;
+mapping an inherited field either errors (accounts, units, weight-unit) or is
+silently ignored. This lean map is the set that reliably creates a child.
+
+**Map these (13)** — the child-specific fields:
 
 | CSV column | Map to NetSuite field | Reference / notes |
 | --- | --- | --- |
@@ -209,26 +214,17 @@ it. Use **`sanmar_new_children_part01.csv`** as the import file below.
 | `Display Name/Code` | Display Name/Code | Product title only (no colour/size). |
 | `Vendor Name/Code` | Vendor Name/Code | The vendor's code for the item = the style. |
 | `Parent/Child Matrix Item` | Matrix Type | Value is `Child Matrix Item` → maps to the "child" matrix type. |
-| `Subitem Of` | Subitem Of (Parent) | **Match by Internal ID.** The merge export writes the parent's internal id here, so numeric styles like `2000` resolve to the right parent instead of colliding with an id. |
-| `Matrix Attribute 1 - Size` | the **Size** matrix option field (`custitem_bsg_size`) | Match the custom-list value **by name** (`Small`, `Large`, …). |
-| `Matrix Attribute 2 - Color` | the **Color** matrix option field (`custitem_bsg_color`) | Match the custom-list value **by name** (`Black`, `True Red`, …). |
+| `Subitem Of` | Subitem Of (Parent) | **Match by Internal ID** (in the field-mapping popup, set the reference to Internal ID — not Name). The merge export writes the parent's internal id here, so a name-match would search for an item literally named e.g. `213625` and fail (`Invalid parent reference key`). |
+| `Matrix Attribute 1 - Size` | Matrix Option - Size (`custitem_bsg_size`) | Match the custom-list value **by name** (`Small`, `Large`, …). |
+| `Matrix Attribute 2 - Color` | Matrix Option - Color (`custitem_bsg_color`) | Match the custom-list value **by name** (`Black`, `True Red`, …). |
 | `UPC Code` | UPC Code | The SKU GTIN. |
-| `Description` | Description | Item/vendor description. |
-| `Units Type` | Units Type | `Each`. |
-| `Stock Units` | Stock Unit | `Eaches`. |
-| `Purchase Units` | Purchase Unit | `Eaches`. |
-| `Sale Units` | Sale Unit | `Eaches`. |
-| `Include Children` | Include Children | `TRUE` (subsidiary rollup). |
+| `Description` | Detailed Description | Item/vendor description. |
 | `Purchase Price` | Purchase Price | SanMar piece price (our cost). |
-| `Vendor 1 Name` | **Vendors** sublist → Vendor | Match by name (`Sanmar Corp`). This is the item-vendor sublist line, not a body field. |
-| `Vendor 1 Purchase Price` | **Vendors** sublist → Purchase Price | Same sublist line as above. |
-| `Weight` | Weight | Piece weight. |
+| `Vendor 1 Name` | **Vendors 1** sublist → Vendor (Req) | Match by name (`Sanmar Corp`). The item-vendor sublist line, not a body field. **Not** "Preferred", **not** "Purchase Price". |
+| `Vendor 1 Purchase Price` | **Vendors 1** sublist → Purchase Price | Same sublist line as above. |
 
-**Leave these UNMAPPED** — a matrix child **inherits** them from its parent, so
-mapping them either errors or is silently ignored. (This is why the live 5-row
-test failed with `Invalid incomeaccount reference key "4100"` — the child was
-being handed an income account it should inherit. Leave the CSV columns present
-but don't map them.)
+**Leave these UNMAPPED** — inherited from the parent (or optional). Mapping them
+is what produced the live errors, one after another:
 
 | CSV column | Why unmapped |
 | --- | --- |
@@ -238,9 +234,12 @@ but don't map them.)
 | `Location` | Inherited from parent. |
 | `Costing Method` | Inherited from parent. |
 | `COGS Account` | Inherited from parent. |
-| `Income Account` | Inherited from parent; applied later by `reconcile-items`. |
+| `Income Account` | Inherited from parent; applied later by `reconcile-items`. Mapping it caused `Invalid incomeaccount reference key "4100"`. |
 | `Asset Account` | Inherited from parent. |
 | `Tax Schedule` | Inherited from parent. |
+| `Units Type` / `Stock Units` / `Purchase Units` / `Sale Units` | Units of measure are inherited from the parent. |
+| `Weight` | Optional; NetSuite auto-maps it to **Weight Unit**, which rejects a number (`Invalid weightunit reference key 0.3300`). Leave it off (or, if you want the weight, map it to the numeric **Weight** field, never Weight Unit). |
+| `Include Children` | Optional subsidiary rollup flag. |
 
 Pricing (Base Price) columns are intentionally **absent** from the file too —
 NetSuite's matrix child importer rejects them ("Please enter missing price(s)").
