@@ -1,31 +1,45 @@
 # Item form vendor-declutter (hide empty vendor fields)
 
-`suitescript/bsg_item_vendor_display.js` is a **Client Script** that hides a
-vendor's field set on the item form when that vendor has no data for the item
-(its marker field is empty). A Gildan 8000 (S&S + SanMar) then shows only S&S
-and SanMar fields — no empty Momentec / UA / Champro / etc. clutter. It only
+Hides a vendor's field set on the item form when that vendor has no data for the
+item (its marker field is empty). A Gildan 8000 (S&S + SanMar) then shows only
+S&S and SanMar fields — no empty Momentec / UA / Champro / etc. clutter. It only
 changes what's *displayed*; it never touches stored values.
 
-## A. Deploy the client script (~3 min, admin)
+## A. Deploy the User Event script (~3 min, admin) — USE THIS ONE
+
+> **Why a User Event, not a Client Script.** A Client Script's `pageInit` does
+> **not** run when you merely *view* a record — NetSuite renders view pages as
+> static HTML and never executes the client script (confirmed live: zero script
+> output in the browser console on a viewed item). So the old client-script
+> approach (`bsg_item_vendor_display.js`) only ever decluttered create/edit, not
+> the view you actually look at. The **User Event** version
+> (`bsg_item_vendor_display_ue.js`) runs server-side in `beforeLoad`, which fires
+> on **view** and hides the empty fields before the page renders.
 
 1. **Upload the file.** Documents > Files > File Cabinet → SuiteScripts →
-   **Add File** → upload `suitescript/bsg_item_vendor_display.js`.
+   **Add File** → upload `suitescript/bsg_item_vendor_display_ue.js`.
 2. **Create the Script record.** Customization > Scripting > Scripts > **New** →
-   select the uploaded file → **Create Script Record** → type **Client Script**.
-   - Name it e.g. `BSG Item Vendor Display`. **Save.**
-3. **Attach it to the item form(s).** Two options:
-   - *Per form (recommended):* Customization > Forms > Entry Forms → open the
-     item custom form you use (e.g. the one on the screenshots) → **Custom Code**
-     subtab → set **Client Script** = `BSG Item Vendor Display`. Save. Repeat for
-     each item form that should declutter.
-   - *Global:* on the Script record add a **Deployment** with **Applies To** =
-     Inventory Item (and any other item types). A form-level attachment is
-     cleaner because it targets only the forms you choose.
-4. **Verify.** Open a single-vendor item (e.g. a Gildan 8000) → the Momentec/UA
-   groups should be gone; open a multi-vendor item → both vendors show.
+   select the uploaded file → **Create Script Record** → type
+   **User Event Script**.
+   - Name it e.g. `BSG Item Vendor Display (UE)`. **Save.**
+3. **Add a Deployment.** On the Script record → **Deployments** subtab → new row:
+   - **Applies To** = `Inventory Part` (add more rows for any other item types
+     you use — Assembly, Kit, etc.).
+   - **Status** = `Released`.
+   - **Log Level** = Debug (so the "fields hidden: N" line shows in the
+     execution log while you verify), then **Save**.
+4. **Verify.** Open a single-vendor item (e.g. a Gildan 8000) → the Momentec / UA
+   / Champro groups should be gone; open a multi-vendor item → both vendors show.
+   The execution log (on the Deployment record) shows `type=view; vendors with
+   data: X; fields hidden: Y` per load.
 
 The vendor list and field IDs live at the top of the script (`VENDORS`). When a
 new vendor's custom fields are added, add a matching entry there.
+
+> The old **Client Script** `bsg_item_vendor_display.js` is kept only as a
+> reference/fallback (it can still declutter the *edit* form if you ever want
+> that). For the view, deploy the User Event above and you can leave the client
+> script undeployed.
 
 ## B. Show the new fields on the form
 
