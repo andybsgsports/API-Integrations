@@ -168,13 +168,25 @@ it. Use **`sanmar_new_children_part01.csv`** as the import file below.
      `sanmar_new_children_part01.csv` (each part is already under the 25,000-line
      limit; the un-split `sanmar_new_children.csv` will be **rejected** as too
      large). **Next.**
-3. **Step "Import Options":**
-   - **Data Handling:** **Add** — create-only. (Add never overwrites an existing
-     record, so a stray already-present row is skipped, not clobbered — belt and
-     braces on top of the diff.)
-   - Leave **Overwrite Missing Fields** *unchecked*.
-   - **Advanced Options** (expand): leave **Run Server SuiteScript and Trigger
-     Workflows** at its default; **Validate Mandatory Custom Fields** = on. **Next.**
+3. **Step "Import Options"** — set every field exactly as below:
+   - **Data Handling:** **ADD** — create-only. Not *Add or Update*. ADD creates
+     new children and never touches an existing record; a stray already-present
+     row errors on just that row instead of overwriting a live item.
+   - **Advanced Options** (expand):
+
+     | Field | Set to | Why |
+     | --- | --- | --- |
+     | Log System Notes for Custom Fields | **off** | Faster; no per-field audit trail needed on a bulk create. |
+     | Overwrite Missing Fields | **off** | Never blank out a field because the CSV column is empty. |
+     | Validate Mandatory Custom Fields | **on** | Surfaces any required custom field the CSV is missing, up front. |
+     | Overwrite Sublists | **off** | Lets the `Vendor 1` line add cleanly instead of replace-mode. |
+     | Ignore Read-Only Fields | **on** (default) | Tolerates read-only columns in the file instead of erroring. |
+     | CSV Decimal Delimiter | **Period** | Costs are `4.12` style. |
+     | Custom Form | **Badger Sporting – Inventory** | BSG's item form — exposes the custom fields for mapping. |
+     | Custom Multi-Select Value Delimiter | `\|` (default) | No multi-selects in this file; leave default. |
+     | Run Server SuiteScript and Trigger Workflows | **off** | Faster bulk create; the CSV already carries every field. Enable later only if a needed default comes from a script. |
+
+     **Next.**
 4. **Step "Field Mapping":** NetSuite auto-maps most columns because our headers
    match the field labels. Set/confirm each row per the table below. The three
    that always need a manual touch are **Subitem Of** (match by Internal ID), the
