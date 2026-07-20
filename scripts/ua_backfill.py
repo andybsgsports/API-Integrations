@@ -26,6 +26,7 @@ import requests
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 
@@ -37,7 +38,7 @@ BASE_PRICE_LEVEL = "1"  # same identifier set reconcile.py uses
 
 FIELDS = [
     "custitem_ua_part_id", "custitem_ua_style", "custitem_ua_gtin",
-    "custitem_ua_qty_available", "custitem_ua_qty_by_whse",
+    "custitem_ua_qty_available",
 ]
 
 
@@ -161,7 +162,9 @@ def get_style_pricing(key_id: str, key_pw: str, style: str) -> dict[str, float]:
     return out
 
 
-def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, tuple[int, str]]:
+def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, int]:
+    """partId -> total quantity. DC OneSource reports a single fulfillment
+    location, so the total IS the per-warehouse number -- no breakdown kept."""
     body = (
         f'<ns:GetInventoryLevelsRequest xmlns:ns="{INV_NS}" '
         f'xmlns:shar="{INV_NS}SharedObjects/">'
@@ -173,25 +176,21 @@ def get_inventory(key_id: str, key_pw: str, style: str) -> dict[str, tuple[int, 
         text = _soap(f"{BASE}/INV/2.0.0/soap", "getInventoryLevels", body)
     except Exception:  # noqa: BLE001
         return {}
-    out: dict[str, tuple[int, str]] = {}
+    out: dict[str, int] = {}
     root = ET.fromstring(text)
     for el in root.iter():
         if _strip(el.tag) != "PartInventory":
             continue
-        pid, qty, whse = "", 0, []
+        pid, qty = "", 0
         for sub in el.iter():
             t = _strip(sub.tag)
             v = (sub.text or "").strip()
             if t == "partId" and v:
                 pid = v
-            elif t == "quantityAvailable":
-                pass
             elif t == "value" and v.replace(".", "").isdigit() and not qty:
                 qty = int(float(v))
-            elif t == "inventoryLocationId" and v:
-                whse.append(v)
         if pid:
-            out[pid] = (qty, "\n".join(whse))
+            out[pid] = qty
     return out
 
 
@@ -266,13 +265,12 @@ def main() -> int:
                     if rid:
                         break
             if rid and rid not in matched:
-                qty, whse = inv.get(part["partId"], (None, ""))
+                qty = inv.get(part["partId"])
                 matched[rid] = {
                     "custitem_ua_part_id": part["partId"],
                     "custitem_ua_style": style,
                     "custitem_ua_gtin": part.get("gtin", ""),
                     "custitem_ua_qty_available": qty,
-                    "custitem_ua_qty_by_whse": whse,
                 }
                 list_price = prices.get(part["partId"])
                 if list_price is not None:
@@ -283,7 +281,7 @@ def main() -> int:
 
     print(f"items with a feed price: {len(price_by_rid):,}")
     ids = sorted(matched)
-    cols = ", ".join(FIELDS)
+    cols = ", ".join(FIELDS + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
@@ -300,12 +298,17 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"  (base-price read failed, writing unconditionally: {str(exc)[:80]})")
         for row in client.suiteql(
-            f"SELECT id, upccode, cost, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, manufacturer, custitem_ss_brand, {cols} "
+            f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             want = {k: v for k, v in matched.get(rid, {}).items()
                     if v is not None and str(v).strip() != ""}
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
+            # S&S brand wins the Manufacturer field on multi-vendor items.
+            if (not str(row.get("custitem_ss_brand") or "").strip()
+                    and not _same(row.get("manufacturer"), "Under Armour")):
+                body["manufacturer"] = "Under Armour"
             gtin = matched.get(rid, {}).get("custitem_ua_gtin", "")
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
@@ -326,6 +329,7 @@ def main() -> int:
                     cost = round(list_price * cost_pct / 100.0, 2)
                     if not _same(row.get("cost"), cost):
                         body["cost"] = cost
+            stamp(body, row, "ua")
             if not body:
                 unchanged += 1
                 continue

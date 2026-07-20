@@ -1,3 +1,4 @@
-# run: per-warehouse-fields-FULL
+# Full SanMar refresh: correct stale warehouse values + exercise 1500-cap detection.
+# run: sanmar-cap-refresh-2026-07-19
 DRY_RUN=false
 MAX_ITEMS=0

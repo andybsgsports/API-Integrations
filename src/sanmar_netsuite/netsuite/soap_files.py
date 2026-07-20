@@ -37,6 +37,8 @@ def _file_type_for(filename: str) -> str:
         return "_GIFIMAGE"
     if lower.endswith((".jpg", ".jpeg")):
         return "_JPGIMAGE"
+    if lower.endswith(".pdf"):
+        return "_PDF"
     return "_JPGIMAGE"
 
 
@@ -47,11 +49,11 @@ def _fetch(url: str, timeout: int) -> bytes:
     return resp.content
 
 
-def upload_from_url_soap(
-    cfg, url: str, filename: str, folder_id: str, *, timeout: int = 60
+def upload_bytes_soap(
+    cfg, content: bytes, filename: str, folder_id: str
 ) -> SoapUploadedFile:
-    """Download ``url`` and create a File Cabinet record for it via SOAP."""
-    content = _fetch(url, timeout)
+    """Create a File Cabinet record from raw bytes via SOAP (isOnline=true, so
+    the file has a login-free media URL)."""
     b64 = base64.b64encode(content).decode("ascii")
     doc_ns = f"urn:filecabinet_{VERSION}.documents.webservices.netsuite.com"
     body = f"""
@@ -75,6 +77,13 @@ def upload_from_url_soap(
     file_id = m.group(1)
     log.info("SOAP-uploaded %s -> File Cabinet id %s", filename, file_id)
     return SoapUploadedFile(file_id=file_id, name=filename)
+
+
+def upload_from_url_soap(
+    cfg, url: str, filename: str, folder_id: str, *, timeout: int = 60
+) -> SoapUploadedFile:
+    """Download ``url`` and create a File Cabinet record for it via SOAP."""
+    return upload_bytes_soap(cfg, _fetch(url, timeout), filename, folder_id)
 
 
 def create_folder_soap(cfg, name: str) -> str:

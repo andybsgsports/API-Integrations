@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from sanmar_netsuite.config import NetSuiteConfig, NetSuiteFieldMap
 from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
 from sanmar_netsuite.transform.catalog import (
@@ -117,5 +115,6 @@ def test_availability_body(dip_path):
     records = {r.unique_key: r for r in parse_inventory(dip_path)}
     body = build_availability_body(records["920331"], _config())
     assert body["custitem_sanmar_qty_available"] == 165
-    breakdown = json.loads(body["custitem_sanmar_qty_by_whse"])
-    assert breakdown == {"1": 120, "3": 45}
+    # The per-warehouse breakdown now lives in dedicated integer fields, not a
+    # text blob; the availability body only carries the total.
+    assert "custitem_sanmar_qty_by_whse" not in body

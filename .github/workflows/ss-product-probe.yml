@@ -1,0 +1,69 @@
+name: S&S Product Data Probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      item_id:
+        description: "NetSuite internal id of the item to probe"
+        required: false
+        default: "84171"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".ss-product-probe-trigger"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve item id
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v=$(grep -E '^ITEM_ID=' .ss-product-probe-trigger | tail -1 | cut -d= -f2 | tr -d ' \r')
+          else
+            v="${{ github.event.inputs.item_id }}"
+          fi
+          echo "PROBE_ITEM_ID=${v:-84171}" >> "$GITHUB_ENV"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SS_API_ACCOUNT_NUMBER=${{ secrets.SS_API_ACCOUNT_NUMBER }}
+          SS_API_KEY=${{ secrets.SS_API_KEY }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: Run S&S product data probe (read-only)
+        run: python scripts/ss_product_probe.py
+      - name: Run S&S diagnose (unmatched item + image fields)
+        run: python scripts/ss_diagnose.py
+      - name: Run S&S style probe (styleID ground truth)
+        run: python scripts/ss_style_probe.py
+      - name: Dump item warehouse/brand fields
+        env:
+          ITEM_DUMP_ID: ${{ env.PROBE_ITEM_ID }}
+        run: python scripts/ns_item_dump.py
+      - name: Probe S&S warehouse code -> full name
+        run: python scripts/ss_warehouse_probe.py
+      - name: Compare item's stored qty vs live S&S /Inventory
+        env:
+          ITEM_ID: ${{ env.PROBE_ITEM_ID }}
+        run: python scripts/ss_item_inventory_probe.py
+      - name: Probe PromoStandards Inventory 2.0.0 vs REST
+        run: python scripts/ss_promostandards_probe.py
+      - name: Diagnose why an item got no S&S data
+        env:
+          ITEM_ID: ${{ env.PROBE_ITEM_ID }}
+        run: python scripts/ss_match_diag.py

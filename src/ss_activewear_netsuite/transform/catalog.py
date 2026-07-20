@@ -66,7 +66,6 @@ def build_item_payload(product: SsProduct, config: SsAppConfig) -> dict[str, Any
         f.is_closeout: bool(product.is_closeout),
         f.is_discontinued: bool(product.is_discontinued),
         f.qty_available: product.qty_available,
-        f.qty_by_whse: warehouses_to_payload(product),
         f.front_image_url: product.front_image_url,
         f.on_model_image_url: product.on_model_image_url,
     }

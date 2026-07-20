@@ -76,6 +76,16 @@ def _bool(raw: Any) -> bool:
     return bool(raw)
 
 
+def _map_price(raw: Any) -> Decimal | None:
+    """S&S publishes mapPrice 0.01 as a placeholder meaning "no MAP
+    restriction" -- writing literal pennies onto item records reads as bad
+    data, so treat anything at or below a cent as no MAP."""
+    value = _decimal(raw)
+    if value is None or value <= Decimal("0.01"):
+        return None
+    return value
+
+
 def _warehouses(raw: Any) -> tuple[WarehouseQty, ...]:
     if not isinstance(raw, list):
         return ()
@@ -104,15 +114,18 @@ def product_from_payload(row: dict[str, Any]) -> SsProduct:
         size_name=str(row.get("sizeName") or "").strip(),
         size_order=_int(row.get("sizeOrder")),
         gtin=str(row.get("gtin") or "").strip(),
-        weight=_decimal(row.get("weight")),
-        case_size=_int(row.get("caseSize")) or None,
+        # Live /Products payloads key these unitWeight / caseQty / retailPrice
+        # (verified against the real API); the older names are kept as
+        # fallbacks for saved snapshots.
+        weight=_decimal(row.get("unitWeight") or row.get("weight")),
+        case_size=_int(row.get("caseQty") or row.get("caseSize")) or None,
         piece_price=_decimal(row.get("piecePrice")),
         dozen_price=_decimal(row.get("dozenPrice")),
         case_price=_decimal(row.get("casePrice")),
         sale_price=_decimal(row.get("salePrice")),
         customer_price=_decimal(row.get("customerPrice")),
-        map_price=_decimal(row.get("mapPrice")),
-        msrp=_decimal(row.get("msrp")),
+        map_price=_map_price(row.get("mapPrice")),
+        msrp=_decimal(row.get("msrp") or row.get("retailPrice")),
         qty_available=_int(row.get("qty")),
         # ``/Products`` (filtered) keys this "warehouseAvailability"; the
         # per-SKU ``/Inventory/{sku}`` endpoint keys the same shape "warehouses".
@@ -120,8 +133,16 @@ def product_from_payload(row: dict[str, Any]) -> SsProduct:
         is_closeout=_bool(row.get("isCloseout")),
         is_discontinued=_bool(row.get("isDiscontinued")),
         front_image_url=str(row.get("colorFrontImage") or row.get("frontImage") or "").strip(),
+        # S&S only populates on-model shots for some products (basics like
+        # Gildan 8000 have none). When the true on-model image is blank, fall
+        # back to the back image -- a real second-angle product shot -- so the
+        # field always resolves to an image, then side as a last resort.
         on_model_image_url=str(
-            row.get("colorOnModelFrontImage") or row.get("onModelFrontImage") or ""
+            row.get("colorOnModelFrontImage")
+            or row.get("onModelFrontImage")
+            or row.get("colorBackImage")
+            or row.get("colorSideImage")
+            or ""
         ).strip(),
         description=str(row.get("description") or "").strip(),
         category_name=str(row.get("categoryName") or "").strip(),

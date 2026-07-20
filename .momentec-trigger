@@ -1,1 +1,2 @@
-run 5 — probe with style->vendorname coverage
+# Re-run cart_price probe across multiple styles.
+# run: mtec-cartprice-multi-2026-07-19

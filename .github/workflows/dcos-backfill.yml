@@ -1,0 +1,103 @@
+name: DCOS Supplier Backfill (Champro/USB/TCK)
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  schedule:
+    # 15:00 UTC nightly, after parent-sync (14:00). The schedule branch runs
+    # every LIVE supplier in sequence (see the run step).
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+    inputs:
+      supplier:
+        description: "Supplier key (champro, usb, tck, capamerica, mizuno, ripit, baden)"
+        required: true
+        default: "champro"
+      dry_run:
+        description: "Dry run (true = report only)"
+        required: true
+        default: "true"
+      max_items:
+        description: "Cap on item writes (0 = no cap)"
+        required: false
+        default: "25"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".dcos-backfill-trigger"]
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve run parameters
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            get() { grep -E "^$1=" .dcos-backfill-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
+            SUPPLIER=$(get SUPPLIER); DRY_RUN=$(get DRY_RUN); MAX_ITEMS=$(get MAX_ITEMS)
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            SUPPLIER="__nightly__"; DRY_RUN="false"; MAX_ITEMS="0"
+          else
+            SUPPLIER="${{ github.event.inputs.supplier }}"
+            DRY_RUN="${{ github.event.inputs.dry_run }}"
+            MAX_ITEMS="${{ github.event.inputs.max_items }}"
+          fi
+          [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          DEBUG=$(grep -E "^DEBUG=" .dcos-backfill-trigger 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \r')
+          HINT=$(grep -E "^DEBUG_HINT=" .dcos-backfill-trigger 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '\r')
+          echo "DCOS_SUPPLIER=${SUPPLIER:-champro}" >> "$GITHUB_ENV"
+          echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
+          echo "MAX_ITEMS=${MAX_ITEMS:-25}" >> "$GITHUB_ENV"
+          echo "DCOS_DEBUG=${DEBUG:-false}" >> "$GITHUB_ENV"
+          echo "DCOS_DEBUG_HINT=${HINT:-}" >> "$GITHUB_ENV"
+          echo "Resolved: supplier=${SUPPLIER:-champro} dry_run=$DRY_RUN max_items=${MAX_ITEMS:-25}"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=${DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+      - name: Run DCOS supplier backfill
+        env:
+          DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
+          DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+          UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          DCOS_DEBUG: ${{ env.DCOS_DEBUG }}
+          DCOS_DEBUG_HINT: ${{ env.DCOS_DEBUG_HINT }}
+        run: |
+          if [ "$DCOS_SUPPLIER" = "__nightly__" ]; then
+            # every supplier with live matches; failures don't stop the rest
+            rc=0
+            for s in champro tck capamerica mizuno; do
+              echo "===== nightly: $s ====="
+              DCOS_SUPPLIER=$s python scripts/dcos_backfill.py || rc=1
+            done
+            exit $rc
+          else
+            python scripts/dcos_backfill.py
+          fi
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }} (${{ env.DCOS_SUPPLIER }})\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

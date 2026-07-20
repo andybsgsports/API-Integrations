@@ -32,7 +32,6 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_sanmar_case_size", "SanMar Case Size", "INTEGER", ""),
     ("custitem_sanmar_status", "SanMar Product Status", "TEXT", ""),
     ("custitem_sanmar_qty_available", "SanMar Qty Available", "INTEGER", ""),
-    ("custitem_sanmar_qty_by_whse", "SanMar Qty By Warehouse", "TEXTAREA", ""),
     ("custitem_sanmar_front_image_url", "SanMar Front Image URL", "URL", ""),
     # S&S Activewear
     ("custitem_ss_sku", "S&S SKU", "TEXT", ""),
@@ -52,7 +51,6 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_ss_case_size", "S&S Case Size", "INTEGER", ""),
     ("custitem_ss_weight", "S&S Weight", "FLOAT", ""),
     ("custitem_ss_qty_available", "S&S Qty Available", "INTEGER", ""),
-    ("custitem_ss_qty_by_whse", "S&S Qty By Warehouse", "TEXTAREA", ""),
     ("custitem_ss_is_closeout", "S&S Is Closeout", "CHECKBOX", ""),
     ("custitem_ss_is_discontinued", "S&S Is Discontinued", "CHECKBOX", ""),
     ("custitem_ss_front_image_url", "S&S Front Image URL", "URL", ""),
@@ -65,8 +63,11 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_mtec_cost", "Momentec Cost", "CURRENCY", ""),
     ("custitem_mtec_case_size", "Momentec Case Pack Qty", "INTEGER", ""),
     ("custitem_mtec_qty_available", "Momentec Qty Available", "INTEGER", ""),
-    ("custitem_mtec_qty_by_whse", "Momentec Qty By Warehouse", "TEXTAREA", ""),
-    ("custitem_mtec_front_image_url", "Momentec Front Image URL", "URL", ""),
+    # Momentec Qty By Warehouse intentionally absent: they ship from a single
+    # warehouse, so Qty Available IS the per-warehouse number (user request).
+    ("custitem_mtec_front_image_url", "Momentec Back Image URL", "URL", ""),
+    ("custitem_mtec_size_guide", "Momentec Size Guide", "URL", ""),
+    ("custitem_mtec_instock_guaranteed", "Momentec In-Stock Guaranteed", "CHECKBOX", ""),
     # Under Armour (DC OneSource)
     ("custitem_ua_part_id", "UA Part ID", "TEXT", ""),
     ("custitem_ua_style", "UA Style", "TEXT", ""),
@@ -74,7 +75,8 @@ FIELDS: list[tuple[str, str, str, str]] = [
     # UA MSRP/Cost intentionally absent: pricing lives on the native fields
     # (Base Price = UA list price, Purchase Price/cost = UA net cost).
     ("custitem_ua_qty_available", "UA Qty Available", "INTEGER", ""),
-    ("custitem_ua_qty_by_whse", "UA Qty By Warehouse", "TEXTAREA", ""),
+    # UA Qty By Warehouse intentionally absent: DC OneSource reports a single
+    # fulfillment location, so Qty Available IS the per-warehouse number.
     ("custitem_ua_front_image_url", "UA Front Image URL", "URL", ""),
 ]
 
@@ -83,6 +85,40 @@ FIELDS: list[tuple[str, str, str, str]] = [
 FIELDS += [
     (sid, label, "INTEGER", "")
     for sid, label in list(SANMAR_WHSE_FIELDS.values()) + list(SS_WHSE_FIELDS.values())
+]
+
+# DC OneSource supplier expansion (see scripts/dcos_backfill.py): same key
+# set as UA, no pricing fields (price lists are reference-only for now).
+for _prefix, _label in (
+    ("champro", "Champro"),
+    ("usb", "USB"),
+    ("tck", "TCK"),
+    ("capamerica", "Cap America"),
+    ("mizuno", "Mizuno"),
+    ("ripit", "Rip-It"),
+    ("baden", "Baden"),
+):
+    FIELDS += [
+        (f"custitem_{_prefix}_part_id", f"{_label} Part ID", "TEXT", ""),
+        (f"custitem_{_prefix}_style", f"{_label} Style", "TEXT", ""),
+        (f"custitem_{_prefix}_gtin", f"{_label} GTIN", "TEXT", ""),
+        (f"custitem_{_prefix}_qty_available", f"{_label} Qty Available", "INTEGER", ""),
+    ]
+
+# Champro reference-doc links: merged sizing guide + fabrics PDFs uploaded to
+# the File Cabinet (scripts/champro_docs_upload.py) and set on every Champro
+# item by dcos_backfill.
+FIELDS += [
+    ("custitem_champro_size_guide", "Champro Size Guide", "URL", ""),
+    ("custitem_champro_fabrics", "Champro Fabrics", "URL", ""),
+]
+
+# Item lifecycle (auto-inactivate discontinued / auto-create new): every feed
+# writer stamps these on the items it matches, and item_lifecycle.py
+# inactivates items whose stamp goes stale past the grace period.
+FIELDS += [
+    ("custitem_feed_source", "Feed Source", "TEXT", ""),
+    ("custitem_feed_last_seen", "Feed Last Seen", "DATE", ""),
 ]
 
 

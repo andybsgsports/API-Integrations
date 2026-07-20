@@ -19,6 +19,8 @@ from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS
+from sanmar_netsuite.netsuite.feed_seen import stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.sanmar import constants as C
 from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
@@ -38,9 +40,18 @@ FIELD_ORDER = [
     "custitem_sanmar_case_size",
     "custitem_sanmar_status",
     "custitem_sanmar_qty_available",
-    "custitem_sanmar_qty_by_whse",
     "custitem_sanmar_front_image_url",
 ] + SANMAR_QTY_FIELDS
+
+# SanMar's sanmar_dip.txt inventory file caps Quantity at 1500 per warehouse
+# (documented in the SanMar FTP Integration Guide; raised from 500 in July
+# 2025). A warehouse with more than 1500 on hand reports as exactly 1500.
+# We use dip.txt (SanMar's recommended inventory source), so we inherit the
+# cap; track hits so it's visible in the feed log. Real on-hand above 1500 is
+# only available via SanMar's PromoStandards/Web Service inventory API.
+INVENTORY_CAP_VALUE = 1500
+CAP_SKUS: set[str] = set()
+CAP_STATS: dict[str, int] = {"locations": 0}
 
 
 def _dl(cfg, name: str) -> Path:
@@ -69,28 +80,19 @@ def build_payloads(
     Values are typed (numbers as numbers) and empty values are omitted —
     NetSuite 400s on an empty string in a numeric/currency field.
     """
-    whse_by_key: dict[str, str] = {}
     total_by_key: dict[str, int] = {}
     qtys_by_key: dict[str, dict[str, int]] = {}
     unknown_whse: set[str] = set()
     for rec in inventory:
-        # One warehouse per line, zero-stock locations hidden -- the
-        # semicolon-joined single line was unreadable on item records.
-        lines = [
-            f"{w.warehouse_label or w.warehouse_no}: {w.quantity:,}"
-            for w in rec.warehouses
-            if w.quantity
-        ]
-        whse_by_key[rec.unique_key] = (
-            "\n".join(lines) if lines
-            else ("0 at all warehouses" if rec.warehouses else "")
-        )
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
         if rec.warehouses:
             # Zero-fill every column so a warehouse that drops out of the
             # feed clears to 0 instead of keeping yesterday's count.
             qtys = {sid: 0 for sid in (s for s, _ in SANMAR_WHSE_FIELDS.values())}
             for w in rec.warehouses:
+                if w.quantity >= INVENTORY_CAP_VALUE:
+                    CAP_STATS["locations"] += 1
+                    CAP_SKUS.add(rec.unique_key)
                 hit = SANMAR_WHSE_FIELDS.get(str(w.warehouse_no))
                 if hit:
                     qtys[hit[0]] = qtys[hit[0]] + w.quantity
@@ -99,7 +101,7 @@ def build_payloads(
             qtys_by_key[rec.unique_key] = qtys
     if unknown_whse:
         print(f"WARNING: feed warehouse number(s) with no dedicated field "
-              f"(still in the text breakdown): {sorted(unknown_whse)}")
+              f"(their qty is not surfaced on the item): {sorted(unknown_whse)}")
 
     payloads: dict[str, dict[str, object]] = {}
     natives: dict[str, tuple] = {}
@@ -125,7 +127,6 @@ def build_payloads(
             put("custitem_sanmar_case_size", None if sku.case_size is None else int(sku.case_size))
             put("custitem_sanmar_status", sku.product_status)
             put("custitem_sanmar_qty_available", None if qty is None else int(qty))
-            put("custitem_sanmar_qty_by_whse", whse_by_key.get(sku.unique_key, ""))
             for field, wqty in qtys_by_key.get(sku.unique_key, {}).items():
                 put(field, wqty)
             images = style.images_by_color.get(sku.color_name)
@@ -133,6 +134,7 @@ def build_payloads(
             # image lives on custitem_atlas_item_image (the real NetSuite
             # Image-type field) instead.
             put("custitem_sanmar_front_image_url", images.back_url() if images else None)
+            put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry
                 natives[sku.gtin] = (
@@ -164,14 +166,15 @@ def main() -> int:
     print(f"feed SKUs with GTIN: {len(payloads):,}")
 
     client = NetSuiteClient(cfg.netsuite)
-    cols = ", ".join(FIELD_ORDER)
+    cols = ", ".join(FIELD_ORDER + SEEN_FIELDS)
     gtins = sorted(payloads)
     considered = written = unchanged = priced = failures = 0
     for i in range(0, len(gtins), 250):
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         rows = client.suiteql(
-            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE upccode IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, manufacturer, custitem_ss_brand, {cols} "
+            f"FROM item WHERE upccode IN ({in_list})"
         )
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
         base_by_rid = read_base_prices(client, id_list)
@@ -183,11 +186,15 @@ def main() -> int:
             body = {
                 f: v for f, v in want.items() if not _same(row.get(f), v)
             }
+            # S&S brand wins the Manufacturer field on multi-vendor items.
+            if "manufacturer" in body and str(row.get("custitem_ss_brand") or "").strip():
+                del body["manufacturer"]
             price, cost, weight = natives.get(gtin, (None, None, None))
             add_native_diffs(
                 body, row, base_by_rid, str(row["id"]),
                 price=price, cost=cost, weight=weight, same=_same,
             )
+            stamp(body, row, "sanmar")
             if not body:
                 unchanged += 1
                 continue
@@ -207,6 +214,15 @@ def main() -> int:
                 if failures <= 10:
                     print(f"  FAILED item {row['id']}: {str(exc)[:150]}")
 
+    if CAP_STATS["locations"]:
+        print(
+            f"NOTE: SanMar inventory cap -- {CAP_STATS['locations']} warehouse "
+            f"location(s) across {len(CAP_SKUS)} SKU(s) reported exactly "
+            f"{INVENTORY_CAP_VALUE} (sanmar_dip.txt caps Quantity at "
+            f"{INVENTORY_CAP_VALUE}/warehouse; true on-hand may be higher). "
+            f"Uncapped depth is only available via SanMar's Web Service / "
+            f"PromoStandards inventory API."
+        )
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "

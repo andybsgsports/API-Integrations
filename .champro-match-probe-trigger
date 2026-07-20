@@ -1,0 +1,3 @@
+# Diagnose why B041 got no Champro data/images. Re-run (prior run hit a
+# transient DC OneSource 500 on getProductSellable; probe now resilient).
+NEEDLES=B040,B041

@@ -1,9 +1,9 @@
 queried columns: displayname, description, purchasedescription
 supplier-matched items: 5,739
-custitem_sanmar_unique_key: copy for 161,190 feed SKUs
-custitem_mtec_item_sku: copy for 103,586 feed SKUs
-S&S style titles fetched: 5,654
-custitem_ss_sku: copy for 195,396 feed SKUs
+custitem_sanmar_unique_key: copy for 161,013 feed SKUs
+custitem_mtec_item_sku: copy for 103,587 feed SKUs
+S&S style titles fetched: 5,655
+custitem_ss_sku: copy for 195,422 feed SKUs
   sample item 132911 [custitem_mtec_item_sku]:
     salesDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
     purchaseDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'

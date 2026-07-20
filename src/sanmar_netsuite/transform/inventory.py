@@ -10,7 +10,10 @@ Instead we store SanMar availability on **custom item fields** for visibility
 and downstream automation (e.g. drop-ship availability checks, reorder logic):
 
 * ``custitem_sanmar_qty_available`` — total across all SanMar warehouses.
-* ``custitem_sanmar_qty_by_whse``   — JSON/text breakdown per warehouse.
+
+The per-warehouse breakdown now lives in the dedicated per-warehouse integer
+fields (see ``scripts/warehouse_fields.py``); the old
+``custitem_sanmar_qty_by_whse`` text blob was retired.
 
 If you later decide to mirror SanMar stock into NetSuite locations, do it via
 Inventory Adjustment transactions, not item-field writes (out of scope here and
@@ -19,7 +22,6 @@ deliberately not automated).
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ..config import NetSuiteConfig
@@ -28,10 +30,8 @@ from ..models import InventoryRecord
 
 def build_availability_body(record: InventoryRecord, config: NetSuiteConfig) -> dict[str, Any]:
     f = config.fields
-    breakdown = {w.warehouse_no: w.quantity for w in record.warehouses}
     body: dict[str, Any] = {
         f.qty_available: record.total_qty,
-        f.qty_by_whse: json.dumps(breakdown, separators=(",", ":")),
     }
     return body
 

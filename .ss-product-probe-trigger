@@ -1,0 +1,3 @@
+# Re-diagnose item 122 (why no S&S data) with vendorname/GTIN + catalog check.
+# run: item122-matchdiag-2026-07-19b
+ITEM_ID=122

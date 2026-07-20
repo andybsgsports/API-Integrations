@@ -1,0 +1,4 @@
+# Probe/raise the Maximum Value on per-warehouse qty fields.
+# run: maxvalue-2026-07-18-dry
+DRY_RUN=true
+MAX_VALUE=50000

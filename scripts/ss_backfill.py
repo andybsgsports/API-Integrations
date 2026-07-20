@@ -27,6 +27,8 @@ from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS
+from sanmar_netsuite.netsuite.feed_seen import stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 from ss_activewear_netsuite.config import get_config as ss_config
@@ -38,7 +40,7 @@ FIELDS = [
     "custitem_ss_gtin", "custitem_ss_brand", "custitem_ss_map",
     "custitem_ss_msrp", "custitem_ss_piece_price", "custitem_ss_dozen_price",
     "custitem_ss_case_price", "custitem_ss_case_size", "custitem_ss_weight",
-    "custitem_ss_qty_available", "custitem_ss_qty_by_whse",
+    "custitem_ss_qty_available",
     "custitem_ss_is_closeout", "custitem_ss_is_discontinued",
     "custitem_ss_front_image_url", "custitem_ss_on_model_image_url",
 ] + SS_QTY_FIELDS
@@ -46,6 +48,16 @@ FIELDS = [
 # Feed warehouseAbbr values with no dedicated field, collected during payload
 # builds and reported once at the end (they still land in the text breakdown).
 UNKNOWN_WHSE: set[str] = set()
+
+# S&S caps this account's API inventory at 500 units per location: any location
+# with >=500 on hand reports as exactly 500 (verified via both the REST and
+# PromoStandards endpoints -- e.g. a location with 498 comes through as 498 but
+# anything >=500 flattens to 500). We can't see past it in code; it's an S&S
+# account-entitlement setting. Track how often we hit it so the cap is visible
+# in the feed log (real availability may be far higher until S&S lifts it).
+INVENTORY_CAP_VALUE = 500
+CAP_SKUS: set[str] = set()
+CAP_STATS: dict[str, int] = {"locations": 0}
 
 
 def _put_into(want: dict[str, object]):
@@ -85,14 +97,6 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     never carries one -- its ``warehouses`` list is always empty)."""
     want: dict[str, object] = {}
     put = _put_into(want)
-    rows = whse_rows if whse_rows is not None else (p.get("warehouses") or [])
-    # One warehouse per line, zero-stock locations hidden (readability).
-    lines = [
-        f"{w.get('warehouseAbbr', '')}: {int(w.get('qty') or 0):,}"
-        for w in rows
-        if int(w.get("qty") or 0)
-    ]
-    whse = "\n".join(lines) if lines else ("0 at all warehouses" if rows else "")
     def num(key):
         v = p.get(key)
         try:
@@ -107,6 +111,7 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     put("custitem_ss_size_name", p.get("size_name"))
     put("custitem_ss_gtin", p.get("gtin"))
     put("custitem_ss_brand", p.get("brand_name"))
+    put("manufacturer", p.get("brand_name"))  # native Manufacturer = Brand
     put("custitem_ss_map", num("map_price"))
     put("custitem_ss_msrp", num("msrp"))
     put("custitem_ss_piece_price", num("piece_price"))
@@ -116,7 +121,6 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     put("custitem_ss_case_size", int(case_size) if case_size else None)
     put("custitem_ss_weight", num("weight"))
     put("custitem_ss_qty_available", int(p.get("qty_available") or 0))
-    put("custitem_ss_qty_by_whse", whse)
     want["custitem_ss_is_closeout"] = bool(p.get("is_closeout"))
     want["custitem_ss_is_discontinued"] = bool(p.get("is_discontinued"))
     put("custitem_ss_front_image_url", _abs_url(p.get("front_image_url")))
@@ -127,9 +131,13 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
         qtys = {sid: 0 for sid in SS_QTY_FIELDS}
         for w in whse_rows:
             abbr = str(w.get("warehouseAbbr") or "").strip()
+            qty = int(w.get("qty") or 0)
+            if qty >= INVENTORY_CAP_VALUE:
+                CAP_STATS["locations"] += 1
+                CAP_SKUS.add(str(p.get("sku") or ""))
             hit = SS_WHSE_FIELDS.get(abbr)
             if hit:
-                qtys[hit[0]] += int(w.get("qty") or 0)
+                qtys[hit[0]] += qty
             elif abbr:
                 UNKNOWN_WHSE.add(abbr)
         want.update(qtys)
@@ -268,14 +276,15 @@ def main() -> int:
 
     # -- write phase (diff-aware)
     ids = sorted(matched)
-    cols = ", ".join(FIELDS)
+    cols = ", ".join(FIELDS + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 200):
         chunk = ids[i : i + 200]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         base_by_rid = read_base_prices(client, in_list)
         for row in client.suiteql(
-            f"SELECT id, upccode, cost, weight, {cols} FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, manufacturer, {cols} "
+            f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
             p = matched.get(rid)
@@ -283,6 +292,14 @@ def main() -> int:
                 continue
             want = payload_for(p, whse_by_sku.get(str(p.get("sku") or "")))
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
+            # Clear stale 0.01 placeholder MAPs written before the no-MAP rule
+            # (REST PATCH null empties the field).
+            if "custitem_ss_map" not in want:
+                try:
+                    if float(row.get("custitem_ss_map")) <= 0.011:
+                        body["custitem_ss_map"] = None
+                except (TypeError, ValueError):
+                    pass
             gtin = (p.get("gtin") or "").strip()
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
@@ -291,6 +308,7 @@ def main() -> int:
                 body, row, base_by_rid, rid,
                 price=price, cost=cost, weight=weight, same=_same,
             )
+            stamp(body, row, "ss")
             if not body:
                 unchanged += 1
                 continue
@@ -316,6 +334,15 @@ def main() -> int:
     if UNKNOWN_WHSE:
         print(f"WARNING: feed warehouse code(s) with no dedicated field "
               f"(still in the text breakdown): {sorted(UNKNOWN_WHSE)}")
+    if CAP_STATS["locations"]:
+        print(
+            f"WARNING: S&S inventory cap hit -- {CAP_STATS['locations']} "
+            f"warehouse location(s) across {len(CAP_SKUS)} SKU(s) reported "
+            f"exactly {INVENTORY_CAP_VALUE} (S&S caps this account's API "
+            f"inventory at {INVENTORY_CAP_VALUE}/location; true on-hand may be "
+            f"higher). Ask S&S to enable full inventory visibility to see real "
+            f"quantities above {INVENTORY_CAP_VALUE}."
+        )
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "

@@ -11,7 +11,7 @@ The two backing lists are::
 
 Matching is **case-insensitive** against existing entries (the live lists carry
 mixed casing and some duplicates); when several entries share a name we reuse
-the lowest internal id for stability. Sizes are spelled out
+the lowest *active* internal id (retired duplicates are inactive). Sizes are spelled out
 (:func:`~sanmar_netsuite.transform.sizes.normalize_size`) before lookup so the
 feed's ``S``/``M``/``L`` line up with the list's ``Small``/``Medium``/``Large``.
 
@@ -86,11 +86,15 @@ class MatrixOptionResolver:
         return new_id, "created"
 
     def _find(self, list_type: str, name: str) -> str | None:
+        # Retired duplicate values are marked inactive (color consolidation);
+        # prefer an active id so new items never point at a retired value.
         rows = self.client.suiteql(
-            f"SELECT id FROM {list_type} "
+            f"SELECT id, isinactive FROM {list_type} "
             f"WHERE LOWER(name) = LOWER('{_sql_escape(name)}') ORDER BY id"
         )
-        return str(rows[0]["id"]) if rows else None
+        active = [r for r in rows if str(r.get("isinactive") or "F") != "T"]
+        pick = active[0] if active else (rows[0] if rows else None)
+        return str(pick["id"]) if pick else None
 
     # convenience wrappers for the per-SKU (REST sync) path
     def color_id(self, color_name: str) -> str | None:

@@ -1,0 +1,4 @@
+# Upload data/champro/ChamproSizingGuide.pdf + ChamproFabrics.pdf to the
+# NetSuite File Cabinet (folder "Champro Reference Docs", available without
+# login) and print their media URLs. Idempotent. DRY_RUN=false to upload.
+DRY_RUN=false

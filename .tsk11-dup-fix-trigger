@@ -1,0 +1,11 @@
+# Trigger file for tsk11-dup-fix.yml push-trigger runs.
+# run: dry-run-first
+# run: LIVE-rename-3
+# run: dry-run-suffix-search
+# run: dry-run-sibling-option-diagnostic
+# run: LIVE-capture-full-error
+# run: dry-run-account-diff
+# run: LIVE-account-repair-plus-rename
+# run: hold-dry-pending-user-decision-on-account-change
+DRY_RUN=true
+DIFF=false

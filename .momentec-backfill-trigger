@@ -1,3 +1,5 @@
-# run: post-refresh-FULL
+# Live run: write-phase verified clean in dry (WOULD write 974, 0 failures).
+# Apply the negotiated net cost (half MSRP less 15%) + all custitem_mtec_*
+# fields to matched items. Diff-aware, sandbox-gated.
 DRY_RUN=false
 MAX_ITEMS=0

@@ -81,3 +81,29 @@ def test_style_from_payload() -> None:
     assert s.style_name == "Z100"
     assert s.brand_name == "Acme"
     assert s.title == "Acme Z100 Tee"
+
+
+def test_product_from_payload_live_api_keys() -> None:
+    """The real /Products payload keys differ from the early fixture names:
+    unitWeight / caseQty / retailPrice (verified against the live API), and
+    mapPrice 0.01 is S&S's "no MAP restriction" placeholder."""
+    p = product_from_payload({
+        "sku": "B06560535",
+        "styleName": "8000",
+        "unitWeight": 0.4583,
+        "caseQty": 72,
+        "retailPrice": 6.9,
+        "mapPrice": 0.01,
+        "piecePrice": 3.45,
+        "customerPrice": 2.66,
+    })
+    assert p.weight == Decimal("0.4583")
+    assert p.case_size == 72
+    assert p.msrp == Decimal("6.9")
+    assert p.map_price is None  # 0.01 placeholder -> no MAP
+    assert p.customer_price == Decimal("2.66")
+
+
+def test_product_from_payload_real_map_survives() -> None:
+    p = product_from_payload({"sku": "X", "mapPrice": 15.99})
+    assert p.map_price == Decimal("15.99")

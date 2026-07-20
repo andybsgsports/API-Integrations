@@ -1,3 +1,3 @@
-# run: dry-run-2-with-user-new-colors
-DRY_RUN=true
-MAX_ITEMS=25
+# run: fresh-sandbox-FULL
+DRY_RUN=false
+MAX_ITEMS=0

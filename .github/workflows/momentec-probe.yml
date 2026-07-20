@@ -31,9 +31,16 @@ jobs:
           NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
           NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
           NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          MOMENTEC_LOGON_ID=${{ secrets.MOMENTEC_LOGON_ID }}
+          MOMENTEC_PASSWORD=${{ secrets.MOMENTEC_PASSWORD }}
           SYNC_DRY_RUN=true
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF2
 
       - name: Run feed probe (read-only)
         run: python scripts/momentec_probe.py
+
+      - name: Probe /v2/Style negotiated cart_price (needs MOMENTEC_LOGON_ID/PASSWORD)
+        env:
+          MOMENTEC_PROBE_STYLES: ${{ vars.MOMENTEC_PROBE_STYLES || '790,412000,510000,227130,410400,1425,560000,020000' }}
+        run: python scripts/momentec_style_probe.py || echo "style probe returned non-zero (missing creds or API error) -- see output above"

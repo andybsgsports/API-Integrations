@@ -9,6 +9,11 @@ on:
     # Nightly steady-state run (diff-aware); staggered so live
     # writers never overlap on the same records.
     - cron: "0 9 * * *"
+    # Intraday inventory refresh: ~7am and ~1pm Central (UTC-5, CDT). Staggered
+    # 15 min behind S&S so the two live writers never overlap on the same
+    # records. Diff-aware, so intraday pushes only what changed (mainly stock).
+    - cron: "20 12 * * *"
+    - cron: "20 18 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

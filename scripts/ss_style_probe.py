@@ -1,0 +1,146 @@
+"""Ground-truth probe for one S&S styleID vs a NetSuite item (read-only).
+
+The user proved S&S DOES carry 695HBM (styleID 6124) -- my earlier probe used
+the wrong lookups. This pulls the style the RIGHT way (filtered
+``/Products?styleid=``) and checks, against the NetSuite item, exactly why the
+sync isn't matching it:
+
+* is the style present in ``iter_styles()`` (so the nightly snapshot pulls it)?
+* what gtin / styleName / colorName / sizeName does S&S carry for each SKU?
+* does any SKU's gtin equal the item's upccode? does styleName equal the
+  item's vendorname? do the color/size names line up with the item's options?
+
+Env: SS_STYLEID (default 6124), SS_ITEM (default 5389).
+"""
+
+from __future__ import annotations
+
+import os
+
+from sanmar_netsuite.config import get_config
+from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, COLOR_LIST, SIZE_FIELD, SIZE_LIST
+from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.transform.sizes import normalize_size
+from ss_activewear_netsuite.config import get_config as ss_config
+from ss_activewear_netsuite.ss_activewear.client import SsClient
+
+
+def main() -> int:
+    style_id = os.environ.get("SS_STYLEID", "6124").strip()
+    item_id = os.environ.get("SS_ITEM", "5389").strip()
+    client = NetSuiteClient(get_config().netsuite)
+    ss = SsClient(ss_config().ss_api)
+
+    # -- the NetSuite item we're trying to populate -------------------------
+    rows = client.suiteql(
+        "SELECT id, itemid, upccode, vendorname, "
+        f"{COLOR_FIELD} AS color_id, {SIZE_FIELD} AS size_id "
+        f"FROM item WHERE id = {int(item_id)}"
+    )
+    it = rows[0] if rows else {}
+    color_nm = size_nm = ""
+    if it.get("color_id"):
+        r = client.suiteql(f"SELECT name FROM {COLOR_LIST} WHERE id = {int(it['color_id'])}")
+        color_nm = str(r[0]["name"]) if r else ""
+    if it.get("size_id"):
+        r = client.suiteql(f"SELECT name FROM {SIZE_LIST} WHERE id = {int(it['size_id'])}")
+        size_nm = str(r[0]["name"]) if r else ""
+    ns_upc = str(it.get("upccode") or "").strip()
+    ns_vendor = str(it.get("vendorname") or "").strip()
+    print("=== NetSuite item ===")
+    print(f"  itemid={it.get('itemid')!r} upccode={ns_upc!r} vendorname={ns_vendor!r}")
+    print(f"  color option={color_nm!r}  size option={size_nm!r}")
+
+    # -- is the style in the styles list the nightly snapshot enumerates? ---
+    print(f"\n=== iter_styles() membership for styleID {style_id} ===")
+    found_style = None
+    count = 0
+    for st in ss.iter_styles():
+        count += 1
+        if str(st.style_id) == style_id or (st.style_name or "").upper() == ns_vendor.upper():
+            found_style = st
+            break
+    if found_style:
+        print(f"  FOUND after scanning {count} styles: styleID={found_style.style_id} "
+              f"name={found_style.style_name!r} brand={found_style.brand_name!r} "
+              f"title={found_style.title!r}")
+    else:
+        print(f"  NOT FOUND in {count} styles -- the nightly snapshot never pulls it")
+
+    # -- what does S&S actually carry for this style? -----------------------
+    print(f"\n=== S&S /Products?styleid={style_id} ===")
+    prods = list(ss.iter_products(style_id=style_id))
+    print(f"  {len(prods)} SKU(s)")
+
+    colors = sorted({(p.color_name or "").strip() for p in prods})
+    sizes = sorted({(p.size_name or "").strip() for p in prods})
+    print(f"\n  distinct S&S colorName values ({len(colors)}):")
+    for c in colors:
+        star = "  <-- item option is 'Royal'" if "royal" in c.lower() else ""
+        print(f"    {c!r}{star}")
+    print(f"\n  distinct S&S sizeName values ({len(sizes)}):")
+    for s in sizes:
+        star = "  <-- item option is 'Small'" if s.upper() in ("S", "SMALL") else ""
+        print(f"    {s!r}{star}")
+
+    print("\n  the Royal/Small-ish SKU(s), verbatim:")
+    for p in prods:
+        cname = (p.color_name or "").strip()
+        sname = (p.size_name or "").strip()
+        if "royal" in cname.lower() and sname.upper() in ("S", "SMALL"):
+            print(f"    sku={p.sku!r} gtin={p.gtin!r} style={p.style_name!r} "
+                  f"color={cname!r} size={sname!r}")
+
+    print(f"\n  gtin format check -- item.upccode={ns_upc!r}, first 5 S&S gtins:")
+    for p in prods[:5]:
+        print(f"    {p.gtin!r}  (color={p.color_name!r} size={p.size_name!r})")
+
+    # -- did the sync match the OTHER children of this style? ---------------
+    print(f"\n=== NetSuite {ns_vendor!r} children: which got S&S data? ===")
+    safe = ns_vendor.replace("'", "''")
+    kids = client.suiteql(
+        "SELECT itemid, custitem_ss_sku, custitem_ss_qty_available "
+        f"FROM item WHERE vendorname = '{safe}' ORDER BY itemid"
+    )
+    matched_kids = [k for k in kids if str(k.get("custitem_ss_sku") or "").strip()]
+    print(f"  {len(kids)} children under vendorname {ns_vendor!r}; "
+          f"{len(matched_kids)} have an S&S SKU")
+
+    # every Royal SKU S&S returns, all sizes -- is Royal/Small really absent?
+    print("\n=== every S&S Royal SKU (all sizes) ===")
+    royals = [p for p in prods if "royal" in (p.color_name or "").lower()]
+    for p in sorted(royals, key=lambda p: (p.size_name or "")):
+        print(f"    color={p.color_name!r} size={p.size_name!r} gtin={p.gtin!r} sku={p.sku!r}")
+
+    # DEFINITIVE cross-check: of the color+size combos S&S actually stocks,
+    # how many have a NetSuite child, and did that child match? A gap here =
+    # real matcher bug; zero gap = it's purely S&S stock availability.
+    def parse_kid(itemid: str) -> tuple[str, str] | None:
+        # 695HBM-<Color>-<Size>
+        rest = itemid[len(ns_vendor) + 1:] if itemid.startswith(ns_vendor + "-") else ""
+        parts = rest.rsplit("-", 1)
+        return (parts[0].lower(), parts[1].lower()) if len(parts) == 2 else None
+
+    ns_by_combo = {}
+    for k in kids:
+        pc = parse_kid(str(k.get("itemid") or ""))
+        if pc:
+            ns_by_combo[pc] = str(k.get("custitem_ss_sku") or "").strip()
+    ss_combos = {
+        ((p.color_name or "").strip().lower(),
+         normalize_size((p.size_name or "").strip()).lower())
+        for p in prods
+    }
+    shared = [c for c in ss_combos if c in ns_by_combo]
+    gap = [c for c in shared if not ns_by_combo[c]]
+    print("\n=== cross-check: S&S SKU has NetSuite child but DIDN'T match ===")
+    print(f"  S&S combos: {len(ss_combos)}; NetSuite child combos: {len(ns_by_combo)}; "
+          f"shared: {len(shared)}; of shared, UNMATCHED (real gap): {len(gap)}")
+    for c in sorted(gap):
+        print(f"    GAP: color={c[0]!r} size={c[1]!r} "
+              "(S&S has it, NetSuite child exists, no match)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -85,7 +85,6 @@ def test_build_item_payload_carries_all_custom_fields(
     assert body[cfg.netsuite_fields.map_price] == 15.99
     assert body[cfg.netsuite_fields.msrp] == 22.0
     assert body[cfg.netsuite_fields.qty_available] == 412
-    assert body[cfg.netsuite_fields.qty_by_whse] == "IL:200;TX:100;NV:112"
     assert body["incomeAccount"] == {"id": "111"}
     assert body["assetAccount"] == {"id": "222"}
     assert body["cogsAccount"] == {"id": "333"}
@@ -110,10 +109,7 @@ def test_inventory_payload_only_carries_qty(
     rows = json.loads(ss_products_path.read_text())
     g500 = product_from_payload(rows[0])
     body = build_inventory_payload(g500, cfg)
-    assert set(body) == {
-        cfg.netsuite_fields.qty_available,
-        cfg.netsuite_fields.qty_by_whse,
-    }
+    assert set(body) == {cfg.netsuite_fields.qty_available}
     assert body[cfg.netsuite_fields.qty_available] == 1234
 
 
