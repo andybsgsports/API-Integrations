@@ -106,7 +106,13 @@ DESCRIPTIONS: dict[str, str] = {
     ),
     "custitem_mtec_gtin": "This item's barcode (GTIN/UPC) as provided by Momentec Brands.",
     "custitem_mtec_msrp": "Momentec Brands' Manufacturer's Suggested Retail Price for this item.",
-    "custitem_mtec_cost": "Momentec Brands' cost price for this item.",
+    "custitem_mtec_cost": (
+        "Our net invoiced cost for this item from Momentec Brands: their "
+        "standard wholesale (half of MSRP) less our negotiated 15% program "
+        "discount. Excludes the quarterly SI back-end rebate, which is not an "
+        "invoice discount. This same value is written to the native Purchase "
+        "Price so NetSuite margins are correct."
+    ),
     "custitem_mtec_case_size": "How many units come in one case pack from Momentec Brands.",
     "custitem_mtec_qty_available": (
         "Total quantity of this item currently available from Momentec Brands "

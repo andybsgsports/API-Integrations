@@ -56,6 +56,21 @@ BRAND_NAMES = {
 }
 UNKNOWN_BRANDS: set[str] = set()
 
+# Negotiated invoice discount off Momentec's wholesale price. Per the vendor
+# program terms ("Discount is half MSRP less 15% on all stock and custom
+# styles"), the feed's ``Cost`` column is the standard wholesale (= half MSRP),
+# and our net invoiced cost is that wholesale less 15%. The separate quarterly
+# SI tiered rebate is a back-end rebate, NOT an invoice discount, so it is
+# deliberately excluded from per-item cost. See docs/VENDOR_PROGRAMS.md.
+MOMENTEC_INVOICE_DISCOUNT = 0.15
+
+
+def _net_cost(wholesale: float | None) -> float | None:
+    """Feed wholesale (half MSRP) -> our net invoiced cost (less 15%)."""
+    if wholesale is None:
+        return None
+    return round(wholesale * (1 - MOMENTEC_INVOICE_DISCOUNT), 2)
+
 # Styles Momentec guarantees in stock year-round (all colors/sizes/genders),
 # from their "In-Stock Guaranteed" program page. Matched against Parent_SKU.
 INSTOCK_GUARANTEED = {
@@ -187,7 +202,8 @@ def main() -> int:
             put("custitem_mtec_style", match.style)
             put("custitem_mtec_gtin", sku.gtin)
             put("custitem_mtec_msrp", _num(sku.msrp))
-            put("custitem_mtec_cost", _num(sku.cost))
+            net_cost = _net_cost(_num(sku.cost))
+            put("custitem_mtec_cost", net_cost)
             put("custitem_mtec_case_size",
                 int(sku.case_pack_qty) if str(sku.case_pack_qty).isdigit() else None)
             put("custitem_mtec_qty_available", inv_total.get(sku.item_sku))
@@ -213,7 +229,7 @@ def main() -> int:
                 body["upcCode"] = sku.gtin
             add_native_diffs(
                 body, row, base_by_rid, rid,
-                price=_num(sku.msrp), cost=_num(sku.cost),
+                price=_num(sku.msrp), cost=net_cost,
                 weight=_num(sku.weight), same=_same,
             )
             stamp(body, row, "momentec")
