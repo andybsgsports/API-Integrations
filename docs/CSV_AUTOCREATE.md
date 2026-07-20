@@ -200,6 +200,8 @@ it. Use **`sanmar_new_children_part01.csv`** as the import file below.
 
 ### Full field mapping (CSV column → NetSuite field)
 
+**Map these** — the child-specific fields:
+
 | CSV column | Map to NetSuite field | Reference / notes |
 | --- | --- | --- |
 | `External ID` | External ID | The item's external id (`SANMAR-<key>`). Set on create; also the key the REST syncs use afterward. |
@@ -216,26 +218,36 @@ it. Use **`sanmar_new_children_part01.csv`** as the import file below.
 | `Stock Units` | Stock Unit | `Eaches`. |
 | `Purchase Units` | Purchase Unit | `Eaches`. |
 | `Sale Units` | Sale Unit | `Eaches`. |
-| `Subsidiary` | Subsidiary | Match by name/path (`Parent Company : Badger Sporting Goods Company`). OneWorld only. |
 | `Include Children` | Include Children | `TRUE` (subsidiary rollup). |
-| `Department` | Department | `Apparel`. |
-| `Class` | Class | Match by full path (`Tops : Tees`). Blank when the SanMar category is unmapped. |
-| `Location` | Location | `Badger Sporting Goods`. |
-| `Costing Method` | Costing Method | `Average`. |
 | `Purchase Price` | Purchase Price | SanMar piece price (our cost). |
 | `Vendor 1 Name` | **Vendors** sublist → Vendor | Match by name (`Sanmar Corp`). This is the item-vendor sublist line, not a body field. |
 | `Vendor 1 Purchase Price` | **Vendors** sublist → Purchase Price | Same sublist line as above. |
 | `Weight` | Weight | Piece weight. |
-| `COGS Account` | COGS Account | Match accounts **by number** (`5100`). |
-| `Income Account` | Income Account | Match by number (`4100`). |
-| `Asset Account` | Asset Account | Match by number (`1200`). |
-| `Tax Schedule` | Tax Schedule | `Taxable`. |
 
-Pricing (Base Price) columns are intentionally **absent** — NetSuite's matrix
-child importer rejects them ("Please enter missing price(s)"). Base Price and the
-income account are applied to the new children **after** the import by
-`sanmar-sync reconcile-items` (same post-step the original load uses; see
-NETSUITE_SETUP.md §8).
+**Leave these UNMAPPED** — a matrix child **inherits** them from its parent, so
+mapping them either errors or is silently ignored. (This is why the live 5-row
+test failed with `Invalid incomeaccount reference key "4100"` — the child was
+being handed an income account it should inherit. Leave the CSV columns present
+but don't map them.)
+
+| CSV column | Why unmapped |
+| --- | --- |
+| `Subsidiary` | Inherited from parent. |
+| `Department` | Inherited from parent. |
+| `Class` | Inherited from parent. |
+| `Location` | Inherited from parent. |
+| `Costing Method` | Inherited from parent. |
+| `COGS Account` | Inherited from parent. |
+| `Income Account` | Inherited from parent; applied later by `reconcile-items`. |
+| `Asset Account` | Inherited from parent. |
+| `Tax Schedule` | Inherited from parent. |
+
+Pricing (Base Price) columns are intentionally **absent** from the file too —
+NetSuite's matrix child importer rejects them ("Please enter missing price(s)").
+Base Price **and** the income account are applied to the new children **after**
+the import by `sanmar-sync reconcile-items` (the same post-step the original load
+uses; see NETSUITE_SETUP.md §8). So the parent's accounts carry the children at
+create time, and reconcile finalises income + Base Price.
 
 > **Matrix-grid caveat.** A child import only succeeds for a colour/size whose
 > value already exists in the matrix custom lists *and* is available on the
