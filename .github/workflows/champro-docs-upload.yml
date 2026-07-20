@@ -1,0 +1,63 @@
+name: Champro Reference Docs Upload (File Cabinet)
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (true = report only)"
+        required: true
+        default: "true"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".champro-docs-upload-trigger"]
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve DRY_RUN
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v=$(grep -E '^DRY_RUN=' .champro-docs-upload-trigger | tail -1 | cut -d= -f2 | tr -d ' \r')
+          else
+            v="${{ github.event.inputs.dry_run }}"
+          fi
+          [ "$v" = "false" ] || v="true"
+          echo "DRY_RUN=$v" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$v"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=${DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+      - name: Upload Champro reference docs
+        run: python scripts/champro_docs_upload.py
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
