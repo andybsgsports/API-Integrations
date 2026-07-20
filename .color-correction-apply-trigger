@@ -1,6 +1,7 @@
-# run: correction-apply-LIVE-2026-07-20
-# LIVE: create 'Collegiate Blue' colour value, then correct all 18 695HBM items
-# (Columbia Blue->Collegiate Blue, Red->True Red, Navy->J.Navy). Scoped to
-# 695HBM only. Preview confirmed 18 items; dry-apply validated the write-path.
+# run: correction-apply-names-LIVE-2026-07-20
+# LIVE: rerun now that the apply also rewrites the Item Name/Number. The 18
+# 695HBM items already have the correct colour; this replaces the stale colour
+# segment in their names (695HBM-Columbia Blue-Small -> 695HBM-Collegiate Blue-
+# Small, etc.). Colour value already exists, so nothing is created.
 DRY_RUN=false
 MAX_ITEMS=0
