@@ -1,0 +1,6 @@
+# run: correction-apply-DRY-2026-07-20
+# DRY: validate the apply write-path. True Red (6) + J.Navy (6) exist and would
+# correct; Collegiate Blue is skipped until the value is created. Flip to
+# DRY_RUN=false only after 'Collegiate Blue' exists (to catch all 18).
+DRY_RUN=true
+MAX_ITEMS=0
