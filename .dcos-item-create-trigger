@@ -1,6 +1,6 @@
-# Auto-create LIVE smoke: create ONE real Rip-It child via the matrix RESTlet.
-# run: ripit-LIVE-1child-after-secrets-2026-07-19
+# Auto-create: RESTlet + secrets confirmed working. Parked at dry pending the
+# integration role gaining 'Lists -> Tax Schedules' permission, then re-run live.
 SUPPLIER=ripit
-DRY_RUN=false
+DRY_RUN=true
 MAX_STYLES=1
 MAX_ITEMS=1
