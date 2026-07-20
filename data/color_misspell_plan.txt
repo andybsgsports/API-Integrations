@@ -1,0 +1,11 @@
+colour-list values: 786
+S&S feed colour names (spelling truth): 161
+items with a colour option: 12,084
+
+near-duplicate colour pairs: 798
+  auto (one side matches the feed, distance 1): 4 -> 34 items to repoint
+  review (ambiguous direction / distance 2): 794 -> 980 items
+  e.g. retire 1017 'Forest Green' -> 672 'Forrest Green' (51 items, review)
+  e.g. retire 6164 'Forrest Green/Si' -> 6395 'Forrest Green/Lg' (1 items, review)
+  e.g. retire 7617 'Forest Green/White' -> 4521 'Forrest Green/White' (0 items, review)
+wrote /home/runner/work/API-Integrations/API-Integrations/data/color_misspell_plan.csv
