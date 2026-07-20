@@ -1,5 +1,6 @@
-# Live run: write-phase verified clean in dry (WOULD write 974, 0 failures).
-# Apply the negotiated net cost (half MSRP less 15%) + all custitem_mtec_*
-# fields to matched items. Diff-aware, sandbox-gated.
+# run: momentec-sync-after-695hbm-colorfix-2026-07-20
+# LIVE: now that 695HBM's Collegiate Blue / True Red / J.Navy items sit on the
+# correct colours, the feed matches them -- this run writes their Momentec data
+# (UPC, pricing, inventory, custitem_mtec_* fields). Diff-aware; sandbox-gated.
 DRY_RUN=false
 MAX_ITEMS=0
