@@ -94,7 +94,11 @@ _SDL_ALIASES = {
     "SUBCATEGORYNAME": "subcategory",
     "PRODUCTSTATUS": "product_status",
     "MSRP": "msrp",
+    # SanMar has spelled the MAP column a few ways across SDL/EPDD revisions;
+    # accept the known variants so a rename doesn't silently drop MAP.
     "MAPPRICING": "map_price",
+    "MAPPRICE": "map_price",
+    "MAP": "map_price",
     "GTIN": "gtin",
     "QTY": "available_qty",
     "FRONTMODELIMAGEURL": "front_model_url",

@@ -112,7 +112,13 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     put("custitem_ss_gtin", p.get("gtin"))
     put("custitem_ss_brand", p.get("brand_name"))
     put("manufacturer", p.get("brand_name"))  # native Manufacturer = Brand
-    put("custitem_ss_map", num("map_price"))
+    # S&S publishes mapPrice 0.01 as a "no MAP restriction" placeholder; writing
+    # literal pennies onto the item reads as bad data, so treat <=1c as no MAP.
+    # (The saved snapshot can still carry the raw 0.01 even though the API parser
+    # filters it, so re-apply the rule here on the live-write path.) The write
+    # loop's clear-stale-0.01 branch then nulls any placeholder already stored.
+    _mp = num("map_price")
+    put("custitem_ss_map", None if (_mp is not None and _mp <= 0.011) else _mp)
     put("custitem_ss_msrp", num("msrp"))
     put("custitem_ss_piece_price", num("piece_price"))
     put("custitem_ss_dozen_price", num("dozen_price"))

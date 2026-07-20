@@ -105,10 +105,14 @@ def build_payloads(
 
     payloads: dict[str, dict[str, object]] = {}
     natives: dict[str, tuple] = {}
+    map_seen = sku_total = 0
     for style in styles:
         for sku in style.skus:
             if not sku.gtin:
                 continue
+            sku_total += 1
+            if sku.map_price is not None:
+                map_seen += 1
             entry: dict[str, object] = {}
             put = _make_put(entry)
             qty = total_by_key.get(sku.unique_key, sku.available_qty)
@@ -142,6 +146,10 @@ def build_payloads(
                     None if sku.piece_price is None else float(sku.piece_price),
                     None if sku.piece_weight is None else float(sku.piece_weight),
                 )
+    # Ground truth on whether SanMar's feed carries MAP at all: value brands
+    # (e.g. Gildan) usually have no MAP, so a blank MAP field can be correct.
+    print(f"SanMar MAP coverage: {map_seen}/{sku_total} feed SKUs carry a MAP "
+          f"price (blank MAP on a no-MAP brand like Gildan is expected)")
     return payloads, natives
 
 
