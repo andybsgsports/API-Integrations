@@ -1,5 +1,5 @@
-# Champro CSV back-fill: fill UPC/GTIN, weight, keys, doc links from
-# data/champro_products.csv by vendor code (SKU). Dry run first to verify
-# matches (esp. B041). No inventory. DRY_RUN=false to write.
-DRY_RUN=true
+# Champro CSV back-fill LIVE: fill UPC/GTIN, weight, keys, doc links on the
+# 66 vendor-code-matched items (incl. B041). No inventory. Dry verified:
+# matched 66, upcCode filled 66, 0 failures.
+DRY_RUN=false
 MAX_ITEMS=0
