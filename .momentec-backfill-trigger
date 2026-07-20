@@ -1,4 +1,5 @@
-# Populate back images into custitem_mtec_front_image_url.
-# run: mtec-backimg-2026-07-19
-DRY_RUN=false
+# Verify the write-phase SELECT runs clean after confirming all custitem_mtec_*
+# fields exist (audit: have=106) + the resilience guard. Dry run: exercises
+# every SELECT chunk (the operation that was 400ing) without writing.
+DRY_RUN=true
 MAX_ITEMS=0
