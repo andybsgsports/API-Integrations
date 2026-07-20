@@ -35,13 +35,15 @@ ENDPOINT_VARIANTS = [
 ]
 
 
-def media_request(key_id: str, key_pw: str, version: str, product_id: str) -> str:
+def media_request(key_id: str, key_pw: str, version: str, product_id: str,
+                  media_type: str = "Image") -> str:
     ns = MEDIA_NS_TMPL.format(v=version)
+    mt = f"<shar:mediaType>{media_type}</shar:mediaType>" if media_type else ""
     return (
         f'<ns:GetMediaContentRequest xmlns:ns="{ns}" xmlns:shar="{ns}SharedObjects/">'
         f"<shar:wsVersion>{version}</shar:wsVersion>"
         f"<shar:id>{key_id}</shar:id><shar:password>{key_pw}</shar:password>"
-        f"<shar:mediaType>Image</shar:mediaType>"
+        f"{mt}"
         f"<shar:productId>{product_id}</shar:productId>"
         "</ns:GetMediaContentRequest>"
     )
@@ -78,35 +80,45 @@ def summarize(text: str) -> tuple[int, list[dict]]:
 
 
 def probe_style(base: str, key_id: str, key_pw: str, style: str) -> bool:
+    dumped = False
     for seg, version in ENDPOINT_VARIANTS:
         url = f"{base}/{seg}/{version}/soap"
-        try:
-            text = _soap(url, "getMediaContent",
-                         media_request(key_id, key_pw, version, style))
-        except Exception as exc:  # noqa: BLE001
-            print(f"    [{seg} {version}] HTTP error: {str(exc)[:120]}")
-            continue
-        if is_fault(text):
-            snippet = " ".join(text.split())
-            idx = snippet.lower().find("faultstring")
-            shown = snippet[idx:idx + 160] if idx >= 0 else snippet[:160]
-            print(f"    [{seg} {version}] fault: {shown}")
-            continue
-        try:
-            count, entries = summarize(text)
-        except ET.ParseError as exc:
-            print(f"    [{seg} {version}] unparseable: {str(exc)[:100]}")
-            continue
-        print(f"    [{seg} {version}] OK -- {count} media entr(y/ies)")
-        for e in entries[:6]:
-            print(f"        {e}")
-        if count:
-            print("    ---- raw (first 2500 chars) ----")
-            print("    " + " ".join(text.split())[:2500])
-            return True
-        # endpoint worked but no images for this style; still a working endpoint
-        return True
-    return False
+        endpoint_ok = False
+        for mtype in ("Image", ""):  # "" = omit the mediaType filter entirely
+            tag = f"{seg} {version} mt={mtype or 'ALL'}"
+            try:
+                text = _soap(url, "getMediaContent",
+                             media_request(key_id, key_pw, version, style, mtype))
+            except Exception as exc:  # noqa: BLE001
+                print(f"    [{tag}] HTTP error: {str(exc)[:120]}")
+                continue
+            if is_fault(text):
+                snippet = " ".join(text.split())
+                idx = snippet.lower().find("faultstring")
+                shown = snippet[idx:idx + 160] if idx >= 0 else snippet[:160]
+                print(f"    [{tag}] fault: {shown}")
+                continue
+            endpoint_ok = True
+            try:
+                count, entries = summarize(text)
+            except ET.ParseError as exc:
+                print(f"    [{tag}] unparseable: {str(exc)[:100]}")
+                continue
+            print(f"    [{tag}] OK -- {count} media entr(y/ies)")
+            for e in entries[:6]:
+                print(f"        {e}")
+            # Dump the raw response once per style so a 0-count result can be
+            # told apart from a response our parser didn't recognize.
+            if not dumped:
+                print("    ---- raw (first 2500 chars) ----")
+                print("    " + " ".join(text.split())[:2500])
+                dumped = True
+            if count:
+                return True
+        if endpoint_ok:
+            # This endpoint answered; no need to try the other path variants.
+            return dumped
+    return dumped
 
 
 def main() -> int:
@@ -121,7 +133,7 @@ def main() -> int:
 
     suppliers = _csv("DCOS_MEDIA_SUPPLIERS") or list(SUPPLIERS)
     forced_styles = _csv("DCOS_MEDIA_STYLES")
-    sample = int(os.environ.get("DCOS_MEDIA_SAMPLE", "2") or "2")
+    sample = int(os.environ.get("DCOS_MEDIA_SAMPLE", "5") or "5")
 
     any_ok = False
     for key in suppliers:
