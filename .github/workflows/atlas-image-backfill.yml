@@ -80,6 +80,9 @@ jobs:
       - name: Run image backfill
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          # DC OneSource images (primaryImageUrl) for Champro et al.
+          DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
+          DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
         run: python scripts/atlas_image_backfill.py
 
       - name: Open issue on failure

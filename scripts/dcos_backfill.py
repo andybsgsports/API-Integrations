@@ -28,7 +28,8 @@ import requests
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS
+from sanmar_netsuite.netsuite.feed_seen import stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 
@@ -128,6 +129,50 @@ def get_parts(base: str, key_id: str, key_pw: str, style: str) -> list[dict]:
         if part.get("partId"):
             parts.append(part)
     return parts
+
+
+def get_style_images(base: str, key_id: str, key_pw: str, style: str) -> dict[str, str]:
+    """partId -> primary image URL for a style.
+
+    DC OneSource has no PromoStandards Media Content service (it returns error
+    125 "Not Supported"), but its Product Data ``getProduct`` response carries a
+    ``primaryImageUrl`` -- at the Product level (one per style) and, when
+    present, per ``ProductPart``. The part-level image wins; otherwise the
+    product-level image is used for every part of the style.
+    """
+    body = (
+        f'<ns:GetProductRequest xmlns:ns="{PRODUCT_NS}" '
+        f'xmlns:shar="{PRODUCT_NS}SharedObjects/">'
+        f"<shar:wsVersion>2.0.0</shar:wsVersion><shar:id>{key_id}</shar:id>"
+        f"<shar:password>{key_pw}</shar:password>"
+        "<shar:localizationCountry>US</shar:localizationCountry>"
+        "<shar:localizationLanguage>en</shar:localizationLanguage>"
+        f"<shar:productId>{style}</shar:productId></ns:GetProductRequest>"
+    )
+    root = ET.fromstring(_soap(f"{base}/Product/2.0.0/soap", "getProduct", body))
+    parents = {child: parent for parent in root.iter() for child in parent}
+    product_img = ""
+    part_img: dict[str, str] = {}
+    part_ids: list[str] = []
+    for el in root.iter():
+        tag = _strip(el.tag)
+        if tag == "ProductPart":
+            pid = next((( s.text or "").strip() for s in el.iter()
+                        if _strip(s.tag) == "partId" and (s.text or "").strip()), "")
+            if pid:
+                part_ids.append(pid)
+        elif tag == "primaryImageUrl" and (el.text or "").strip():
+            url = el.text.strip()
+            par = parents.get(el)
+            if par is not None and _strip(par.tag) == "ProductPart":
+                pid = next((( s.text or "").strip() for s in par.iter()
+                            if _strip(s.tag) == "partId" and (s.text or "").strip()), "")
+                if pid:
+                    part_img[pid] = url
+            elif not product_img:
+                product_img = url
+    out = {pid: part_img.get(pid) or product_img for pid in part_ids}
+    return {pid: url for pid, url in out.items() if url}
 
 
 def get_inventory(base: str, key_id: str, key_pw: str, style: str) -> dict[str, int]:
