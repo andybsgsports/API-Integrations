@@ -3,7 +3,7 @@ color list values: 786
 abbreviation-looking names (short, lowercase, no space): 0
 
 === 2. matrix children color coverage ===
-children: 12,465; with color option: 12,465; WITHOUT: 0
+children: 12,466; with color option: 12,466; WITHOUT: 0
 
 === 3. assigned color vs supplier color name ===
   (S&S comparison failed: NetSuite 400: Bad Request)
