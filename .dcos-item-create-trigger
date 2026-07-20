@@ -1,6 +1,6 @@
-# Auto-create smoke — secrets now set. Dry run first (1 style, few items).
-# run: ripit-DRY-after-secrets-2026-07-19
+# Auto-create LIVE smoke: create ONE real Rip-It child via the matrix RESTlet.
+# run: ripit-LIVE-1child-after-secrets-2026-07-19
 SUPPLIER=ripit
-DRY_RUN=true
+DRY_RUN=false
 MAX_STYLES=1
-MAX_ITEMS=3
+MAX_ITEMS=1
