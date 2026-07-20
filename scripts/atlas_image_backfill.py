@@ -21,6 +21,7 @@ SYNC_DRY_RUN; UPDATE_MAX_ITEMS caps item writes.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 from pathlib import Path
@@ -42,6 +43,9 @@ from ss_activewear_netsuite.config import get_config as ss_config
 
 FIELD = "custitem_atlas_item_image"
 FOLDER_NAME = "Supplier Item Images"
+# UPC -> Champro product image, from the user-supplied champrosports.com export
+# (data/champro_images.csv). Per-color images, matched to items by barcode.
+CHAMPRO_IMAGE_CSV = Path(__file__).resolve().parents[1] / "data" / "champro_images.csv"
 
 
 def sanmar_images() -> dict[str, str]:
@@ -104,10 +108,33 @@ def ss_images() -> dict[str, str]:
     return out
 
 
+def champro_csv_images() -> dict[str, str]:
+    """UPC -> Champro image from the champrosports.com export. Keyed under
+    several barcode paddings (UPC-12 / EAN-13 / GTIN-14, and zero-stripped) so
+    it matches whatever form NetSuite's upccode is stored in."""
+    out: dict[str, str] = {}
+    if not CHAMPRO_IMAGE_CSV.exists():
+        return out
+    with CHAMPRO_IMAGE_CSV.open(encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh):
+            upc = (row.get("upc") or "").strip()
+            url = (row.get("image_url") or "").strip()
+            if not upc or not url:
+                continue
+            core = upc.lstrip("0") or upc
+            for key in {upc, core, core.zfill(12), core.zfill(13), core.zfill(14)}:
+                out.setdefault(key, url)
+    return out
+
+
 SOURCES = [  # ranking order: (item key field, loader)
     ("custitem_sanmar_unique_key", sanmar_images),
     ("custitem_mtec_item_sku", momentec_images),
     ("custitem_ss_sku", ss_images),
+    # Champro barcode-matched images rank above the DC OneSource feed image
+    # (below) so items get the per-color champrosports.com photo, not the
+    # single product-level feed image.
+    ("upccode", champro_csv_images),
 ]
 
 # DC OneSource suppliers have no Media Content service, but their Product Data
