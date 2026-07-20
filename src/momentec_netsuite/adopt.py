@@ -46,7 +46,6 @@ class MomentecMatchRow:
     upc: str
     ns_id: str | None = None
     method: str = "unmatched"
-    matched_color_id: str | None = None  # the colour-list value the item sits on
 
 
 @dataclass
@@ -99,16 +98,9 @@ def _fetch_style_items(client, style: str) -> list[dict]:
 
 
 def match_momentec(
-    client, styles: Iterable[MomentecStyle], *, style_limit: int = 0,
-    synonyms: dict[str, str] | None = None,
+    client, styles: Iterable[MomentecStyle], *, style_limit: int = 0
 ) -> MomentecReport:
-    """Match each Momentec SKU to an existing item via option ids.
-
-    ``synonyms`` maps a feed colour name -> one of our list-value names, letting
-    a feed colour that is a different *word* for an existing value (e.g. a
-    vendor's "Collegiate Blue" == our "Columbia Blue") bridge to the item so it
-    matches. Curated/reviewed -- these can't be guessed.
-    """
+    """Match each Momentec SKU to an existing item via option ids."""
     report = MomentecReport()
     options = OptionMaps(client)
 
@@ -157,9 +149,7 @@ def match_momentec(
                         + options.size_candidates(normalize_size(sku.size))
                     )
                 )
-                for color_id, method in options.color_candidates(
-                    color, color, synonyms
-                ):
+                for color_id, method in options.color_candidates(color, color):
                     hit = None
                     for size_id in size_ids:
                         hit = opt_index.get((color_id, size_id))
@@ -168,7 +158,6 @@ def match_momentec(
                     if hit:
                         row.ns_id = hit[0]
                         row.method = method
-                        row.matched_color_id = color_id
                         break
             if row.ns_id:
                 claimed.add(row.ns_id)

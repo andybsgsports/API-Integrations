@@ -1,4 +1,4 @@
-name: Color Synonym Preview (Momentec, read-only)
+name: Color Correction Preview (per-style, read-only)
 
 permissions:
   contents: write
@@ -7,7 +7,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: ["claude/festive-carson-oj4y8n"]
-    paths: [".color-synonym-preview-trigger", "data/color_synonyms.csv"]
+    paths: [".color-correction-preview-trigger", "data/color_corrections.csv"]
 
 jobs:
   preview:
@@ -33,17 +33,17 @@ jobs:
           SYNC_DRY_RUN=true
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF2
-      - name: Run color synonym preview (read-only)
+      - name: Run color correction preview (read-only)
         run: |
           set -o pipefail
-          python scripts/color_synonym_preview.py | tee color_synonym_preview.txt
+          python scripts/color_correction_preview.py | tee color_correction_preview.txt
       - name: Commit preview back to this branch
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          mkdir -p data && cp color_synonym_preview.txt data/ 2>/dev/null || true
-          git add -f data/color_synonym_preview.csv data/color_synonym_preview.txt 2>/dev/null || true
-          git commit -m "Color synonym preview (run ${{ github.run_id }}) [skip ci]" || exit 0
+          mkdir -p data && cp color_correction_preview.txt data/ 2>/dev/null || true
+          git add -f data/color_correction_preview.csv data/color_correction_preview.txt 2>/dev/null || true
+          git commit -m "Color correction preview (run ${{ github.run_id }}) [skip ci]" || exit 0
           git pull --rebase origin ${{ github.ref_name }} || true
           git push origin HEAD:${{ github.ref_name }} || echo "push failed - report in log only"
