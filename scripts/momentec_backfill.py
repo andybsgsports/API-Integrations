@@ -148,6 +148,24 @@ def _same(current, new) -> bool:
         return False
 
 
+def _present_columns(client, candidates: list[str]) -> list[str]:
+    """Subset of candidate item columns that actually exist in the account.
+
+    A field that has been added to the code but not yet created in NetSuite
+    would otherwise make the whole write-phase ``SELECT`` 400, silently
+    stalling the nightly for every item. Probing each once lets the run write
+    the fields that do exist and warn about the ones that don't.
+    """
+    ok: list[str] = []
+    for c in candidates:
+        try:
+            client.suiteql(f"SELECT {c} FROM item WHERE rownum <= 1")
+            ok.append(c)
+        except Exception:  # noqa: BLE001 - unknown column -> treat as absent
+            pass
+    return ok
+
+
 def main() -> int:
     cfg = get_config()
     allow_write = not ns_config().sync.dry_run
@@ -179,7 +197,12 @@ def main() -> int:
         by_item.setdefault(r.ns_id, r)
 
     ids = sorted(by_item)
-    cols = ", ".join(FIELDS + SEEN_FIELDS)
+    present = _present_columns(client, FIELDS)
+    missing = [f for f in FIELDS if f not in present]
+    if missing:
+        print(f"WARNING: custom field(s) not present in account -- skipping "
+              f"read+write for these (create them, then re-run): {missing}")
+    cols = ", ".join(present + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = priced = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
@@ -221,6 +244,8 @@ def main() -> int:
             elif sku.brand:
                 UNKNOWN_BRANDS.add(sku.brand)
 
+            for mf in missing:
+                want.pop(mf, None)
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             # S&S brand wins the Manufacturer field on multi-vendor items.
             if "manufacturer" in body and str(row.get("custitem_ss_brand") or "").strip():

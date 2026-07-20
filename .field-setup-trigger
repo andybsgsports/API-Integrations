@@ -1,3 +1,6 @@
-# Field created; neutralized.
+# Momentec nightly was 400ing on the write-phase SELECT because newer
+# custitem_mtec_* fields (size_guide / instock_guaranteed) may not exist in the
+# account yet. Run the read-only audit + idempotent SOAP creator to create any
+# missing fields. The SOAP creator only touches fields the audit reports missing.
 FIELD_CREATE=false
-SOAP_CREATE=false
+SOAP_CREATE=true
