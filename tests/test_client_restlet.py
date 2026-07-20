@@ -67,3 +67,53 @@ def test_call_restlet_requires_script_and_deploy_ids():
     client = NetSuiteClient(_sandbox_config())
     with pytest.raises(RuntimeError, match="script/deploy ids"):
         client.call_restlet("", "", {"items": []})
+
+
+class _StatusResp:
+    reason = "Bad Request"
+    content = b"{}"
+
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = "err"
+
+    def json(self):
+        return self._payload
+
+
+def test_suiteql_retries_transient_400(monkeypatch):
+    """A transient SuiteQL 400 is retried and then succeeds (read-only, safe)."""
+    client = NetSuiteClient(_sandbox_config())
+    calls = {"n": 0}
+
+    def fake_request(method, url, *, json_body=None, headers=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _StatusResp(400, {"title": "Bad Request"})
+        return _StatusResp(200, {"items": [{"id": 1}], "hasMore": False})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr("sanmar_netsuite.netsuite.client.time.sleep", lambda *_: None)
+
+    assert client.suiteql("SELECT id FROM item") == [{"id": 1}]
+    assert calls["n"] == 2  # one retry
+
+
+def test_suiteql_gives_up_after_attempts(monkeypatch):
+    """A persistent 400 still raises (after the bounded retries)."""
+    from sanmar_netsuite.netsuite.client import NetSuiteError
+
+    client = NetSuiteClient(_sandbox_config())
+    calls = {"n": 0}
+
+    def fake_request(method, url, *, json_body=None, headers=None):
+        calls["n"] += 1
+        return _StatusResp(400, {"title": "Bad Request"})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr("sanmar_netsuite.netsuite.client.time.sleep", lambda *_: None)
+
+    with pytest.raises(NetSuiteError):
+        client.suiteql("SELECT id FROM item")
+    assert calls["n"] == 3  # bounded attempts, no infinite retry
