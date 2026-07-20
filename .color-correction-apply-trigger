@@ -1,7 +1,7 @@
-# run: correction-apply-names-LIVE-2026-07-20
-# LIVE: rerun now that the apply also rewrites the Item Name/Number. The 18
-# 695HBM items already have the correct colour; this replaces the stale colour
-# segment in their names (695HBM-Columbia Blue-Small -> 695HBM-Collegiate Blue-
-# Small, etc.). Colour value already exists, so nothing is created.
+# run: correction-apply-8000-LIVE-2026-07-20
+# LIVE: apply the 8000 corrections. Columbia Blue -> Carolina Blue (id 1016,
+# exists) and Heather Royal -> Heather Deep Royal (created automatically), 16
+# items total; colour option + Item Name/Number both updated. 695HBM rows are
+# already done (0 items). Scoped to the listed styles.
 DRY_RUN=false
 MAX_ITEMS=0
