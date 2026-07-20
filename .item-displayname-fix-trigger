@@ -1,0 +1,6 @@
+# run: displayname-695hbm-LIVE-2026-07-20
+# LIVE: normalise every 695HBM item's Display Name / Purchase Description to
+# Momentec's "Dri-Power(R) Fleece Hoodie". Only the 2 S&S-named items differ, so
+# only those are written. Diff-aware; scoped to 695HBM.
+DRY_RUN=false
+MAX_ITEMS=0
