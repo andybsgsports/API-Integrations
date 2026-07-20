@@ -1,5 +1,5 @@
-# run: forrest-fix-DRY-2026-07-20b
-# DRY: verify it finds the ~75 items on Forrest Green (672) and would repoint
-# them to Forest Green (1017), then would inactivate value 672.
-DRY_RUN=true
+# run: forrest-fix-LIVE-2026-07-20
+# LIVE: dry verified 72 items on Forrest Green (672) -> Forest Green (1017),
+# 0 failures, then inactivate value 672. Andy approved this specific fix.
+DRY_RUN=false
 MAX_ITEMS=0
