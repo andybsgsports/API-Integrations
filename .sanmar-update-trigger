@@ -1,4 +1,7 @@
-# Full SanMar refresh: correct stale warehouse values + exercise 1500-cap detection.
-# run: sanmar-cap-refresh-2026-07-19
+# LIVE full run to apply the SanMar MAP header-alias fix and log MAP coverage
+# (how many feed SKUs carry a MAP). Diff-aware, so it only writes MAP where the
+# feed now resolves one. Reveals whether a blank MAP (e.g. Gildan) is correct
+# (no MAP at SanMar) or was a column-name miss. Sandbox-gated.
+# run: sanmar-map-alias-fix-2026-07-20
 DRY_RUN=false
 MAX_ITEMS=0
