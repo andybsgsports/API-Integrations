@@ -1,0 +1,45 @@
+name: DCOS Media Content Probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suppliers:
+        description: "Comma list of supplier keys (blank = all)"
+        required: false
+        default: ""
+      styles:
+        description: "Comma list of styles to probe (blank = auto-pick sellable)"
+        required: false
+        default: ""
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".dcos-media-probe-trigger"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve probe parameters
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            get() { grep -E "^$1=" .dcos-media-probe-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
+            echo "DCOS_MEDIA_SUPPLIERS=$(get SUPPLIERS)" >> "$GITHUB_ENV"
+            echo "DCOS_MEDIA_STYLES=$(get STYLES)" >> "$GITHUB_ENV"
+          else
+            echo "DCOS_MEDIA_SUPPLIERS=${{ github.event.inputs.suppliers }}" >> "$GITHUB_ENV"
+            echo "DCOS_MEDIA_STYLES=${{ github.event.inputs.styles }}" >> "$GITHUB_ENV"
+          fi
+      - name: Probe DCOS media content (read-only)
+        env:
+          DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
+          DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+        run: python scripts/dcos_media_probe.py

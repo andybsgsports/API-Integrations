@@ -1,0 +1,5 @@
+# Read-only probe: does DC OneSource expose PromoStandards Media Content
+# (product images) and how are they keyed? Start with Champro; blank SUPPLIERS
+# = all. Blank STYLES = auto-pick a couple of sellable styles per supplier.
+SUPPLIERS=champro
+STYLES=
