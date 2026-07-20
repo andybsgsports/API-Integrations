@@ -1,6 +1,7 @@
-# Auto-create: RESTlet + secrets confirmed working. Parked at dry pending the
-# integration role gaining 'Lists -> Tax Schedules' permission, then re-run live.
+# Auto-create live smoke: RESTlet + matrix secrets confirmed working, and the
+# integration role now has 'Lists -> Tax Schedules'. Live, minimal scope
+# (1 style / 1 child) to confirm end-to-end create, then park back at dry.
 SUPPLIER=ripit
-DRY_RUN=true
+DRY_RUN=false
 MAX_STYLES=1
 MAX_ITEMS=1
