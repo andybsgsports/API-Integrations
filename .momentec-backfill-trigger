@@ -1,5 +1,5 @@
-# Verify the write-phase SELECT runs clean after confirming all custitem_mtec_*
-# fields exist (audit: have=106) + the resilience guard. Dry run: exercises
-# every SELECT chunk (the operation that was 400ing) without writing.
-DRY_RUN=true
+# Live run: write-phase verified clean in dry (WOULD write 974, 0 failures).
+# Apply the negotiated net cost (half MSRP less 15%) + all custitem_mtec_*
+# fields to matched items. Diff-aware, sandbox-gated.
+DRY_RUN=false
 MAX_ITEMS=0
