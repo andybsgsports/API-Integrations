@@ -1,6 +1,6 @@
 # Trigger file for atlas-image-backfill.yml push-trigger runs.
-# Dry test of the new DC OneSource primaryImageUrl wiring (Champro et al.):
-# confirm the per-supplier image maps build and would set the Item Image.
-# run: dcos-image-wiring-dry-2026-07-20
+# Dry test of the full image wiring: Champro per-color images (UPC-matched from
+# data/champro_images.csv) preferred over the DC OneSource feed primaryImageUrl.
+# run: champro-upc-images-dry-2026-07-20
 DRY_RUN=true
 MAX_ITEMS=25
