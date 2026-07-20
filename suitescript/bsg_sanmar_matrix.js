@@ -16,7 +16,8 @@
  *       "incomeAccount": "4100", "cogsAccount": "5100", "assetAccount": "1200",
  *       "taxSchedule": "Taxable", "subsidiary": "Parent Company : ...",
  *       "department": "Apparel", "class": "Tops : Tees",
- *       "location": "Badger Sporting Goods", "costingMethod": "AVG",
+ *       "location": "Badger Sporting Goods",
+ *       "preferredLocation": "Badger Sporting Goods", "costingMethod": "AVG",
  *       "cost": 3.49, "basePrice": 6.00, "currency": "US Dollar"
  *   }, ... ] }
  *
@@ -93,6 +94,8 @@ define(["N/record", "N/search"], (record, search) => {
     setIf(rec, "department", it.department && resolveByName("department", it.department));
     setIf(rec, "class", it.class && resolveClass(it.class));
     setIf(rec, "location", it.location && resolveByName("location", it.location));
+    setIf(rec, "preferredlocation",
+      it.preferredLocation && resolveByName("location", it.preferredLocation));
     setIf(rec, "costingmethod", it.costingMethod);
     setIf(rec, "cost", it.cost);
     if (it.basePrice !== undefined && it.basePrice !== null) {

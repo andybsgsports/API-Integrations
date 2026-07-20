@@ -88,7 +88,12 @@ def resolve_parent_refs(client: NetSuiteClient) -> dict[str, dict]:
         f"SELECT id FROM location WHERE name = '{_sql_escape(DEFAULT_LOCATION)}'"
     )
     if rows:
+        # Every created item must carry Badger Sporting Goods as both its
+        # Warehouse (location) and Preferred Location -- the account has a
+        # single location, and Preferred Location drives SO auto-population +
+        # web shipping-cost calc.
         refs["location"] = {"id": str(rows[0]["id"])}
+        refs["preferredLocation"] = {"id": str(rows[0]["id"])}
     rows = client.suiteql(
         f"SELECT id FROM department WHERE name = '{_sql_escape(DEFAULT_DEPARTMENT)}'"
     )
@@ -270,6 +275,7 @@ def main() -> int:
                 "subsidiary": DEFAULT_SUBSIDIARY,
                 "department": DEFAULT_DEPARTMENT,
                 "location": DEFAULT_LOCATION,
+                "preferredLocation": DEFAULT_LOCATION,
                 "costingMethod": "AVG",
             })
         for i in range(0, len(payloads), RESTLET_BATCH):
