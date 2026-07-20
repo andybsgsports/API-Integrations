@@ -105,21 +105,33 @@ define([], function () {
     return v === null || v === undefined || String(v).trim() === '';
   }
 
+  function log(msg) {
+    try { if (console && console.log) { console.log('bsg_vendor_display: ' + msg); } }
+    catch (e) { /* console unavailable */ }
+  }
+
   function apply(rec) {
+    var hidden = 0, present = 0;
     VENDORS.forEach(function (vendor) {
-      if (!isEmpty(rec.getValue({ fieldId: vendor.marker }))) {
+      var mv = rec.getValue({ fieldId: vendor.marker });
+      if (!isEmpty(mv)) {
+        present++;
         return; // vendor has data -> leave its fields visible
       }
       vendor.fields.forEach(function (fid) {
         var fld = rec.getField({ fieldId: fid });
         if (fld) {
           fld.isDisplay = false;
+          hidden++;
         }
       });
     });
+    log('vendors with data: ' + present + '; fields hidden: ' + hidden);
+    return hidden;
   }
 
   function pageInit(context) {
+    log('pageInit mode=' + context.mode);
     // Only declutter existing records; on create/copy leave everything visible
     // so a manual item can still be filled in.
     if (context.mode === 'create' || context.mode === 'copy') {
