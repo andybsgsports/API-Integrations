@@ -1,5 +1,7 @@
-# run: mfr-rest-2026-07-18-mizuno
-SUPPLIER=mizuno
+# Champro live backfill: refresh custitem_champro_* and set the sizing-guide /
+# fabrics reference-doc links on every matched Champro item.
+# run: champro-refdocs-2026-07-20
+SUPPLIER=champro
 DRY_RUN=false
 MAX_ITEMS=0
 DEBUG=false

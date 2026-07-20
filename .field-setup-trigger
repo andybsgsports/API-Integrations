@@ -1,5 +1,3 @@
-# Create the two new Champro reference-doc link fields
-# (custitem_champro_size_guide, custitem_champro_fabrics) via the idempotent
-# SOAP creator, which only touches fields the audit reports missing.
+# All fields present (incl. Champro reference-doc links). Neutralized.
 FIELD_CREATE=false
-SOAP_CREATE=true
+SOAP_CREATE=false
