@@ -1,4 +1,5 @@
-# All custitem_* fields confirmed present (audit 2026-07-20: have=106).
-# Neutralized. Set SOAP_CREATE=true to re-run the idempotent field creator.
+# Create the two new Champro reference-doc link fields
+# (custitem_champro_size_guide, custitem_champro_fabrics) via the idempotent
+# SOAP creator, which only touches fields the audit reports missing.
 FIELD_CREATE=false
-SOAP_CREATE=false
+SOAP_CREATE=true
