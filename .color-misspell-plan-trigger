@@ -1,0 +1,4 @@
+# run: misspell-plan-2026-07-20
+# Read-only: detect near-duplicate colour-list values (e.g. Forrest Green vs
+# Forest Green), decide direction from the S&S feed spelling, and write a
+# reviewable data/color_misspell_plan.csv. No writes.
