@@ -74,6 +74,32 @@ def create_color_value(client: NetSuiteClient, name: str) -> str:
         raise
 
 
+def ensure_active(client: NetSuiteClient, value_id: str) -> bool:
+    """Reactivate a colour-list value if it's inactive; return True if changed.
+
+    An inactive value can't be assigned to a matrix child (NetSuite rejects it as
+    an "Invalid Field Value"), so a target that already exists but was retired
+    during consolidation must be reactivated before use.
+    """
+    rows = client.suiteql(
+        f"SELECT isinactive FROM {COLOR_LIST} WHERE id = {int(value_id)}"
+    )
+    if not rows or str(rows[0].get("isinactive") or "F") != "T":
+        return False
+    try:
+        client.update_record(COLOR_LIST, str(value_id), {"isInactive": False})
+    except Exception as exc:  # noqa: BLE001
+        # reactivation re-validates the abbreviation; uniquify + retry
+        if "abbreviation" in str(getattr(exc, "payload", "")).lower():
+            client.update_record(
+                COLOR_LIST, str(value_id),
+                {"isInactive": False, "abbreviation": f"z{value_id}"},
+            )
+        else:
+            raise
+    return True
+
+
 def main() -> int:
     cfg = get_config()
     allow_write = not cfg.sync.dry_run
@@ -84,6 +110,7 @@ def main() -> int:
     options = OptionMaps(client)
 
     created: dict[str, str] = {}
+    reactivated: set[str] = set()
     would_create: dict[str, str] = {}
     # (item_id, matrixtype, body, label)
     todo: list[tuple[str, str, dict, str]] = []
@@ -94,6 +121,12 @@ def main() -> int:
         cor_ids = options.color_by_name.get(ncor, [])
         if cor_ids:
             correct_id: str | None = cor_ids[0]
+            # An existing value retired during consolidation is inactive and
+            # can't be assigned to a matrix child -- reactivate it first.
+            if allow_write and ncor not in reactivated:
+                reactivated.add(ncor)
+                if ensure_active(client, correct_id):
+                    print(f"reactivated colour value {cor!r} (id {correct_id})")
         elif ncor in created:
             correct_id = created[ncor]
         elif allow_write:
