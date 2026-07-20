@@ -105,6 +105,14 @@ for _prefix, _label in (
         (f"custitem_{_prefix}_qty_available", f"{_label} Qty Available", "INTEGER", ""),
     ]
 
+# Champro reference-doc links: merged sizing guide + fabrics PDFs uploaded to
+# the File Cabinet (scripts/champro_docs_upload.py) and set on every Champro
+# item by dcos_backfill.
+FIELDS += [
+    ("custitem_champro_size_guide", "Champro Size Guide", "URL", ""),
+    ("custitem_champro_fabrics", "Champro Fabrics", "URL", ""),
+]
+
 # Item lifecycle (auto-inactivate discontinued / auto-create new): every feed
 # writer stamps these on the items it matches, and item_lifecycle.py
 # inactivates items whose stamp goes stale past the grace period.

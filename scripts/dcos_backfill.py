@@ -175,6 +175,36 @@ def get_style_images(base: str, key_id: str, key_pw: str, style: str) -> dict[st
     return {pid: url for pid, url in out.items() if url}
 
 
+# Champro reference-doc File Cabinet files (uploaded by champro_docs_upload.py),
+# matched to the fields they populate by exact file name.
+CHAMPRO_DOC_FILES = {
+    "custitem_champro_size_guide": "Champro Sizing Guide.pdf",
+    "custitem_champro_fabrics": "Champro Fabrics.pdf",
+}
+
+
+def champro_doc_urls(client: NetSuiteClient, account: str) -> dict[str, str]:
+    """field scriptid -> login-free File Cabinet URL for the Champro reference
+    PDFs, looked up by name so a re-upload (new file id) needs no code change."""
+    try:
+        rows = client.suiteql(
+            "SELECT name, url FROM file WHERE folder = "
+            "(SELECT id FROM mediaitemfolder WHERE name = 'Champro Reference Docs')"
+        )
+    except Exception:  # noqa: BLE001 - folder/file absent -> no links
+        return {}
+    dom = f"https://{account.replace('_', '-').lower()}.app.netsuite.com"
+    by_name = {str(r.get("name") or ""): str(r.get("url") or "") for r in rows}
+    out: dict[str, str] = {}
+    for field, fname in CHAMPRO_DOC_FILES.items():
+        url = by_name.get(fname, "")
+        if url.startswith("/"):
+            url = dom + url
+        if url:
+            out[field] = url
+    return out
+
+
 def get_inventory(base: str, key_id: str, key_pw: str, style: str) -> dict[str, int]:
     """partId -> total quantity (DCOS reports a single fulfillment location)."""
     body = (
@@ -486,7 +516,14 @@ def main() -> int:
     print(f"matched items: {len(matched):,}")
 
     ids = sorted(matched)
-    cols = ", ".join(fields + SEEN_FIELDS)
+    # Champro items also carry the sizing-guide / fabrics reference links (same
+    # value on every Champro item; looked up by file name at runtime).
+    extra_fields: dict[str, str] = {}
+    if key == "champro":
+        extra_fields = champro_doc_urls(client, ns_config().netsuite.account_id)
+        if extra_fields:
+            print(f"champro reference-doc links: {sorted(extra_fields)}")
+    cols = ", ".join(fields + list(extra_fields) + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
@@ -498,6 +535,7 @@ def main() -> int:
             rid = str(row["id"])
             want = {k: v for k, v in matched.get(rid, {}).items()
                     if v is not None and str(v).strip() != ""}
+            want.update(extra_fields)
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             gtin = matched.get(rid, {}).get(f"custitem_{prefix}_gtin", "")
             if not str(row.get("upccode") or "").strip() and gtin:

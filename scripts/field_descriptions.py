@@ -172,6 +172,17 @@ for _pfx, _name in (
         "(updated nightly)."
     )
 
+# Champro reference-doc links (uploaded to the File Cabinet, shown on every
+# Champro item).
+DESCRIPTIONS["custitem_champro_size_guide"] = (
+    "Link to Champro's combined sizing guide (Adult, Women, Youth, Girls, and "
+    "Protective charts) for measuring and picking the right size."
+)
+DESCRIPTIONS["custitem_champro_fabrics"] = (
+    "Link to Champro's fabric reference (stock and sublimated fabrics) "
+    "describing the materials used across their product lines."
+)
+
 # Item lifecycle heartbeat (stamped by every feed writer, consumed by
 # item_lifecycle.py to auto-inactivate discontinued items).
 DESCRIPTIONS["custitem_feed_source"] = (
