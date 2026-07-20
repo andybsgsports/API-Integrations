@@ -1,0 +1,12 @@
+corrections loaded: 3
+
+per-style colour corrections (scoped -- never a global rename):
+  695HBM: 'Columbia Blue' -> 'Collegiate Blue': 6 item(s); target value NO -- needs creating
+  695HBM: 'Red' -> 'True Red': 6 item(s); target value yes (id 2702)
+  695HBM: 'Navy' -> 'J.Navy': 6 item(s); target value yes (id 4241)
+
+target colour values that must be CREATED before applying:
+  'Collegiate Blue'
+
+total items to correct: 18
+wrote /home/runner/work/API-Integrations/API-Integrations/data/color_correction_preview.csv
