@@ -1,7 +1,8 @@
 # Copy Department / Class / Purchase Description / Sales Description from each
 # SanMar matrix parent down onto its blank children (the ones the CSV create-
 # import left empty). Fill-blanks-only, SanMar children only, diff-aware.
-# Start with a DRY RUN to see exactly what it would set, then flip to false.
-# run: child-finalize-dryrun-2026-07-20
+# Now also sets Location = Badger Sporting Goods, and probes every column first
+# so a bad name can't hard-fail the run. Start with a DRY RUN, then flip to false.
+# run: child-finalize-dryrun-2-2026-07-20
 DRY_RUN=true
 MAX_ITEMS=50

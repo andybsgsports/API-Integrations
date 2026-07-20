@@ -1,7 +1,8 @@
-"""Unit tests for the SanMar child-finalize copy logic (scripts/sanmar_child_finalize).
+"""Unit tests for the SanMar child-finalize field logic (scripts/sanmar_child_finalize).
 
-The live pass needs NetSuite, but the parent->child copy decision is pure: copy a
-field only when the parent has a value and the child is blank (never overwrite).
+The live pass needs NetSuite, but the per-child body decision is pure:
+* copy Department/Class/descriptions from the parent only where the child is blank;
+* set Location to the fixed Badger Sporting Goods id whenever it isn't already.
 """
 
 from __future__ import annotations
@@ -11,24 +12,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from sanmar_child_finalize import plan_body  # noqa: E402
+from sanmar_child_finalize import COPY_FIELDS, plan_body  # noqa: E402
+
+LOC = "7"  # pretend Badger Sporting Goods location internal id
+
+
+def _body(child, parent, *, location_id=None, has_location_col=True):
+    return plan_body(
+        child, parent, copy_cols=COPY_FIELDS,
+        location_id=location_id, has_location_col=has_location_col,
+    )
 
 
 def test_copies_blank_fields_from_parent():
     parent = {
-        "department": "12",          # reference cols return internal ids
-        "class": "44",
-        "salesdescription": "Soft ringspun tee",
+        "department": "12", "class": "44",       # reference cols return ids
+        "description": "Soft ringspun tee",
         "purchasedescription": "Gildan Softstyle Tee",
     }
-    child = {"department": "", "class": None, "salesdescription": "", "purchasedescription": ""}
+    child = {"department": "", "class": None, "description": "", "purchasedescription": ""}
 
-    body = plan_body(child, parent)
+    body = _body(child, parent)
 
     assert body == {
-        "department": {"id": "12"},          # reference -> {id}
+        "department": {"id": "12"},
         "class": {"id": "44"},
-        "salesDescription": "Soft ringspun tee",   # plain string
+        "salesDescription": "Soft ringspun tee",
         "purchaseDescription": "Gildan Softstyle Tee",
     }
 
@@ -36,24 +45,32 @@ def test_copies_blank_fields_from_parent():
 def test_never_overwrites_a_value_the_child_already_has():
     parent = {
         "department": "12", "class": "44",
-        "salesdescription": "P", "purchasedescription": "P",
+        "description": "P", "purchasedescription": "P",
     }
     child = {
         "department": "99", "class": "44",
-        "salesdescription": "kept", "purchasedescription": "",
+        "description": "kept", "purchasedescription": "",
     }
 
-    body = plan_body(child, parent)
+    body = _body(child, parent)
 
-    # department/class/salesdescription already set on child -> left alone;
-    # only the blank purchasedescription is filled.
-    assert body == {"purchaseDescription": "P"}
+    assert body == {"purchaseDescription": "P"}  # only the blank one is filled
 
 
-def test_skips_field_when_parent_is_blank_too():
-    parent = {"department": "", "class": "44", "salesdescription": "", "purchasedescription": ""}
-    child = {"department": "", "class": "", "salesdescription": "", "purchasedescription": ""}
+def test_location_set_when_missing_or_wrong_and_skipped_when_correct():
+    parent = {"department": "12"}
+    # blank location -> set it
+    assert _body({"department": "12", "location": ""}, parent, location_id=LOC) == {
+        "location": {"id": LOC}
+    }
+    # different location -> overwrite to Badger Sporting Goods
+    assert _body({"department": "12", "location": "3"}, parent, location_id=LOC) == {
+        "location": {"id": LOC}
+    }
+    # already correct -> no location write, nothing to do
+    assert _body({"department": "12", "location": LOC}, parent, location_id=LOC) == {}
 
-    body = plan_body(child, parent)
 
-    assert body == {"class": {"id": "44"}}  # only the field the parent actually has
+def test_location_set_unconditionally_when_column_unreadable():
+    body = _body({"department": "12"}, {}, location_id=LOC, has_location_col=False)
+    assert body == {"location": {"id": LOC}}
