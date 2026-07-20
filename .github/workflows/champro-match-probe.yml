@@ -1,0 +1,50 @@
+name: Champro Match Probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      needles:
+        description: "Comma list of styles to diagnose"
+        required: false
+        default: "B040,B041"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".champro-match-probe-trigger"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve needles
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v=$(grep -E '^NEEDLES=' .champro-match-probe-trigger | tail -1 | cut -d= -f2- | tr -d ' \r')
+          else
+            v="${{ github.event.inputs.needles }}"
+          fi
+          echo "CHAMPRO_PROBE=${v:-B040,B041}" >> "$GITHUB_ENV"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: Run Champro match probe (read-only)
+        env:
+          DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
+          DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+        run: python scripts/champro_match_probe.py
