@@ -136,7 +136,8 @@ class OptionMaps:
             if name:
                 self.size_by_name.setdefault(name, []).append(str(r["id"]))
 
-    def color_candidates(self, full_color: str, mainframe: str) -> list[tuple[str, str]]:
+    def color_candidates(self, full_color: str, mainframe: str,
+                         synonyms: dict[str, str] | None = None) -> list[tuple[str, str]]:
         """Ordered, deduped ``(list value id, method label)`` candidates."""
         full = full_color.strip().lower()
         mf = mainframe.strip().lower()
@@ -156,6 +157,15 @@ class OptionMaps:
         heur = heuristic_abbrev(full_color)
         add(self.color_by_name.get(heur), "option:heur")
         add(self.color_by_abbrev.get(heur), "option:heur")
+        # Curated vendor synonym: the feed's colour name is a different word for
+        # one of our list values (e.g. a vendor's "Collegiate Blue" == our
+        # "Columbia Blue"). These can't be guessed by name/abbrev/heuristic, so
+        # they come from a reviewed feed_color -> ns_color map. Lowest priority,
+        # so a real name/abbrev match always wins first.
+        if synonyms:
+            syn = synonyms.get(full)
+            if syn:
+                add(self.color_by_name.get(syn.strip().lower()), "option:synonym")
         return out
 
     def size_candidates(self, size_normalized: str) -> list[str]:

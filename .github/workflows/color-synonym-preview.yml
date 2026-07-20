@@ -1,0 +1,49 @@
+name: Color Synonym Preview (Momentec, read-only)
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".color-synonym-preview-trigger", "data/color_synonyms.csv"]
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: Run color synonym preview (read-only)
+        run: |
+          set -o pipefail
+          python scripts/color_synonym_preview.py | tee color_synonym_preview.txt
+      - name: Commit preview back to this branch
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p data && cp color_synonym_preview.txt data/ 2>/dev/null || true
+          git add -f data/color_synonym_preview.csv data/color_synonym_preview.txt 2>/dev/null || true
+          git commit -m "Color synonym preview (run ${{ github.run_id }}) [skip ci]" || exit 0
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git push origin HEAD:${{ github.ref_name }} || echo "push failed - report in log only"
