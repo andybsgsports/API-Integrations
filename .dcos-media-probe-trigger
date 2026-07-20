@@ -1,8 +1,6 @@
-# Read-only probe: does DC OneSource expose PromoStandards Media Content
-# (product images) and how are they keyed? Endpoint confirmed responding but
-# returned 0 entries for A010/A011 -- re-run dumping raw XML + trying more
-# styles and both mediaType=Image / omitted, to tell "no images" from a
-# response shape our parser missed.
-# run: dump-raw-2026-07-20
+# MediaContent service is NOT supported by DC OneSource (error 125 "Invalid
+# service provided"). Re-run to check whether image URLs instead ride along in
+# the Product Data response (getProduct tags + any http/image values).
+# run: product-image-scan-2026-07-20
 SUPPLIERS=champro
 STYLES=

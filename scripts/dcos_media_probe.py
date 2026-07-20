@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import xml.etree.ElementTree as ET
 
-from dcos_backfill import SUPPLIERS, _soap, _strip, get_sellable_styles
+from dcos_backfill import PRODUCT_NS, SUPPLIERS, _soap, _strip, get_sellable_styles
 
 MEDIA_NS_TMPL = "http://www.promostandards.org/WSDL/MediaService/{v}/"
 
@@ -51,7 +51,45 @@ def media_request(key_id: str, key_pw: str, version: str, product_id: str,
 
 def is_fault(text: str) -> bool:
     low = text.lower()
-    return "soap:fault" in low or "<fault" in low or "faultstring" in low
+    return (
+        "soap:fault" in low or "<fault" in low or "faultstring" in low
+        # PromoStandards ErrorMessage (e.g. code 125 "Not Supported: Invalid
+        # service provided") isn't a SOAP fault but still means no service.
+        or "not supported" in low or "invalid service provided" in low
+        or "<errormessage" in low
+    )
+
+
+def scan_product(base: str, key_id: str, key_pw: str, style: str) -> None:
+    """Dump the getProduct response's tag names + any image/URL-looking values,
+    to see whether image URLs ride along in Product Data (the one DCOS service
+    we know works) since Media Content is not supported."""
+    body = (
+        f'<ns:GetProductRequest xmlns:ns="{PRODUCT_NS}" xmlns:shar="{PRODUCT_NS}SharedObjects/">'
+        f"<shar:wsVersion>2.0.0</shar:wsVersion><shar:id>{key_id}</shar:id>"
+        f"<shar:password>{key_pw}</shar:password>"
+        "<shar:localizationCountry>US</shar:localizationCountry>"
+        "<shar:localizationLanguage>en</shar:localizationLanguage>"
+        f"<shar:productId>{style}</shar:productId></ns:GetProductRequest>"
+    )
+    try:
+        text = _soap(f"{base}/Product/2.0.0/soap", "getProduct", body)
+        root = ET.fromstring(text)
+    except Exception as exc:  # noqa: BLE001
+        print(f"    getProduct scan error: {str(exc)[:120]}")
+        return
+    tags: set[str] = set()
+    hits: list[tuple[str, str]] = []
+    for el in root.iter():
+        t = _strip(el.tag)
+        tags.add(t)
+        v = (el.text or "").strip()
+        low = v.lower()
+        if ("image" in t.lower() or "media" in t.lower()
+                or low.startswith("http") or ".jpg" in low or ".png" in low):
+            hits.append((t, v[:120]))
+    print(f"    getProduct tags: {sorted(tags)}")
+    print(f"    image/url hits: {hits[:20] if hits else 'NONE'}")
 
 
 def summarize(text: str) -> tuple[int, list[dict]]:
@@ -153,6 +191,8 @@ def main() -> int:
         if not styles:
             print("  no styles to probe")
             continue
+        print(f"  [product-data image scan] {styles[0]}:")
+        scan_product(base, key_id, key_pw, styles[0])
         for style in styles:
             print(f"  style {style}:")
             if probe_style(base, key_id, key_pw, style):
