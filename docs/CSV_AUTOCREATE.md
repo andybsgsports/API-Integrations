@@ -35,6 +35,16 @@ The diff step is **read-only** and safe to run any time (workflow
 **SanMar Create Preview**, or bump `.sanmar-create-preview-trigger`). It never
 writes to NetSuite — it only reports counts and stages the CSV.
 
+> **The full child CSV is large** (tens of thousands of rows / ~30 MB) and
+> NetSuite's Import Assistant refuses any file over **25,000 lines**. So the
+> preview splits it into **`_part01.csv`, `_part02.csv`, …**, each under the
+> limit. Because every child just references its already-existing parent, the
+> parts import in **any order**. The parts + the full file are attached to the
+> workflow run as a **downloadable artifact** (`sanmar-new-children-<run id>`) —
+> they are *not* committed to the branch (too big for git). Only the small text
+> report and the net-new-parent list are committed. Download the parts from the
+> run's **Artifacts** section (Actions → the run → Artifacts).
+
 ---
 
 ## Naming cheat-sheet — use these exact values
@@ -141,16 +151,23 @@ The RESTlet writes each incoming CSV to a folder before importing it.
 ## Step 6 — Create the saved CSV import map (the important one)
 
 Do this once with a real sample so the columns line up. Run the preview first
-(workflow **SanMar Create Preview**) so `data/sanmar_new_children.csv` exists,
-download it from the branch, and use it as the import file below.
+(workflow **SanMar Create Preview**), then download the artifact
+`sanmar-new-children-<run id>` from that run's **Artifacts** section and unzip
+it. Use **`sanmar_new_children_part01.csv`** as the import file below.
 
 1. **Setup > Import/Export > Import CSV Records.**
 2. **Step "Scan & Upload File":**
    - **Import Type:** `Items`
    - **Record Type:** `Inventory Item`
-   - **Character Encoding:** `Unicode (UTF-8)` (our files are UTF-8)
+   - **Character Encoding:** **`Unicode (UTF-8)`** — our files are UTF-8. Do
+     **not** leave it on the default `Western (Windows 1252)`, or the special
+     characters in the descriptions (the `®` in "Dri-Power®", accented colour
+     names) will be mangled.
    - **CSV Column Delimiter:** `Comma`
-   - **Select** the `sanmar_new_children.csv` file. **Next.**
+   - **CSV File(s):** `ONE FILE TO UPLOAD` → **Select** a single part file, e.g.
+     `sanmar_new_children_part01.csv` (each part is already under the 25,000-line
+     limit; the un-split `sanmar_new_children.csv` will be **rejected** as too
+     large). **Next.**
 3. **Step "Import Options":**
    - **Data Handling:** **Add** — create-only. (Add never overwrites an existing
      record, so a stray already-present row is skipped, not clobbered — belt and
@@ -231,36 +248,46 @@ NETSUITE_CSVIMPORT_CHILD_MAP   # custimport_bsg_sanmar_child (Step 6)
 ## Validate by hand once, before automating
 
 1. Run the **SanMar Create Preview** workflow. Read the report it commits
-   (`data/sanmar_create_preview.txt`) — it says how many new children exist and
-   how many styles are net-new.
-2. Open `data/sanmar_new_children.csv`, keep the header + the first ~5 rows in a
-   scratch copy, and import that by hand through the wizard (Step 6) using the
-   saved map. Confirm the 5 children land under the right parents with the right
-   colour/size, external id, cost, and vendor.
+   (`data/sanmar_create_preview.txt`) — it says how many new children exist, how
+   many parts the CSV was split into, and how many styles are net-new.
+2. Download the run's `sanmar-new-children-<run id>` artifact. Keep the header +
+   the first ~5 rows of `part01` in a scratch copy, and import that by hand
+   through the wizard (Step 6) using the saved map. Confirm the 5 children land
+   under the right parents with the right colour/size, external id, cost, and
+   vendor.
 3. Run `sanmar-sync reconcile-items` (dry run first) to see Base Price + income
    account applied to them.
 
-Only once that hand-import is clean should the RESTlet drive the whole file.
+Only once that hand-import is clean should you import the full parts (or let the
+RESTlet drive them). **Import every part** — `part01`, `part02`, … — to cover
+all the new children; the parts are independent, so order doesn't matter.
 
 ## Wiring the automated import (phase B)
 
 The RESTlet accepts the CSV **inline** (`csv` raw text, or `csvBase64`), so the
-pipeline hands over the file it just generated in a single signed REST call — no
-separate SOAP upload. Submit shape (one job per map):
+pipeline hands over each part it just generated in a single signed REST call — no
+separate SOAP upload. Submit **one job per part** (each part is already under the
+25,000-line limit; keep the parts split rather than concatenating them):
 
 ```json
-{ "jobs": [ {
-    "mappingId": "custimport_bsg_sanmar_child",
-    "csv": "External ID,Item Name/Number,...\n...",
+{ "jobs": [
+  { "mappingId": "custimport_bsg_sanmar_child",
+    "csv": "External ID,Item Name/Number,...\n...",   // part01 contents
     "folderId": 771,
-    "fileName": "sanmar_new_children_2026-07-20.csv",
-    "name": "SanMar new children 2026-07-20"
-} ] }
+    "fileName": "sanmar_new_children_part01_2026-07-20.csv",
+    "name": "SanMar new children part01 2026-07-20" },
+  { "mappingId": "custimport_bsg_sanmar_child",
+    "csv": "External ID,Item Name/Number,...\n...",   // part02 contents
+    "folderId": 771,
+    "fileName": "sanmar_new_children_part02_2026-07-20.csv",
+    "name": "SanMar new children part02 2026-07-20" }
+] }
 ```
 
-The RESTlet returns `{ "results": [ { "taskId": "...", "fileId": ..., "ok": true } ] }`.
-Poll `GET ?taskId=<id>` until `status` is `COMPLETE`, then run
-`sanmar-sync reconcile-items` to apply prices to the new children.
+The RESTlet returns `{ "results": [ { "taskId": "...", "fileId": ..., "ok": true }, … ] }`
+— one entry per part. Poll `GET ?taskId=<id>` on each until `status` is
+`COMPLETE`, then run `sanmar-sync reconcile-items` to apply prices to the new
+children.
 
 **Ordering caveat (net-new parents):** a child import fails if its parent doesn't
 exist. The preview keeps net-new-parent rows *out* of the child CSV for exactly

@@ -35,6 +35,11 @@ from sanmar_netsuite.transform.csv_export import write_matrix_csv
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# NetSuite's CSV Import Assistant refuses a file with more than 25,000 lines
+# (header + rows). Split well under that so each part uploads cleanly, with
+# headroom (24,000 data rows + header = 24,001 lines < 25,000).
+MAX_ROWS_PER_PART = 24_000
+
 
 class MissingSplit:
     """The result of diffing the feed against the live catalog."""
@@ -69,6 +74,29 @@ def split_missing(styles, parent_refs: dict[str, str], skip: set[str]) -> Missin
                 out.new_parent_styles.add(s.style)
                 out.child_only_skip.add(eid)  # keep net-new-parent rows out
     return out
+
+
+def split_csv(src: Path, out_dir: Path, prefix: str, max_rows: int) -> list[Path]:
+    """Split a CSV into <=``max_rows``-data-row parts, header repeated on each.
+
+    NetSuite's Import Assistant caps a file at 25,000 lines, so a big create-only
+    export has to arrive as several parts. The children are independent (each just
+    references its already-existing parent), so the parts import in any order.
+    Returns the part paths ([src] unchanged if it fits in one).
+    """
+    with src.open(encoding="utf-8", newline="") as fh:
+        header = fh.readline()
+        rows = fh.readlines()
+    if len(rows) <= max_rows:
+        return [src]
+    parts: list[Path] = []
+    for i in range(0, len(rows), max_rows):
+        part = out_dir / f"{prefix}_part{len(parts) + 1:02d}.csv"
+        with part.open("w", encoding="utf-8", newline="") as out:
+            out.write(header)
+            out.writelines(rows[i:i + max_rows])
+        parts.append(part)
+    return parts
 
 
 def _resolve_feed(config) -> Path:
@@ -110,6 +138,8 @@ def main() -> int:
         parent_refs=parent_refs,
         skip_external_ids=split.child_only_skip,
     )
+    # Split into <=25k-line parts (the Import Assistant's hard limit).
+    parts = split_csv(child_csv, data, "sanmar_new_children", MAX_ROWS_PER_PART)
 
     # Net-new parent styles need a parent record created first -- list them for
     # the (later) parent-creation phase; they are NOT in the child CSV.
@@ -123,6 +153,12 @@ def main() -> int:
     print("")
     print(f"NEW children under existing parents : {split.new_children:>6}  "
           f"-> {child_csv.relative_to(ROOT)} (import-ready)")
+    if len(parts) > 1:
+        print(f"  split into {len(parts)} part(s) of <= {MAX_ROWS_PER_PART} rows "
+              f"(Import Assistant caps a file at 25,000 lines):")
+        for p in parts:
+            n = sum(1 for _ in p.open(encoding="utf-8")) - 1  # minus header
+            print(f"    {p.relative_to(ROOT)}: {n} rows")
     print(f"NEW rows under net-new parent styles: {split.new_parent_rows:>6}  "
           f"across {len(styles_sorted)} style(s) -> "
           f"{parents_txt.relative_to(ROOT)} (need parent first)")

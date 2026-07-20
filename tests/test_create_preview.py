@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from sanmar_create_preview import split_missing  # noqa: E402
+from sanmar_create_preview import split_csv, split_missing  # noqa: E402
 
 
 def _sku(key, color, size):
@@ -50,3 +50,27 @@ def test_split_all_in_sync_when_everything_skipped():
     assert out.new_children == 0
     assert out.new_parent_rows == 0
     assert out.new_parent_styles == set()
+
+
+def test_split_csv_chunks_under_limit_with_header_on_each(tmp_path):
+    src = tmp_path / "big.csv"
+    lines = ["External ID,Name\n"] + [f"SANMAR-{i},{i}\n" for i in range(2500)]
+    src.write_text("".join(lines), encoding="utf-8")
+
+    parts = split_csv(src, tmp_path, "big", 1000)  # 2500 rows -> 3 parts
+
+    assert len(parts) == 3
+    seen = []
+    for p in parts:
+        rows = p.read_text(encoding="utf-8").splitlines()
+        assert rows[0] == "External ID,Name"          # header on every part
+        assert len(rows) - 1 <= 1000                   # each part under the cap
+        seen.extend(rows[1:])
+    assert len(seen) == 2500                           # every row preserved
+
+
+def test_split_csv_leaves_small_file_as_one_part(tmp_path):
+    src = tmp_path / "small.csv"
+    src.write_text("External ID,Name\nSANMAR-1,1\n", encoding="utf-8")
+    parts = split_csv(src, tmp_path, "small", 1000)
+    assert parts == [src]  # fits in one -> returned unchanged, no _partNN files
