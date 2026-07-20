@@ -28,7 +28,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from dcos_backfill import SUPPLIERS as DCOS_SUPPLIERS
-from dcos_backfill import get_style_images
+from dcos_backfill import get_sellable_styles, get_style_images
 
 from momentec_netsuite.config import get_config as mtec_config
 from momentec_netsuite.feeds import parse_product_data
@@ -137,12 +137,12 @@ SOURCES = [  # ranking order: (item key field, loader)
     ("upccode", champro_csv_images),
 ]
 
-# DC OneSource suppliers have no Media Content service, but their Product Data
-# response carries primaryImageUrl. We pull it per style present in NetSuite and
-# key by partId (custitem_<prefix>_part_id). Only "product" style_source
-# suppliers can be looked up by the stored style (which equals the productId);
-# "part"-source ones (usb, tck) would need a productId map we don't keep, so
-# they're skipped here. (item key field, endpoint base, style field)
+# DC OneSource has no Media Content service, but its Product Data response
+# carries primaryImageUrl (confirmed for every vendor). Images key by partId
+# (custitem_<prefix>_part_id).
+#
+# "product" style_source suppliers: the stored style IS the feed productId, so
+# look up only the styles present in NetSuite. (item field, base, style field)
 DCOS_IMAGE_SUPPLIERS: list[tuple[str, str, str]] = [
     ("custitem_ua_part_id", "https://api.dc-onesource.com/xml/UNDERARMOR",
      "custitem_ua_style"),
@@ -154,6 +154,15 @@ for _k, _v in DCOS_SUPPLIERS.items():
             f"https://api.dc-onesource.com/xml/{_v['slug']}",
             f"custitem_{_k}_style",
         ))
+
+# "part" style_source suppliers (usb, tck): the stored style isn't the feed
+# productId, so walk the feed's sellable productIds, pull each product's
+# per-part primaryImageUrl, and keep the parts present in NetSuite (early-stop
+# once all are covered). (item key field, endpoint base)
+DCOS_PART_IMAGE_SUPPLIERS: list[tuple[str, str]] = [
+    (f"custitem_{_k}_part_id", f"https://api.dc-onesource.com/xml/{_v['slug']}")
+    for _k, _v in DCOS_SUPPLIERS.items() if _v.get("style_source") == "part"
+]
 
 
 def dcos_image_map(client, base: str, style_field: str, part_field: str,
@@ -177,6 +186,41 @@ def dcos_image_map(client, base: str, style_field: str, part_field: str,
             out.update(get_style_images(base, key_id, key_pw, style))
         except Exception:  # noqa: BLE001 - one bad style shouldn't sink the rest
             continue
+    return out
+
+
+def dcos_image_map_by_part(client, base: str, part_field: str,
+                           key_id: str, key_pw: str) -> dict[str, str]:
+    """partId -> primaryImageUrl for a "part"-source vendor (usb, tck), whose
+    stored style isn't the feed productId. Walk the feed's sellable products,
+    keeping images for the parts present in NetSuite; stop once all are found."""
+    if not key_id or not key_pw:
+        return {}
+    try:
+        rows = client.suiteql(
+            f"SELECT DISTINCT {part_field} AS p FROM item WHERE {part_field} IS NOT NULL"
+        )
+    except Exception:  # noqa: BLE001 - supplier field may not exist yet
+        return {}
+    targets = {str(r.get("p") or "").strip() for r in rows}
+    targets.discard("")
+    if not targets:
+        return {}
+    try:
+        styles = get_sellable_styles(base, key_id, key_pw)
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict[str, str] = {}
+    for style in styles:
+        try:
+            imgs = get_style_images(base, key_id, key_pw, style)
+        except Exception:  # noqa: BLE001 - one bad style shouldn't sink the rest
+            continue
+        for pid, url in imgs.items():
+            if pid in targets:
+                out[pid] = url
+        if len(out) >= len(targets):
+            break  # every in-NetSuite part now has an image
     return out
 
 
@@ -205,7 +249,11 @@ def main() -> int:
     key_id = os.environ.get("DCOS_KEY_ID", "")
     key_pw = os.environ.get("DCOS_KEY_PASSWORD", "")
     # ranking: supplier feeds first, then DC OneSource primaryImageUrl.
-    ranked_fields = [f for f, _ in SOURCES] + [f for f, _, _ in DCOS_IMAGE_SUPPLIERS]
+    ranked_fields = (
+        [f for f, _ in SOURCES]
+        + [f for f, _, _ in DCOS_IMAGE_SUPPLIERS]
+        + [f for f, _ in DCOS_PART_IMAGE_SUPPLIERS]
+    )
     key_cols = ", ".join(ranked_fields)
     where = " OR ".join(f"{f} IS NOT NULL" for f in ranked_fields)
     items = client.suiteql(f"SELECT id, {key_cols}, {FIELD} FROM item WHERE {where}")
@@ -219,6 +267,9 @@ def main() -> int:
         url_by_field[field] = dcos_image_map(
             client, base, style_field, field, key_id, key_pw)
         print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts")
+    for field, base in DCOS_PART_IMAGE_SUPPLIERS:
+        url_by_field[field] = dcos_image_map_by_part(client, base, field, key_id, key_pw)
+        print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts (by part)")
 
     folder_id = _resolve_folder_id(client, cfg, allow_write)
     print(f"using File Cabinet folder id {folder_id}")
