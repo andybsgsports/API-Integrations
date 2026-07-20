@@ -30,17 +30,29 @@ def main() -> int:
                if s.strip()]
     base = f"https://api.dc-onesource.com/xml/{SUPPLIERS['champro']['slug']}"
 
-    styles = get_sellable_styles(base, key_id, key_pw)
-    print(f"champro sellable styles: {len(styles):,}")
-    direct = [s for s in styles if s.upper() in needles]
-    print(f"sellable styles that ARE a needle: {direct}")
-    substr = [s for s in styles if any(n in s.upper() for n in needles)]
-    print(f"sellable styles CONTAINING a needle (substring): {substr}")
-    covering = [s for s in styles
-                if any(n in expand_style_members(s) for n in needles)]
-    print(f"sellable styles whose expanded members COVER a needle: {covering}")
+    # getProductSellable intermittently 500s; best-effort, don't let it sink
+    # the rest of the diagnosis.
+    substr: list[str] = []
+    covering: list[str] = []
+    try:
+        styles = get_sellable_styles(base, key_id, key_pw)
+        print(f"champro sellable styles: {len(styles):,}")
+        direct = [s for s in styles if s.upper() in needles]
+        print(f"sellable styles that ARE a needle: {direct}")
+        substr = [s for s in styles if any(n in s.upper() for n in needles)]
+        print(f"sellable styles CONTAINING a needle (substring): {substr}")
+        covering = [s for s in styles
+                    if any(n in expand_style_members(s) for n in needles)]
+        print(f"sellable styles whose expanded members COVER a needle: {covering}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"getProductSellable failed ({str(exc)[:120]}); "
+              "probing candidate productIds directly instead")
 
-    for s in (substr or covering)[:6]:
+    # Candidate productIds to getProduct: the sellable hits, each needle on its
+    # own, and the hyphen-join of the needles (Champro groups A/Youth as ranges).
+    candidates = list(dict.fromkeys(
+        substr + covering + needles + ["-".join(needles)]))
+    for s in candidates[:8]:
         print(f"\n--- getProduct({s})  members={expand_style_members(s)} ---")
         try:
             parts = get_parts(base, key_id, key_pw, s)
