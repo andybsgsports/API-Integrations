@@ -1,6 +1,6 @@
-# run: correction-apply-DRY-2026-07-20
-# DRY: validate the apply write-path. True Red (6) + J.Navy (6) exist and would
-# correct; Collegiate Blue is skipped until the value is created. Flip to
-# DRY_RUN=false only after 'Collegiate Blue' exists (to catch all 18).
-DRY_RUN=true
+# run: correction-apply-LIVE-2026-07-20
+# LIVE: create 'Collegiate Blue' colour value, then correct all 18 695HBM items
+# (Columbia Blue->Collegiate Blue, Red->True Red, Navy->J.Navy). Scoped to
+# 695HBM only. Preview confirmed 18 items; dry-apply validated the write-path.
+DRY_RUN=false
 MAX_ITEMS=0
