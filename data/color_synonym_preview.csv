@@ -1,0 +1,40 @@
+item_id,itemid,style,size,current_color,vendor_color,gtin,method
+210286,223246-Carbon Heather/Athletic Heather-2X-Large,223246,2XL,Carbon Heather/Athletic Heather,CH/AH,00840320333163,option:abbrev
+210287,223246-Carbon Heather/Athletic Heather-Large,223246,L,Carbon Heather/Athletic Heather,CH/AH,00840320333170,option:abbrev
+210288,223246-Carbon Heather/Athletic Heather-Medium,223246,M,Carbon Heather/Athletic Heather,CH/AH,00840320333187,option:abbrev
+210290,223246-Carbon Heather/Athletic Heather-X-Large,223246,XL,Carbon Heather/Athletic Heather,CH/AH,00840320333200,option:abbrev
+5332,695HBM-Columbia Blue-2X-Large,695HBM,2XL,Columbia Blue,COLLEGIATE BLUE,00023255535868,option:synonym
+5333,695HBM-Columbia Blue-3X-Large,695HBM,3XL,Columbia Blue,COLLEGIATE BLUE,00023255535875,option:synonym
+5330,695HBM-Columbia Blue-Large,695HBM,L,Columbia Blue,COLLEGIATE BLUE,00023255535844,option:synonym
+5329,695HBM-Columbia Blue-Medium,695HBM,M,Columbia Blue,COLLEGIATE BLUE,00023255535837,option:synonym
+5328,695HBM-Columbia Blue-Small,695HBM,S,Columbia Blue,COLLEGIATE BLUE,00023255535820,option:synonym
+5331,695HBM-Columbia Blue-X-Large,695HBM,XL,Columbia Blue,COLLEGIATE BLUE,00023255535851,option:synonym
+192472,698HBM-Columbia Blue-Large,698HBM,L,Columbia Blue,COLLEGIATE BLUE,00023255593080,option:synonym
+192473,698HBM-Columbia Blue-Medium,698HBM,M,Columbia Blue,COLLEGIATE BLUE,00023255593073,option:synonym
+192474,698HBM-Columbia Blue-Small,698HBM,S,Columbia Blue,COLLEGIATE BLUE,00023255834558,option:synonym
+129373,6959,6959,L,Nahe,NAVY HEATHER,00842283151013,option:heur
+207823,596HBM-Navy-Large,596HBM,L,Navy,J.NAVY,00023255750773,option:synonym
+5365,695HBM-Navy-2X-Large,695HBM,2XL,Navy,J.NAVY,00023255756560,option:synonym
+5366,695HBM-Navy-3X-Large,695HBM,3XL,Navy,J.NAVY,00023255756577,option:synonym
+5363,695HBM-Navy-Large,695HBM,L,Navy,J.NAVY,00023255756546,option:synonym
+5362,695HBM-Navy-Medium,695HBM,M,Navy,J.NAVY,00023255756539,option:synonym
+5361,695HBM-Navy-Small,695HBM,S,Navy,J.NAVY,00023255756522,option:synonym
+5364,695HBM-Navy-X-Large,695HBM,XL,Navy,J.NAVY,00023255756553,option:synonym
+204658,698HBM-Navy-2X-Large,698HBM,2XL,Navy,J.NAVY,00023255800607,option:synonym
+204669,698HBM-Navy-Medium,698HBM,M,Navy,J.NAVY,00023255800560,option:synonym
+204671,698HBM-Navy-X-Large,698HBM,XL,Navy,J.NAVY,00023255800584,option:synonym
+5415,995HBB-Navy-Large,995HBB,L,Navy,J.NAVY,00023255840740,option:synonym
+5414,995HBB-Navy-Medium,995HBB,M,Navy,J.NAVY,00023255840733,option:synonym
+5413,995HBB-Navy-Small,995HBB,S,Navy,J.NAVY,00023255840726,option:synonym
+5386,695HBM-Red-2X-Large,695HBM,2XL,Red,TRUE RED,00023255498620,option:synonym
+5387,695HBM-Red-3X-Large,695HBM,3XL,Red,TRUE RED,00023255498637,option:synonym
+5384,695HBM-Red-Large,695HBM,L,Red,TRUE RED,00023255498590,option:synonym
+5383,695HBM-Red-Medium,695HBM,M,Red,TRUE RED,00023255498583,option:synonym
+5382,695HBM-Red-Small,695HBM,S,Red,TRUE RED,00023255498576,option:synonym
+5385,695HBM-Red-X-Large,695HBM,XL,Red,TRUE RED,00023255498613,option:synonym
+5423,995HBB-Red-Large,995HBB,L,Red,TRUE RED,00023255840825,option:synonym
+5422,995HBB-Red-Medium,995HBB,M,Red,TRUE RED,00023255840818,option:synonym
+5421,995HBB-Red-Small,995HBB,S,Red,TRUE RED,00023255840801,option:synonym
+218548,R20DKM-Red-2X-Large,R20DKM,2XL,Red,TRUE RED,00765689208771,option:synonym
+218555,R20DKM-Red-Medium,R20DKM,M,Red,TRUE RED,00765689208818,option:synonym
+218560,R20DKM-Red-X-Large,R20DKM,XL,Red,TRUE RED,00765689208832,option:synonym
