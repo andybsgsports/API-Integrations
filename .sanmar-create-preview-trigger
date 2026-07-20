@@ -1,0 +1,7 @@
+# Read-only: report what CSV auto-create would ADD, and stage the pilot CSV.
+# Downloads the SanMar SDL feed, reads the live NetSuite catalog (no writes),
+# and writes data/sanmar_new_children.csv (new colours/sizes under existing
+# parents -- import-ready) + data/sanmar_new_parents.txt (net-new styles that
+# need a parent record first). This is the sample the operator builds the saved
+# CSV import map against. Bump the run tag to re-trigger.
+# run: sanmar-create-preview-2026-07-20
