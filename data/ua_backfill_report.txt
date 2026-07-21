@@ -1,1 +1,9 @@
 cost = list price x 40.0%
+UA sellable styles: 7,448
+styles present by vendorname: 130
+  ...50/130 styles processed; matched so far 264
+  ...100/130 styles processed; matched so far 363
+matched items: 409
+items with a feed price: 409
+
+ua backfill: wrote 409 item(s); unchanged: 0; upcCode filled (was empty): 0; price/cost updated: 1; failures: 0
