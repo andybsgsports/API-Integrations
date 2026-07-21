@@ -177,25 +177,32 @@ class NetSuiteClient:
 
     # ── RESTlet ──────────────────────────────────────────────────────────────
     def call_restlet(
-        self, script_id: str, deploy_id: str, body: Any, *, method: str = "POST"
+        self,
+        script_id: str,
+        deploy_id: str,
+        body: Any,
+        *,
+        method: str = "POST",
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """POST a JSON body to a deployed RESTlet, returning its JSON response.
+        """Call a deployed RESTlet, returning its JSON response.
 
         The RESTlet lives on the ``restlets`` host (not the SuiteTalk REST host)
         and is addressed by ``script``/``deploy`` query params, which TBA signs
-        as part of the request. Used to create matrix children — the one item
-        operation the record API and CSV importer can't do reliably.
+        as part of the request. ``params`` adds extra query params (e.g. a GET
+        ``taskId=`` for a status check). Used to create matrix children and to
+        drive CSV imports — the item operations the record API can't do.
         """
         if not self._config.restlet_base:
             raise RuntimeError("NETSUITE_RESTLET_BASE (or account id) is not configured.")
         if not script_id or not deploy_id:
             raise RuntimeError(
-                "RESTlet script/deploy ids are not configured. Set "
-                "NETSUITE_MATRIX_SCRIPT_ID and NETSUITE_MATRIX_DEPLOY_ID (see "
-                "docs/RESTLET_DEPLOY.md)."
+                "RESTlet script/deploy ids are not configured (see docs)."
             )
-        params = urlencode({"script": script_id, "deploy": deploy_id})
-        url = f"{self._config.restlet_base}{self.RESTLET_PATH}?{params}"
+        query = {"script": script_id, "deploy": deploy_id}
+        if params:
+            query.update(params)
+        url = f"{self._config.restlet_base}{self.RESTLET_PATH}?{urlencode(query)}"
         return self._json_or_error(self._request(method, url, json_body=body))
 
     # ── SuiteQL ──────────────────────────────────────────────────────────────

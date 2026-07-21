@@ -301,7 +301,30 @@ Only once that hand-import is clean should you import the full parts (or let the
 RESTlet drive them). **Import every part** — `part01`, `part02`, … — to cover
 all the new children; the parts are independent, so order doesn't matter.
 
-## Wiring the automated import (phase B)
+## The automated nightly pipeline (built)
+
+The **SanMar Auto-Create** workflow (`.github/workflows/sanmar-autocreate.yml`)
+runs the whole thing on a schedule (06:00 UTC), in the only order that imports
+cleanly:
+
+1. `sanmar_create_preview.py` — diff feed vs catalog → child CSV parts + the
+   colours/sizes they use (read-only)
+2. `sanmar_ensure_matrix_values.py` — create any missing colours/sizes **first**
+3. `sanmar_csv_import.py` — POST each part to the `bsg_csv_import` RESTlet and
+   poll each import task to `COMPLETE`
+4. `sanmar_child_finalize.py` — Department/Class/Descriptions/Location on the new
+   items
+
+Pricing/availability then flow from the existing nightly **Field Update** (10:00
+UTC, matched by UPC) — which is why auto-create is scheduled earlier.
+
+**Safety switch:** scheduled runs default to **dry** (report only, no writes)
+until `.sanmar-autocreate-trigger` sets `AUTOCREATE_LIVE=true`. Watch a dry cycle
+(the run's `sanmar-autocreate-<id>` artifact has the report + CSV parts), then
+flip the flag to let it create items nightly. Requires the four
+`NETSUITE_CSVIMPORT_*` secrets below to be set.
+
+### RESTlet call shape
 
 The RESTlet accepts the CSV **inline** (`csv` raw text, or `csvBase64`), so the
 pipeline hands over each part it just generated in a single signed REST call — no

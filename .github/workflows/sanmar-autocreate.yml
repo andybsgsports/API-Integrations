@@ -1,0 +1,116 @@
+name: SanMar Auto-Create (nightly, new items)
+
+# The end-to-end automated create pipeline for items SanMar carries but NetSuite
+# doesn't yet, in the only order that imports cleanly:
+#   1. create-preview   -- diff feed vs catalog -> importable child CSV + the
+#                          colours/sizes those children use (read-only)
+#   2. ensure-values    -- create any missing matrix colours/sizes FIRST
+#   3. csv-import        -- drive the CSV import via the bsg_csv_import RESTlet
+#   4. child-finalize    -- Department/Class/Descriptions/Location on the new items
+# Pricing/availability then flow from the existing nightly Field Update (10:00
+# UTC, by UPC). Scheduled at 06:00 UTC so new items exist before that enrich.
+#
+# SAFETY: scheduled runs default to DRY (report only, no writes) until
+# .sanmar-autocreate-trigger sets AUTOCREATE_LIVE=true -- so you can watch a
+# cycle before it creates anything. Everything is sandbox-gated regardless.
+
+permissions:
+  contents: write
+  issues: write
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Actually create + import (false = dry-run report)"
+        required: true
+        default: "false"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".sanmar-autocreate-trigger"]
+
+jobs:
+  autocreate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve LIVE flag (schedule/push read the trigger file; dispatch uses input)
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            LIVE="${{ github.event.inputs.live }}"
+          else
+            LIVE=$(grep -E "^AUTOCREATE_LIVE=" .sanmar-autocreate-trigger | tail -1 | cut -d= -f2- | tr -d ' \r')
+          fi
+          # Fail safe: only an explicit "true" turns writes on.
+          [ "$LIVE" = "true" ] || LIVE="false"
+          [ "$LIVE" = "true" ] && DRY="false" || DRY="true"
+          echo "SYNC_DRY_RUN=$DRY" >> "$GITHUB_ENV"
+          echo "IMPORT_STAMP=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
+          echo "Resolved: live=$LIVE (SYNC_DRY_RUN=$DRY)"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          NETSUITE_CSVIMPORT_SCRIPT_ID=${{ secrets.NETSUITE_CSVIMPORT_SCRIPT_ID }}
+          NETSUITE_CSVIMPORT_DEPLOY_ID=${{ secrets.NETSUITE_CSVIMPORT_DEPLOY_ID }}
+          NETSUITE_CSVIMPORT_FOLDER_ID=${{ secrets.NETSUITE_CSVIMPORT_FOLDER_ID }}
+          NETSUITE_CSVIMPORT_CHILD_MAP=${{ secrets.NETSUITE_CSVIMPORT_CHILD_MAP }}
+          SYNC_DRY_RUN=${SYNC_DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+      - name: 1) create-preview -- CSV parts + colour/size lists (read-only)
+        run: |
+          set -o pipefail
+          python scripts/sanmar_create_preview.py | tee autocreate.txt
+      - name: 2) ensure-values -- create missing colours/sizes FIRST
+        run: |
+          set -o pipefail
+          python scripts/sanmar_ensure_matrix_values.py | tee -a autocreate.txt
+      - name: 3) csv-import -- drive the import via the RESTlet
+        env:
+          IMPORT_STAMP: ${{ env.IMPORT_STAMP }}
+        run: |
+          set -o pipefail
+          python scripts/sanmar_csv_import.py | tee -a autocreate.txt
+      - name: 4) child-finalize -- Department/Class/Descriptions/Location
+        env:
+          UPDATE_MAX_ITEMS: "0"
+        run: |
+          set -o pipefail
+          python scripts/sanmar_child_finalize.py | tee -a autocreate.txt
+      - name: Upload CSV parts + report (artifact, 14-day retention)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanmar-autocreate-${{ github.run_id }}
+          path: |
+            data/sanmar_new_children_part*.csv
+            autocreate.txt
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
