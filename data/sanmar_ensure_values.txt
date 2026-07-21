@@ -1,5 +1,6 @@
-colors: 634 missing -> 593 NEW, 41 variant(s) of existing values
-sizes : 7 missing -> 4 NEW, 0 variant(s) of existing values
+reading colours from sanmar_missing_colors.txt, sizes from sanmar_missing_sizes.txt
+colors: 634 missing -> 543 NEW, 41 variant(s) of existing values
+sizes : 7 missing -> 0 NEW, 0 variant(s) of existing values
 
 sample colour variants (map to existing, NOT created):
   'Ash Grey' -> 'ASH GREY'
@@ -15,5 +16,5 @@ sample colour variants (map to existing, NOT created):
   'Black/ White' -> 'Black/White'
   'Blustery/ Navy' -> 'Blustery/Navy'
 
-ensure values: created 50 colour(s) + 4 size(s); variants left for remap: 41; failures: 0
+ensure values: created 543 colour(s) + 0 size(s); variants left for remap: 41; failures: 0
 plans written: data/sanmar_color_plan.csv, data/sanmar_size_plan.csv
