@@ -2,7 +2,9 @@
 # the live matrix lists. DRY RUN first: reports how many are genuinely NEW (to be
 # created) vs spelling variants of values you already have (to remap, not
 # duplicate), and writes data/sanmar_color_plan.csv + data/sanmar_size_plan.csv.
-# Sizes now spell out (S/M->Small/Medium, NB->Newborn, 06M->0-6 Months, etc.).
-# run: ensure-values-dryrun-2-2026-07-20
-DRY_RUN=true
-CREATE_MAX=0
+# Dry run: 593 NEW colours + 7 sizes to create; 41 variants remap to existing
+# (not duplicated). First LIVE run capped at 50 colours to confirm abbreviation
+# generation, then uncap to 0.
+# run: ensure-values-LIVE-cap50-2026-07-21
+DRY_RUN=false
+CREATE_MAX=50
