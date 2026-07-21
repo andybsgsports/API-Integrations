@@ -2,6 +2,7 @@
 # the live matrix lists. DRY RUN first: reports how many are genuinely NEW (to be
 # created) vs spelling variants of values you already have (to remap, not
 # duplicate), and writes data/sanmar_color_plan.csv + data/sanmar_size_plan.csv.
-# run: ensure-values-dryrun-2026-07-20
+# Sizes now spell out (S/M->Small/Medium, NB->Newborn, 06M->0-6 Months, etc.).
+# run: ensure-values-dryrun-2-2026-07-20
 DRY_RUN=true
 CREATE_MAX=0

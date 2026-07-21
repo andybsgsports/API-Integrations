@@ -34,6 +34,13 @@ _EXACT: dict[str, str] = {
     "OS": "One Size",
     "OSFM": "One Size",
     "ONESIZE": "One Size",
+    # Infant / toddler sizes, spelled out per BSG convention. "6T" is the
+    # standard toddler label and stays as-is; checked here before the Tall-suffix
+    # rule so it isn't mis-read as "6 Tall".
+    "NB": "Newborn",
+    "06M": "0-6 Months",
+    "24M": "24 Months",
+    "6T": "6T",
 }
 
 
