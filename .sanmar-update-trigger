@@ -1,7 +1,6 @@
-# LIVE full run to apply the SanMar MAP header-alias fix and log MAP coverage
-# (how many feed SKUs carry a MAP). Diff-aware, so it only writes MAP where the
-# feed now resolves one. Reveals whether a blank MAP (e.g. Gildan) is correct
-# (no MAP at SanMar) or was a column-name miss. Sandbox-gated.
-# run: sanmar-map-alias-fix-2026-07-20
-DRY_RUN=false
+# DIAGNOSTIC dry run: re-run the nightly Field Update read-only to see whether
+# the 18:07 failure (#43) was transient contention from today's heavy catalog
+# writes, or a real error the new items surfaced. Dry = reads only, no writes.
+# run: field-update-diagnostic-dryrun-2026-07-21
+DRY_RUN=true
 MAX_ITEMS=0
