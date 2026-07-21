@@ -3,7 +3,7 @@
 # reference item that already has it (auto-picked, or set UOM_REFERENCE_ID);
 # Store Description = each item's own detailed description. DRY first so the
 # reference UOM values print for review, then flip DRY_RUN=false + MAX_ITEMS=0.
-# run: uom-fix-dryrun-2026-07-21
+# run: uom-fix-dryrun-2-2026-07-21
 DRY_RUN=true
 MAX_ITEMS=50
 UOM_REFERENCE_ID=161098

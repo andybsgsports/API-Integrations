@@ -17,7 +17,7 @@ UOM = {
 
 def test_sets_uom_when_blank_and_store_from_sales():
     body = build_body(
-        {"unitstype": "", "salesdescription": "Soft tee", "storedescription": ""},
+        {"unitstype": "", "description": "Soft tee", "storedescription": ""},
         UOM, has_uom_col=True,
     )
     assert body == {**UOM, "storeDescription": "Soft tee"}
@@ -25,7 +25,7 @@ def test_sets_uom_when_blank_and_store_from_sales():
 
 def test_skips_uom_when_already_set():
     body = build_body(
-        {"unitstype": "1", "salesdescription": "Soft tee", "storedescription": "Soft tee"},
+        {"unitstype": "1", "description": "Soft tee", "storedescription": "Soft tee"},
         UOM, has_uom_col=True,
     )
     assert body == {}  # UOM present, store already matches -> nothing
@@ -33,7 +33,7 @@ def test_skips_uom_when_already_set():
 
 def test_store_only_when_uom_present_but_store_stale():
     body = build_body(
-        {"unitstype": "1", "salesdescription": "New copy", "storedescription": "old"},
+        {"unitstype": "1", "description": "New copy", "storedescription": "old"},
         UOM, has_uom_col=True,
     )
     assert body == {"storeDescription": "New copy"}

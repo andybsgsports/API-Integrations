@@ -51,7 +51,10 @@ def build_body(row: dict, uom: dict, has_uom_col: bool) -> dict:
     body: dict = {}
     if not has_uom_col or not str(row.get("unitstype") or "").strip():
         body.update(uom)
-    sales = str(row.get("salesdescription") or "").strip()
+    # SuiteQL sales-description column is 'description' (salesdescription doesn't
+    # project). storedescription may be absent from the row -> treated as blank,
+    # so it still gets set from the item's own description.
+    sales = str(row.get("description") or "").strip()
     store = str(row.get("storedescription") or "").strip()
     if sales and store != sales:
         body["storeDescription"] = sales
@@ -88,7 +91,7 @@ def main() -> int:
         return 1
 
     store_ok = _projects(client, "storedescription")
-    cols = "id, salesdescription" + (", unitstype" if has_uom_col else "") \
+    cols = "id, description" + (", unitstype" if has_uom_col else "") \
         + (", storedescription" if store_ok else "")
 
     max_rows = client.suiteql(
