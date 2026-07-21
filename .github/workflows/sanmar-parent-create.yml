@@ -1,0 +1,84 @@
+name: SanMar Parent Create (net-new styles, pilot)
+
+# Creates net-new SanMar styles NetSuite doesn't carry -- parent matrix item via
+# REST, then its children via the matrix RESTlet (parent-before-child, in order).
+# Runs create-preview first to refresh data/sanmar_new_parents.txt, then creates
+# up to MAX_STYLES of them. DRY by default. LIVE needs the matrix RESTlet
+# redeployed with the upccode line (so children carry UPC for the Field Update).
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (true = report only)"
+        required: true
+        default: "true"
+      max_styles:
+        description: "Max net-new styles to create (pilot = 5)"
+        required: false
+        default: "5"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".sanmar-parent-create-trigger"]
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve run parameters (inputs, or trigger file on push)
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            get() { grep -E "^$1=" .sanmar-parent-create-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
+            DRY_RUN=$(get DRY_RUN); MAX_STYLES=$(get MAX_STYLES)
+          else
+            DRY_RUN="${{ github.event.inputs.dry_run }}"; MAX_STYLES="${{ github.event.inputs.max_styles }}"
+          fi
+          [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
+          echo "MAX_STYLES=${MAX_STYLES:-5}" >> "$GITHUB_ENV"
+          echo "Resolved: dry_run=$DRY_RUN max_styles=${MAX_STYLES:-5}"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          NETSUITE_MATRIX_SCRIPT_ID=${{ secrets.NETSUITE_MATRIX_SCRIPT_ID }}
+          NETSUITE_MATRIX_DEPLOY_ID=${{ secrets.NETSUITE_MATRIX_DEPLOY_ID }}
+          SYNC_DRY_RUN=${DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+      - name: 1) create-preview -- refresh the net-new parent list (read-only)
+        run: python scripts/sanmar_create_preview.py
+      - name: 2) parent-create -- pilot styles (parent via REST, children via RESTlet;
+          creates any missing colour/size options inline)
+        env:
+          CREATE_MAX_STYLES: ${{ env.MAX_STYLES }}
+        run: python scripts/sanmar_parent_create.py
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

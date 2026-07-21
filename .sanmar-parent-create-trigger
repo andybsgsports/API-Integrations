@@ -1,0 +1,9 @@
+# Pilot: create net-new SanMar styles NetSuite doesn't carry -- parent matrix
+# item via REST, then children via the matrix RESTlet (parent-before-child).
+# Refreshes the net-new list via create-preview, then creates up to MAX_STYLES.
+# DRY first: reports which styles + how many children + which options it would
+# create, no writes. Flip DRY_RUN=false for the live pilot (needs the matrix
+# RESTlet redeployed with the upccode line).
+# run: parent-create-dry-pilot-2026-07-21
+DRY_RUN=true
+MAX_STYLES=5
