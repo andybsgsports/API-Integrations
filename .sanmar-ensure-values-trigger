@@ -1,0 +1,7 @@
+# Reconcile the 634 colours + 7 sizes the create-import couldn't resolve against
+# the live matrix lists. DRY RUN first: reports how many are genuinely NEW (to be
+# created) vs spelling variants of values you already have (to remap, not
+# duplicate), and writes data/sanmar_color_plan.csv + data/sanmar_size_plan.csv.
+# run: ensure-values-dryrun-2026-07-20
+DRY_RUN=true
+CREATE_MAX=0
