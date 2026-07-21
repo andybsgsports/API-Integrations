@@ -1,5 +1,5 @@
 colors: 634 missing -> 593 NEW, 41 variant(s) of existing values
-sizes : 7 missing -> 7 NEW, 0 variant(s) of existing values
+sizes : 7 missing -> 4 NEW, 0 variant(s) of existing values
 
 sample colour variants (map to existing, NOT created):
   'Ash Grey' -> 'ASH GREY'
@@ -27,5 +27,5 @@ sample colour variants (map to existing, NOT created):
   WOULD create colour 'Aqua'
   WOULD create colour 'Aqua Green Heather'
 
-ensure values: WOULD create (dry run) 593 colour(s) + 7 size(s); variants left for remap: 41; failures: 0
+ensure values: WOULD create (dry run) 593 colour(s) + 4 size(s); variants left for remap: 41; failures: 0
 plans written: data/sanmar_color_plan.csv, data/sanmar_size_plan.csv
