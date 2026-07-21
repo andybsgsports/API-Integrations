@@ -100,4 +100,11 @@ def normalize_size(raw: str | None) -> str:
     if not s:
         return s
     key = s.upper().replace(" ", "").replace("/", "")
-    return _lookup(key) or s
+    exact = _lookup(key)
+    if exact:
+        return exact
+    # Combined sizes (S/M, M/L, L/XL): spell out each side and rejoin, so the
+    # matrix value reads "Small/Medium" not "S/M" -- BSG spells sizes out.
+    if "/" in s:
+        return "/".join(normalize_size(part) for part in s.split("/"))
+    return s
