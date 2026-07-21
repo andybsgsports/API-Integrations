@@ -1,10 +1,7 @@
-# Nightly SanMar auto-create (06:00 UTC): create-preview -> ensure-values ->
-# RESTlet import -> child-finalize. Scheduled runs read AUTOCREATE_LIVE below.
-#
-# START DRY: AUTOCREATE_LIVE=false makes every run report only (no colours
-# created, no import) so you can watch a full cycle first. Flip to true when
-# you're ready for it to actually create new items each night.
-#
-# Bumping this file also fires one run immediately (with the flag below).
-# run: autocreate-dry-cycle-2026-07-21
-AUTOCREATE_LIVE=false
+# GO LIVE: the nightly SanMar auto-create now actually creates new items each
+# night (create-preview -> ensure-values -> RESTlet import -> child-finalize).
+# Bumping this file also fires one live cycle now -- which end-to-end tests the
+# bsg_csv_import RESTlet + the NETSUITE_CSVIMPORT_* secrets on whatever new
+# existing-parent children the feed has today.
+# run: autocreate-LIVE-2026-07-21
+AUTOCREATE_LIVE=true
