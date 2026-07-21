@@ -4,6 +4,9 @@
 # DRY first: reports which styles + how many children + which options it would
 # create, no writes. Flip DRY_RUN=false for the live pilot (needs the matrix
 # RESTlet redeployed with the upccode line).
-# run: parent-create-dry-pilot-2026-07-21
-DRY_RUN=true
+# Dry pilot was clean: 5 styles / ~16 children / 2 new colours (Petrol, Wasabe),
+# 0 failures. RESTlet re-uploaded with the upccode line. GO LIVE on the 5-style
+# pilot -- creates the parents (REST) + children (RESTlet) for real.
+# run: parent-create-LIVE-pilot-2026-07-21
+DRY_RUN=false
 MAX_STYLES=5
