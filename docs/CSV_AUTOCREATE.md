@@ -22,14 +22,30 @@ child row whose parent doesn't exist yet fails the import).
 
 ```
 SanMar SDL feed ──┐
-                  ├─> scripts/sanmar_create_preview.py (read-only diff)
+                  ├─> 1. sanmar_create_preview.py (read-only diff)
 live NetSuite  ───┘        │
-                           ├─> data/sanmar_new_children.csv   (new colours/sizes under existing parents)
-                           └─> data/sanmar_new_parents.txt    (styles that need a parent first)
-
-data/sanmar_new_children.csv ──> bsg_csv_import RESTlet ──> N/task.CsvImportTask ──> matrix children created
+                           ├─> data/sanmar_new_children.csv          (importable child rows)
+                           ├─> data/sanmar_new_children_colors.txt   (colours those rows use)  ┐
+                           ├─> data/sanmar_new_children_sizes.txt    (sizes those rows use)    │ pre-flight input
+                           └─> data/sanmar_new_parents.txt           (styles needing a parent first)
+                           │
+                           v
+                    2. sanmar_ensure_matrix_values.py  (PRE-FLIGHT, creates missing colours/sizes)
+                           │
+                           v
+data/sanmar_new_children.csv ──> 3. bsg_csv_import RESTlet ──> N/task.CsvImportTask ──> matrix children created
                                   (against a saved import map, "Add" mode)
 ```
+
+**Order matters — colours/sizes must exist before the items reference them.** A
+matrix child fails with `Invalid matrixoptioncustitem_bsg_color reference key
+<name>` if its colour isn't in the list yet, so the create pipeline runs the
+**ensure-values pre-flight (step 2) before every import**. `create-preview`
+emits the exact colours/sizes the pending children use; `ensure-values` creates
+the ones the matrix lists don't carry (remapping spelling variants of existing
+values rather than duplicating them) — so by the time the CSV imports, every
+option resolves. The **SanMar Create Preview + Ensure Values** workflow chains
+steps 1–2 automatically (`PREFLIGHT_CREATE=true`).
 
 The diff step is **read-only** and safe to run any time (workflow
 **SanMar Create Preview**, or bump `.sanmar-create-preview-trigger`). It never

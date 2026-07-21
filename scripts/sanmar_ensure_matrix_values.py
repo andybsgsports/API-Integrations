@@ -65,6 +65,21 @@ def _read_lines(path: Path) -> list[str]:
     return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
+def _input_file(env_var: str, preferred: str, fallback: str) -> Path:
+    """Resolve which name list to read.
+
+    Order: an explicit env override, else the create-preview's "new children"
+    list (the pre-flight input -- every colour/size the pending import uses),
+    else the failure-derived "missing" list (retro-fixing an import that already
+    ran). Lets ensure-values run as a pre-import gate or a post-mortem cleanup.
+    """
+    override = os.environ.get(env_var)
+    if override:
+        return ROOT / override
+    pref = ROOT / "data" / preferred
+    return pref if pref.exists() else ROOT / "data" / fallback
+
+
 def _unique_abbrev(base: str, used: set[str]) -> str:
     ab = (base or "c")[:10]
     cand, i = ab, 1
@@ -90,10 +105,15 @@ def main() -> int:
     used_abbrev = {str(r.get("abbreviation") or "").lower() for r in color_rows}
     used_abbrev.discard("")
 
-    missing_colors = _read_lines(ROOT / "data" / "sanmar_missing_colors.txt")
-    missing_sizes = [
-        normalize_size(s) for s in _read_lines(ROOT / "data" / "sanmar_missing_sizes.txt")
-    ]
+    colors_file = _input_file(
+        "ENSURE_COLORS_FILE", "sanmar_new_children_colors.txt", "sanmar_missing_colors.txt"
+    )
+    sizes_file = _input_file(
+        "ENSURE_SIZES_FILE", "sanmar_new_children_sizes.txt", "sanmar_missing_sizes.txt"
+    )
+    print(f"reading colours from {colors_file.name}, sizes from {sizes_file.name}")
+    missing_colors = _read_lines(colors_file)
+    missing_sizes = [normalize_size(s) for s in _read_lines(sizes_file)]
 
     new_colors, color_variants = classify(missing_colors, color_by_norm)
     new_sizes, size_variants = classify(missing_sizes, size_by_norm)

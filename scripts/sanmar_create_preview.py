@@ -32,6 +32,7 @@ from sanmar_netsuite.sanmar import constants as C
 from sanmar_netsuite.sanmar.parsers import parse_styles
 from sanmar_netsuite.sanmar.sftp_client import SanMarSftp
 from sanmar_netsuite.transform.csv_export import write_matrix_csv
+from sanmar_netsuite.transform.sizes import normalize_size
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -140,6 +141,28 @@ def main() -> int:
     )
     # Split into <=25k-line parts (the Import Assistant's hard limit).
     parts = split_csv(child_csv, data, "sanmar_new_children", MAX_ROWS_PER_PART)
+
+    # Pre-flight input: the distinct colours/sizes the NEW children reference.
+    # The ensure-values step reads these and creates any the matrix lists don't
+    # carry yet -- BEFORE the import, so a child never fails on a missing option.
+    used_colors: set[str] = set()
+    used_sizes: set[str] = set()
+    for style in styles:
+        if style.style not in parent_refs:
+            continue  # net-new-parent children aren't in the child CSV
+        for sku in style.skus:
+            if child_external_id(sku.unique_key) in split.child_only_skip:
+                continue
+            used_colors.add(sku.color_name)
+            used_sizes.add(normalize_size(sku.size))
+    (data / "sanmar_new_children_colors.txt").write_text(
+        "\n".join(sorted(used_colors)) + ("\n" if used_colors else ""), encoding="utf-8"
+    )
+    (data / "sanmar_new_children_sizes.txt").write_text(
+        "\n".join(sorted(used_sizes)) + ("\n" if used_sizes else ""), encoding="utf-8"
+    )
+    print(f"new children reference {len(used_colors)} distinct colour(s), "
+          f"{len(used_sizes)} size(s) -> ensure-values checks/creates these first")
 
     # Net-new parent styles need a parent record created first -- list them for
     # the (later) parent-creation phase; they are NOT in the child CSV.
