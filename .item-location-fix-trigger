@@ -1,0 +1,6 @@
+# Set Warehouse + Preferred Location = Badger Sporting Goods on every matrix item
+# (parent AND child). DRY first: reports how many items need it (a sample of
+# which). Then flip DRY_RUN=false (and MAX_ITEMS=0) to sweep the whole catalog.
+# run: location-fix-dryrun-2026-07-21
+DRY_RUN=true
+MAX_ITEMS=50

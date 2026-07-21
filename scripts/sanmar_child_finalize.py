@@ -86,7 +86,9 @@ def plan_body(
     if location_id:
         current = str(child.get("location") or "").strip()
         if not has_location_col or current != location_id:
+            # Warehouse + Preferred Location both = Badger Sporting Goods.
             body["location"] = {"id": location_id}
+            body["preferredLocation"] = {"id": location_id}
     return body
 
 

@@ -59,18 +59,15 @@ def test_never_overwrites_a_value_the_child_already_has():
 
 def test_location_set_when_missing_or_wrong_and_skipped_when_correct():
     parent = {"department": "12"}
-    # blank location -> set it
-    assert _body({"department": "12", "location": ""}, parent, location_id=LOC) == {
-        "location": {"id": LOC}
-    }
-    # different location -> overwrite to Badger Sporting Goods
-    assert _body({"department": "12", "location": "3"}, parent, location_id=LOC) == {
-        "location": {"id": LOC}
-    }
+    both = {"location": {"id": LOC}, "preferredLocation": {"id": LOC}}
+    # blank location -> set Warehouse + Preferred Location
+    assert _body({"department": "12", "location": ""}, parent, location_id=LOC) == both
+    # different location -> overwrite both to Badger Sporting Goods
+    assert _body({"department": "12", "location": "3"}, parent, location_id=LOC) == both
     # already correct -> no location write, nothing to do
     assert _body({"department": "12", "location": LOC}, parent, location_id=LOC) == {}
 
 
 def test_location_set_unconditionally_when_column_unreadable():
     body = _body({"department": "12"}, {}, location_id=LOC, has_location_col=False)
-    assert body == {"location": {"id": LOC}}
+    assert body == {"location": {"id": LOC}, "preferredLocation": {"id": LOC}}
