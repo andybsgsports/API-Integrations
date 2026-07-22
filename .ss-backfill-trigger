@@ -1,7 +1,7 @@
-# LIVE full run to apply the S&S MAP fix: 0.01 "no MAP" placeholders are now
-# treated as no-MAP, so this pass blanks every stale 0.01 custitem_ss_map and
-# writes real MAPs (>1c) where S&S actually restricts. No cap so it reaches the
-# whole matched catalog. Sandbox-gated.
-# run: ss-map-sentinel-fix-2026-07-20
-DRY_RUN=false
+# DRY validation of the new sale-aware Purchase Price + On Sale flag on the S&S
+# side (mirrors the SanMar change). Reads only: downloads a fresh catalog and
+# reports how many matched items are on sale today ("S&S on sale today: X/Y")
+# without writing. Flip DRY_RUN=false (or let the nightly cron run) to apply.
+# run: ss-sale-pricing-dryrun-2026-07-22
+DRY_RUN=true
 MAX_ITEMS=0

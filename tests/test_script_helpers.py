@@ -80,12 +80,13 @@ class TestSsHelpers:
         assert _abs_url(None) is None
 
     def test_natives_prefers_customer_price(self):
+        # no sale price -> cost is the customer price; on_sale False
         assert natives_for(
             {"msrp": "28", "customer_price": "11.5", "piece_price": "12", "weight": "0.4"}
-        ) == (28.0, 11.5, 0.4)
+        ) == (28.0, 11.5, 0.4, False)
 
     def test_natives_falls_back_to_piece_price(self):
-        assert natives_for({"piece_price": "12"}) == (None, 12.0, None)
+        assert natives_for({"piece_price": "12"}) == (None, 12.0, None, False)
 
 
 class TestNativeDiffs:
