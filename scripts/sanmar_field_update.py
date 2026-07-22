@@ -11,7 +11,9 @@ runs are small. Honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
 
 from __future__ import annotations
 
+import html
 import os
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -129,25 +131,39 @@ def _projects(client: NetSuiteClient, col: str) -> bool:
         return False
 
 
+_STATUS_PREFIX = re.compile(r"^(DISCONTINUED|CLOSEOUT|NEW)\b[\s:–-]*", re.I)
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(text or "")).strip()
+
+
 def store_display_name(title: str, style: str) -> str:
-    """Web-store Display Name = the product title with the trailing style number
-    stripped (SanMar appends it, e.g. '...Pullover Hoodie NKFD9889')."""
-    t = (title or "").strip()
-    s = (style or "").strip()
-    if s and t.upper().endswith(s.upper()):
-        t = t[: -len(s)].rstrip(" -")
-    return t
+    """Clean product name = the feed title with any status prefix and trailing
+    style number stripped, Title-cased if it arrived ALL CAPS.
+
+    This deliberately mirrors ``description_update._polish_name`` so the web
+    Store Display Name matches the item's Display Name / Description exactly
+    (those are set from the same feed title by the description-update job)."""
+    name = _STATUS_PREFIX.sub("", _clean(title))
+    if style:
+        name = re.sub(rf"[\s.,-]*{re.escape(style)}[\s.]*$", "", name, flags=re.I)
+    name = name.strip(" .,-")
+    if name.isupper():
+        name = name.title()
+    return name
 
 
 def store_description(available_sizes: str, description: str) -> str:
-    """Store Description = the AVAILABLE_SIZES line, a blank line, then the
-    marketing paragraph -- mirroring the sanmar.com product page. SanMar's flat
-    feed strips commas and ships the feature list as prose (not bullets); the
-    fully punctuated, bulleted copy is only available via their content web
-    service, so this is the closest the feed allows."""
-    sizes = (available_sizes or "").strip()
-    body = (description or "").strip()
-    if sizes and body:
+    """Store/Stock Description = the marketing copy, with a real size list
+    ("Women's Sizes: S-2XL") prepended when the feed carries one. One-size items
+    (no "Sizes:" line) get just the copy. SanMar's flat feed strips commas and
+    ships the features as prose (no bullet column exists); the fully punctuated,
+    bulleted copy is only available via their content web service."""
+    sizes = _clean(available_sizes)
+    body = _clean(description)
+    # Only prepend a genuine size list, not "One Size" / blank.
+    if sizes and ":" in sizes and body:
         return f"{sizes}\n\n{body}"
     return body or sizes
 
@@ -291,9 +307,12 @@ def main() -> int:
         styles, inventory, on_sale_field=on_sale_field
     )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
-    # Store Display Name + Store Description are native fields; write them only
-    # where the column is queryable so the diff works (self-enabling).
-    store_cols = [c for c in ("storedisplayname", "storedescription") if _projects(client, c)]
+    # Store Display Name + Store/Stock Description are native fields; write them
+    # only where the column is queryable so the diff works (self-enabling).
+    store_cols = [
+        c for c in ("storedisplayname", "storedescription", "stockdescription")
+        if _projects(client, c)
+    ]
     if store_cols:
         print(f"store fields active: {store_cols}")
     cols = ", ".join(FIELD_ORDER + SEEN_FIELDS + store_cols)
@@ -324,7 +343,8 @@ def main() -> int:
                 body, row, base_by_rid, str(row["id"]),
                 price=price, cost=cost, weight=weight, same=_same,
             )
-            # Store Display Name + Store Description (native web-store fields).
+            # Store Display Name + Store/Stock Description (native web-store
+            # fields). Store and Stock Description carry the same marketing copy.
             disp, sdesc = store_by_gtin.get(gtin, ("", ""))
             if ("storedisplayname" in store_cols and disp
                     and not _same(row.get("storedisplayname"), disp)):
@@ -332,6 +352,9 @@ def main() -> int:
             if ("storedescription" in store_cols and sdesc
                     and not _same(row.get("storedescription"), sdesc)):
                 body["storeDescription"] = sdesc
+            if ("stockdescription" in store_cols and sdesc
+                    and not _same(row.get("stockdescription"), sdesc)):
+                body["stockDescription"] = sdesc
             stamp(body, row, "sanmar")
             if not body:
                 unchanged += 1
@@ -341,7 +364,7 @@ def main() -> int:
             considered += 1
             if "price" in body or "cost" in body or "weight" in body:
                 priced += 1
-            if "storeDisplayName" in body or "storeDescription" in body:
+            if any(k in body for k in ("storeDisplayName", "storeDescription", "stockDescription")):
                 stored += 1
             if not allow_write:
                 written += 1

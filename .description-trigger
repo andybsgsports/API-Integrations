@@ -1,4 +1,7 @@
-# run: post-refresh-FULL
-DRY_RUN=false
+# DRY run to show the copy fix: Display Name / Description / Purchase Description
+# get set to the clean product name (vendor# stripped, marketing blob removed).
+# Prints before/after samples. Flip DRY_RUN=false (or let the 12:00 UTC nightly)
+# to apply.
+# run: desc-copy-cleanup-dryrun-2026-07-22
+DRY_RUN=true
 MAX_ITEMS=0
-# run: manual-nightly-2026-07-18-retry
