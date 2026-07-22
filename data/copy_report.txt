@@ -16,16 +16,18 @@ custitem_ss_sku: copy for 195,423 feed SKUs
     displayName: 'OGIO - Transfer Duffel. 108084' -> 'OGIO - Transfer Duffel'
     salesDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
     purchaseDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
-  sample item 102058 [custitem_mtec_item_sku]:
-    displayName: 'Knicker Crush  Baseball Pant' -> 'Crush Baseball Knicker'
-    salesDescription: 'Knicker Crush  Baseball Pant' -> 'Crush Baseball Knicker'
-    purchaseDescription: 'Knicker Crush  Baseball Pant' -> 'Crush Baseball Knicker'
-  sample item 129373 [custitem_mtec_item_sku]:
-    displayName: 'All Day Tri Blend Tee' -> 'All-Day Core Basic Tri-Blend Tee'
-    salesDescription: 'All Day Tri Blend Tee' -> 'All-Day Core Basic Tri-Blend Tee'
-    purchaseDescription: 'All Day Tri Blend Tee' -> 'All-Day Core Basic Tri-Blend Tee'
+  FAILED item 244194: 429 Too Many Requests :: 
+  FAILED item 244387: 429 Too Many Requests :: 
+  FAILED item 242376: 429 Too Many Requests :: 
+  FAILED item 243234: 429 Too Many Requests :: 
+  FAILED item 233232: 429 Too Many Requests :: 
+  FAILED item 234090: 429 Too Many Requests :: 
+  FAILED item 234069: 429 Too Many Requests :: 
+  FAILED item 233687: 429 Too Many Requests :: 
+  FAILED item 240709: 429 Too Many Requests :: 
+  FAILED item 241813: 429 Too Many Requests :: 
   sample item 194770 [custitem_mtec_item_sku]:
     salesDescription: 'Russell Integrated 7-Piece Pad Football Pant' -> 'Integrated 7-Piece Pad Football Pant'
     purchaseDescription: 'Russell Integrated 7-Piece Pad Football Pant' -> 'Integrated 7-Piece Pad Football Pant'
 
-description update: WOULD write (dry run) 14135 item(s); unchanged: 14894; no feed copy: 5; failures: 0
+description update: wrote 12953 item(s); unchanged: 16061; no feed copy: 5; failures: 15
