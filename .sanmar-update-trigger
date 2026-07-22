@@ -6,6 +6,9 @@
 # Now also covers Store Display Name (= clean product name, polished to match
 # the Display Name the description-update job sets) and Store + Stock Description
 # (= the marketing copy). Watch "store name/desc updated: N".
-# run: field-update-store-stock-dryrun-2026-07-22
-DRY_RUN=true
+# LIVE: apply Store Display Name (= clean name) + Store & Stock Description
+# (= marketing copy), alongside the case-price cost + On Sale flag. Dry run was
+# clean (0 failures).
+# run: field-update-store-stock-LIVE-2026-07-22
+DRY_RUN=false
 MAX_ITEMS=0

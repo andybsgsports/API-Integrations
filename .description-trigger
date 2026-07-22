@@ -2,6 +2,9 @@
 # get set to the clean product name (vendor# stripped, marketing blob removed).
 # Prints before/after samples. Flip DRY_RUN=false (or let the 12:00 UTC nightly)
 # to apply.
-# run: desc-copy-cleanup-dryrun-2026-07-22
-DRY_RUN=true
+# LIVE: apply the copy fix confirmed by the dry run (item 244489 OGIO Transfer
+# Duffel verified). Display Name / Description / Purchase Description -> clean
+# product name across 14,135 items; 0 failures in dry.
+# run: desc-copy-cleanup-LIVE-2026-07-22
+DRY_RUN=false
 MAX_ITEMS=0
