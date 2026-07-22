@@ -133,12 +133,14 @@ def build_payloads(
     today = today or date.today()
     total_by_key: dict[str, int] = {}
     qtys_by_key: dict[str, dict[str, int]] = {}
-    # unique_key -> (each_sale_price, sale_start, sale_end) from the dip feed.
+    # unique_key -> (case_sale_price, each_sale_price, sale_start, sale_end) from dip.
     sale_by_key: dict[str, tuple] = {}
     unknown_whse: set[str] = set()
     for rec in inventory:
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
-        sale_by_key[rec.unique_key] = (rec.each_sale_price, rec.sale_start, rec.sale_end)
+        sale_by_key[rec.unique_key] = (
+            rec.case_sale_price, rec.each_sale_price, rec.sale_start, rec.sale_end
+        )
         if rec.warehouses:
             # Zero-fill every column so a warehouse that drops out of the
             # feed clears to 0 instead of keeping yesterday's count.
@@ -169,11 +171,20 @@ def build_payloads(
                 map_seen += 1
             entry: dict[str, object] = {}
             put = _make_put(entry)
-            # Purchase Price tracks the active sale price when SanMar has one
-            # running; reverts to the regular piece price when it ends.
-            sale_price, sale_start, sale_end = sale_by_key.get(sku.unique_key, (None, "", ""))
+            # Cost basis = the CASE price (SanMar's by-the-case unit price, i.e.
+            # the "Original Price" shown on sanmar.com) -- NOT the single-piece
+            # (open-stock) price, which runs ~$1 higher and is what made the
+            # Purchase Price read too high. Compare against the case-level sale
+            # price for the same reason; fall back to piece-level when a style
+            # carries no case data. (The true contract/Program price is lower
+            # still but is not in the SFTP feeds.)
+            case_sale, each_sale, sale_start, sale_end = sale_by_key.get(
+                sku.unique_key, (None, None, "", "")
+            )
+            regular = sku.case_price if sku.case_price is not None else sku.piece_price
+            sale_price = case_sale if case_sale is not None else each_sale
             cost, on_sale = effective_cost(
-                sku.piece_price, sale_price, sale_start, sale_end, today
+                regular, sale_price, sale_start, sale_end, today
             )
             if on_sale:
                 on_sale_count += 1

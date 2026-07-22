@@ -66,7 +66,7 @@ def build_child_payload(
         "class": class_for_category(style.category),
         "location": DEFAULT_LOCATION,
         "costingMethod": _COSTING_CODE.get(DEFAULT_COSTING_METHOD.lower(), "AVG"),
-        "cost": _f(sku.piece_price),
+        "cost": _f(sku.case_price if sku.case_price is not None else sku.piece_price),
         "basePrice": _f(sku.msrp),
         "currency": DEFAULT_CURRENCY,
     }

@@ -132,7 +132,9 @@ def _row(
     from ..netsuite.repository import child_external_id
 
     size = normalize_size(sku.size)
-    cost = _num(sku.piece_price)
+    # Cost = case price (the "Original Price" on sanmar.com); the single-piece
+    # (open-stock) price runs ~$1 higher. Fall back to piece price if no case.
+    cost = _num(sku.case_price if sku.case_price is not None else sku.piece_price)
     # Numeric styles are referenced by parent internal id (see netsuite.parents);
     # everything else by the style name.
     subitem_of = parent_refs.get(sku.style, sku.style)
