@@ -72,10 +72,20 @@ def _make_put(entry: dict[str, object]):
     return put
 
 
-# Optional checkbox field flagged when an item is currently on sale. Left blank
-# until the field exists in NetSuite (set SANMAR_ON_SALE_FIELD to its script id,
-# e.g. custitem_bsg_on_sale); the sale-aware Purchase Price below needs no field.
-ON_SALE_FIELD = os.environ.get("SANMAR_ON_SALE_FIELD", "").strip()
+# Checkbox field flagged when an item is currently on sale. Auto-detected at
+# runtime (used only if it exists in NetSuite), so it self-enables once created
+# -- no sequencing/env needed. The sale-aware Purchase Price below needs no field.
+ON_SALE_FIELD = os.environ.get("SANMAR_ON_SALE_FIELD", "custitem_bsg_on_sale").strip()
+
+
+def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
+    if not scriptid:
+        return False
+    try:
+        client.suiteql(f"SELECT {scriptid} FROM item WHERE rownum <= 1")
+        return True
+    except Exception:  # noqa: BLE001 - unknown column -> field not created yet
+        return False
 
 
 def _parse_sale_date(s: object) -> date | None:
@@ -112,7 +122,7 @@ def effective_cost(piece_price, sale_price, sale_start, sale_end, today: date):
 
 
 def build_payloads(
-    styles, inventory, today: date | None = None
+    styles, inventory, today: date | None = None, on_sale_field: str = ""
 ) -> tuple[dict[str, dict[str, object]], dict[str, tuple]]:
     """GTIN -> field payload for every feed SKU carrying a barcode, plus
     GTIN -> (base price, cost, weight) for the native-field writes.
@@ -167,8 +177,8 @@ def build_payloads(
             )
             if on_sale:
                 on_sale_count += 1
-            if ON_SALE_FIELD:
-                put(ON_SALE_FIELD, on_sale)
+            if on_sale_field:
+                put(on_sale_field, on_sale)
             qty = total_by_key.get(sku.unique_key, sku.available_qty)
             put("custitem_sanmar_unique_key", sku.unique_key)
             put("custitem_sanmar_inventory_key", sku.inventory_key)
@@ -204,7 +214,7 @@ def build_payloads(
     # (e.g. Gildan) usually have no MAP, so a blank MAP field can be correct.
     print(f"SanMar MAP coverage: {map_seen}/{sku_total} feed SKUs carry a MAP "
           f"price (blank MAP on a no-MAP brand like Gildan is expected)")
-    flag = f" (flagged via {ON_SALE_FIELD})" if ON_SALE_FIELD else " (On Sale field not configured)"
+    flag = f" (flagged via {on_sale_field})" if on_sale_field else " (On Sale field not created)"
     print(f"SanMar on sale today: {on_sale_count}/{sku_total} SKUs "
           f"-> Purchase Price = sale price{flag}")
     return payloads, natives
@@ -227,10 +237,11 @@ def main() -> int:
 
     styles = parse_styles(_dl(cfg, C.FILE_SDL_N))
     inventory = parse_inventory(_dl(cfg, C.FILE_DIP))
-    payloads, natives = build_payloads(styles, inventory)
-    print(f"feed SKUs with GTIN: {len(payloads):,}")
-
     client = NetSuiteClient(cfg.netsuite)
+    # Use the On Sale checkbox only once it exists in NetSuite (self-enabling).
+    on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
+    payloads, natives = build_payloads(styles, inventory, on_sale_field=on_sale_field)
+    print(f"feed SKUs with GTIN: {len(payloads):,}")
     cols = ", ".join(FIELD_ORDER + SEEN_FIELDS)
     gtins = sorted(payloads)
     considered = written = unchanged = priced = failures = 0

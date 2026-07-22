@@ -121,6 +121,12 @@ FIELDS += [
     ("custitem_feed_last_seen", "Feed Last Seen", "DATE", ""),
 ]
 
+# On-sale flag: the field updates check this when an item's current cost is a
+# vendor sale price below its regular price (SanMar dip sale, S&S sale price).
+FIELDS += [
+    ("custitem_bsg_on_sale", "On Sale", "CHECKBOX", ""),
+]
+
 
 def field_exists(client: NetSuiteClient, scriptid: str) -> bool:
     try:

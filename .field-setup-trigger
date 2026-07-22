@@ -1,3 +1,5 @@
-# All fields present (incl. Champro reference-doc links). Neutralized.
-FIELD_CREATE=false
+# Create the new custitem_bsg_on_sale checkbox field (On Sale) via the REST
+# itemcustomfield path. Idempotent -- existing fields are reported, not touched.
+# run: create-on-sale-field-2026-07-21
+FIELD_CREATE=true
 SOAP_CREATE=false
