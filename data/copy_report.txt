@@ -1,41 +1,33 @@
 queried columns: displayname, description, purchasedescription
-supplier-matched items: 14,116
-custitem_sanmar_unique_key: copy for 161,186 feed SKUs
+supplier-matched items: 29,018
+custitem_sanmar_unique_key: copy for 161,208 feed SKUs
 custitem_mtec_item_sku: copy for 103,586 feed SKUs
-S&S style titles fetched: 5,657
-custitem_ss_sku: copy for 195,499 feed SKUs
+S&S style titles fetched: 5,655
+custitem_ss_sku: copy for 195,423 feed SKUs
   sample item 132911 [custitem_mtec_item_sku]:
     salesDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
     purchaseDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
   sample item 209014 [custitem_mtec_item_sku]:
     salesDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
     purchaseDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
-  sample item 224173 [custitem_ss_sku]:
-    displayName: 'Gildan Heavy Blend Crewneck Sweatshirt.  18000' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-    salesDescription: 'Gildan Heavy Blend Crewneck Sweatshirt' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-    purchaseDescription: 'Gildan Heavy Blend Crewneck Sweatshirt' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-  sample item 224041 [custitem_ss_sku]:
-    displayName: 'Gildan Heavy Blend Crewneck Sweatshirt.  18000' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-    salesDescription: 'Gildan Heavy Blend Crewneck Sweatshirt' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-    purchaseDescription: 'Gildan Heavy Blend Crewneck Sweatshirt' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-  sample item 224042 [custitem_ss_sku]:
-    displayName: 'Gildan Heavy Blend Crewneck Sweatshirt.  18000' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-    salesDescription: 'Gildan Heavy Blend Crewneck Sweatshirt' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
-    purchaseDescription: 'Gildan Heavy Blend Crewneck Sweatshirt' -> 'Gildan Unisex Heavy Blend™ Crewneck Sweatshirt'
+  sample item 224176 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan Heavy Blend Crewneck Sweatshirt.  18000' -> 'Gildan Heavy Blend Crewneck Sweatshirt'
+  sample item 224177 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan Heavy Blend Crewneck Sweatshirt.  18000' -> 'Gildan Heavy Blend Crewneck Sweatshirt'
+  sample item 224178 [custitem_sanmar_unique_key]:
+    displayName: 'Gildan Heavy Blend Crewneck Sweatshirt.  18000' -> 'Gildan Heavy Blend Crewneck Sweatshirt'
   sample item 209073 [custitem_mtec_item_sku]:
     salesDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
     purchaseDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
-  sample item 221741 [custitem_sanmar_unique_key]:
-    displayName: 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt.  29B' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-    salesDescription: '' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-    purchaseDescription: '' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-  sample item 221740 [custitem_sanmar_unique_key]:
-    displayName: 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt.  29B' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-    salesDescription: '' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-    purchaseDescription: '' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-  sample item 221739 [custitem_sanmar_unique_key]:
-    displayName: 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt.  29B' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-    salesDescription: '' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
-    purchaseDescription: '' -> 'Jerzees - Youth Dri-Power 50/50 Cotton/Poly T-Shirt'
+  FAILED item 235105: 429 Too Many Requests :: 
+  FAILED item 235111: 429 Too Many Requests :: 
+  FAILED item 235391: 429 Too Many Requests :: 
+  FAILED item 242826: 429 Too Many Requests :: 
+  FAILED item 242707: 429 Too Many Requests :: 
+  FAILED item 242755: 429 Too Many Requests :: 
+  FAILED item 242814: 429 Too Many Requests :: 
+  FAILED item 242981: 429 Too Many Requests :: 
+  FAILED item 242976: 429 Too Many Requests :: 
+  FAILED item 243642: 429 Too Many Requests :: 
 
-description update: wrote 8417 item(s); unchanged: 5698; no feed copy: 1; failures: 0
+description update: wrote 18290 item(s); unchanged: 10702; no feed copy: 5; failures: 21
