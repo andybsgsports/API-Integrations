@@ -58,6 +58,7 @@ class StyleRecord:
     category: str  # CATEGORY_NAME
     subcategory: str  # SUBCATEGORY_NAME
     product_status: str
+    available_sizes: str = ""  # AVAILABLE_SIZES, e.g. "Women's Sizes: S-2XL"
     skus: list[SkuRecord] = field(default_factory=list)
     # color_name -> set of image URLs (front/back model + flat)
     images_by_color: dict[str, ColorImages] = field(default_factory=dict)

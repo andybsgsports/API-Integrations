@@ -121,9 +121,40 @@ def effective_cost(piece_price, sale_price, sale_start, sale_end, today: date):
     return sp, True
 
 
+def _projects(client: NetSuiteClient, col: str) -> bool:
+    try:
+        client.suiteql(f"SELECT {col} FROM item WHERE rownum <= 1")
+        return True
+    except Exception:  # noqa: BLE001 - column not queryable
+        return False
+
+
+def store_display_name(title: str, style: str) -> str:
+    """Web-store Display Name = the product title with the trailing style number
+    stripped (SanMar appends it, e.g. '...Pullover Hoodie NKFD9889')."""
+    t = (title or "").strip()
+    s = (style or "").strip()
+    if s and t.upper().endswith(s.upper()):
+        t = t[: -len(s)].rstrip(" -")
+    return t
+
+
+def store_description(available_sizes: str, description: str) -> str:
+    """Store Description = the AVAILABLE_SIZES line, a blank line, then the
+    marketing paragraph -- mirroring the sanmar.com product page. SanMar's flat
+    feed strips commas and ships the feature list as prose (not bullets); the
+    fully punctuated, bulleted copy is only available via their content web
+    service, so this is the closest the feed allows."""
+    sizes = (available_sizes or "").strip()
+    body = (description or "").strip()
+    if sizes and body:
+        return f"{sizes}\n\n{body}"
+    return body or sizes
+
+
 def build_payloads(
     styles, inventory, today: date | None = None, on_sale_field: str = ""
-) -> tuple[dict[str, dict[str, object]], dict[str, tuple]]:
+) -> tuple[dict[str, dict[str, object]], dict[str, tuple], dict[str, tuple]]:
     """GTIN -> field payload for every feed SKU carrying a barcode, plus
     GTIN -> (base price, cost, weight) for the native-field writes.
 
@@ -161,8 +192,12 @@ def build_payloads(
 
     payloads: dict[str, dict[str, object]] = {}
     natives: dict[str, tuple] = {}
+    # gtin -> (store display name, store description) from the feed.
+    store_by_gtin: dict[str, tuple] = {}
     map_seen = sku_total = on_sale_count = 0
     for style in styles:
+        disp = store_display_name(style.title, style.style)
+        sdesc = store_description(style.available_sizes, style.description)
         for sku in style.skus:
             if not sku.gtin:
                 continue
@@ -221,6 +256,7 @@ def build_payloads(
                     cost,  # effective cost: sale price while on sale, else regular
                     None if sku.piece_weight is None else float(sku.piece_weight),
                 )
+                store_by_gtin[sku.gtin] = (disp, sdesc)
     # Ground truth on whether SanMar's feed carries MAP at all: value brands
     # (e.g. Gildan) usually have no MAP, so a blank MAP field can be correct.
     print(f"SanMar MAP coverage: {map_seen}/{sku_total} feed SKUs carry a MAP "
@@ -228,7 +264,7 @@ def build_payloads(
     flag = f" (flagged via {on_sale_field})" if on_sale_field else " (On Sale field not created)"
     print(f"SanMar on sale today: {on_sale_count}/{sku_total} SKUs "
           f"-> Purchase Price = sale price{flag}")
-    return payloads, natives
+    return payloads, natives, store_by_gtin
 
 
 def _same(current: object, new: object) -> bool:
@@ -251,11 +287,18 @@ def main() -> int:
     client = NetSuiteClient(cfg.netsuite)
     # Use the On Sale checkbox only once it exists in NetSuite (self-enabling).
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
-    payloads, natives = build_payloads(styles, inventory, on_sale_field=on_sale_field)
+    payloads, natives, store_by_gtin = build_payloads(
+        styles, inventory, on_sale_field=on_sale_field
+    )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
-    cols = ", ".join(FIELD_ORDER + SEEN_FIELDS)
+    # Store Display Name + Store Description are native fields; write them only
+    # where the column is queryable so the diff works (self-enabling).
+    store_cols = [c for c in ("storedisplayname", "storedescription") if _projects(client, c)]
+    if store_cols:
+        print(f"store fields active: {store_cols}")
+    cols = ", ".join(FIELD_ORDER + SEEN_FIELDS + store_cols)
     gtins = sorted(payloads)
-    considered = written = unchanged = priced = failures = 0
+    considered = written = unchanged = priced = stored = failures = 0
     for i in range(0, len(gtins), 250):
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
@@ -281,6 +324,14 @@ def main() -> int:
                 body, row, base_by_rid, str(row["id"]),
                 price=price, cost=cost, weight=weight, same=_same,
             )
+            # Store Display Name + Store Description (native web-store fields).
+            disp, sdesc = store_by_gtin.get(gtin, ("", ""))
+            if ("storedisplayname" in store_cols and disp
+                    and not _same(row.get("storedisplayname"), disp)):
+                body["storeDisplayName"] = disp
+            if ("storedescription" in store_cols and sdesc
+                    and not _same(row.get("storedescription"), sdesc)):
+                body["storeDescription"] = sdesc
             stamp(body, row, "sanmar")
             if not body:
                 unchanged += 1
@@ -290,6 +341,8 @@ def main() -> int:
             considered += 1
             if "price" in body or "cost" in body or "weight" in body:
                 priced += 1
+            if "storeDisplayName" in body or "storeDescription" in body:
+                stored += 1
             if not allow_write:
                 written += 1
                 continue
@@ -313,7 +366,7 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
-          f"failures: {failures}")
+          f"store name/desc updated: {stored}; failures: {failures}")
     return 1 if failures else 0
 
 

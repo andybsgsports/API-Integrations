@@ -1,4 +1,8 @@
-"""Unit test for the UOM/store-description body builder (scripts/item_uom_fix)."""
+"""Unit test for the UOM body builder (scripts/item_uom_fix).
+
+Store Description is owned by the SanMar field update now, so this builder is
+UOM-only.
+"""
 
 from __future__ import annotations
 
@@ -15,25 +19,17 @@ UOM = {
 }
 
 
-def test_sets_uom_when_blank_and_store_from_sales():
-    body = build_body(
-        {"unitstype": "", "description": "Soft tee", "storedescription": ""},
-        UOM, has_uom_col=True,
-    )
-    assert body == {**UOM, "storeDescription": "Soft tee"}
+def test_sets_uom_when_blank():
+    body = build_body({"unitstype": ""}, UOM, has_uom_col=True)
+    assert body == UOM
 
 
 def test_skips_uom_when_already_set():
-    body = build_body(
-        {"unitstype": "1", "description": "Soft tee", "storedescription": "Soft tee"},
-        UOM, has_uom_col=True,
-    )
-    assert body == {}  # UOM present, store already matches -> nothing
+    body = build_body({"unitstype": "1"}, UOM, has_uom_col=True)
+    assert body == {}
 
 
-def test_store_only_when_uom_present_but_store_stale():
-    body = build_body(
-        {"unitstype": "1", "description": "New copy", "storedescription": "old"},
-        UOM, has_uom_col=True,
-    )
-    assert body == {"storeDescription": "New copy"}
+def test_sets_uom_when_column_absent():
+    # No unitstype column projects at all -> set UOM unconditionally.
+    body = build_body({}, UOM, has_uom_col=False)
+    assert body == UOM

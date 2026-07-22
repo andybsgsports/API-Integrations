@@ -1,11 +1,11 @@
-"""Fill Units of Measure, Weight Unit, and Store Description on every matrix item
-that's missing them.
+"""Fill Units of Measure + Weight Unit on every matrix item that's missing them.
 
 These were wrongly dropped from the create-import (I excluded them as "inherited"
 -- they're actually per-item settable, as item 161098 shows). Rather than guess
 the UOM record ids, this reads a REFERENCE item that already has them and copies
-its Units Type / Stock / Purchase / Sale Unit + Weight Unit down. Store
-Description is set from each item's own sales (detailed) description.
+its Units Type / Stock / Purchase / Sale Unit + Weight Unit down. (Store
+Description is owned by the SanMar field update, which builds the rich feed copy;
+it is intentionally not written here to avoid two writers on one field.)
 
 Diff-aware (writes only what's blank), id-range-chunked, dry-run by default. The
 dry run prints the reference values it would copy, so they can be eyeballed
@@ -46,18 +46,14 @@ def _projects(client: NetSuiteClient, col: str) -> bool:
 
 
 def build_body(row: dict, uom: dict, has_uom_col: bool) -> dict:
-    """Fields to set on one item: UOM (if its unitstype is blank) + Store
-    Description (= the item's own sales description, if blank/different)."""
+    """Fields to set on one item: the UOM set, when its unitstype is blank.
+
+    Store Description is now owned by the SanMar field update (it builds the
+    rich sizes-line + marketing copy from the feed), so this stays UOM-only to
+    avoid two writers disagreeing on one field."""
     body: dict = {}
     if not has_uom_col or not str(row.get("unitstype") or "").strip():
         body.update(uom)
-    # SuiteQL sales-description column is 'description' (salesdescription doesn't
-    # project). storedescription may be absent from the row -> treated as blank,
-    # so it still gets set from the item's own description.
-    sales = str(row.get("description") or "").strip()
-    store = str(row.get("storedescription") or "").strip()
-    if sales and store != sales:
-        body["storeDescription"] = sales
     return body
 
 
@@ -90,9 +86,7 @@ def main() -> int:
         print("reference item has no UOM fields set -- pick another UOM_REFERENCE_ID")
         return 1
 
-    store_ok = _projects(client, "storedescription")
-    cols = "id, description" + (", unitstype" if has_uom_col else "") \
-        + (", storedescription" if store_ok else "")
+    cols = "id" + (", unitstype" if has_uom_col else "")
 
     max_rows = client.suiteql(
         "SELECT MAX(id) AS m FROM item WHERE matrixtype IN ('PARENT', 'CHILD')"
