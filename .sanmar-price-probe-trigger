@@ -2,8 +2,8 @@
 # styles -- DM130L (the 7.20 Purchase Price question) and NKDR1499 (the Nike
 # Club Fleece hoodie, to see what the feed carries for Store Description /
 # Store Display Name).
-# run: price-desc-probe-2026-07-22b
-STYLE=DM130L
+# run: nkfd9889-desc-probe-2026-07-22c
+STYLE=NKFD9889
 COLOR=
 SIZE=
-TITLE=Club Fleece Sleeve Swoosh
+TITLE=
