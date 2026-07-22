@@ -12,6 +12,7 @@ substring match on the SDL colour name / size).
 
 from __future__ import annotations
 
+import csv
 import os
 from datetime import date
 
@@ -24,6 +25,40 @@ from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
 
 def _f(v) -> str:
     return "-" if v is None else f"{float(v):.2f}"
+
+
+def _dump_raw_headers(cfg, styles_wanted: set[str]) -> None:
+    """Print the full raw column list of the SDL and EPDD product feeds, plus one
+    raw row for a wanted style -- reveals bullet/feature/keyword columns our
+    reader (which keeps only mapped columns) would otherwise discard."""
+    for fname in (C.FILE_SDL_N, C.FILE_EPDD):
+        print(f"\n########## RAW HEADERS: {fname} ##########")
+        try:
+            path = _dl(cfg, fname)
+        except Exception as exc:  # noqa: BLE001 - feed may not be provisioned
+            print(f"  (could not download {fname}: {str(exc)[:160]})")
+            continue
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            reader = csv.DictReader(fh)
+            cols = reader.fieldnames or []
+            print(f"  {len(cols)} columns:")
+            for c_ in cols:
+                print(f"    - {c_!r}")
+            # Find the style column and print one matching row in full.
+            style_col = next(
+                (c_ for c_ in cols if "".join(ch for ch in c_.upper()
+                 if ch.isalnum()) in ("STYLE", "STYLE#", "STYLENUMBER")),
+                None,
+            )
+            if not style_col:
+                continue
+            for row in reader:
+                if (row.get(style_col) or "").strip().upper() in styles_wanted:
+                    print(f"\n  first raw row for style {row.get(style_col)!r}:")
+                    for k, v in row.items():
+                        val = (v or "")
+                        print(f"    {k!r}: {val[:300]!r}")
+                    break
 
 
 def main() -> int:
@@ -40,6 +75,9 @@ def main() -> int:
     title_filter = (os.environ.get("SANMAR_PROBE_TITLE") or "").strip().lower()
 
     cfg = get_config()
+    if (os.environ.get("SANMAR_PROBE_RAWHEADERS") or "").lower() == "true":
+        _dump_raw_headers(cfg, styles_wanted)
+        return 0
     styles = parse_styles(_dl(cfg, C.FILE_SDL_N))
     inventory = parse_inventory(_dl(cfg, C.FILE_DIP))
     dip_by_key = {rec.unique_key: rec for rec in inventory}

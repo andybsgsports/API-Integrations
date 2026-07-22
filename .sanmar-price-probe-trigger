@@ -1,9 +1,10 @@
-# Read-only: dump SanMar price fields AND the raw title/description for two
-# styles -- DM130L (the 7.20 Purchase Price question) and NKDR1499 (the Nike
-# Club Fleece hoodie, to see what the feed carries for Store Description /
-# Store Display Name).
-# run: nkfd9889-desc-probe-2026-07-22c
+# Read-only: dump the FULL raw column list of the SDL and EPDD product feeds,
+# plus one raw NKFD9889 row -- to find whether SanMar carries the marketing
+# bullet points / "sizes" line anywhere in the flat feeds (our reader only keeps
+# the columns it maps, so unmapped bullet/feature columns would be invisible).
+# run: rawheaders-probe-2026-07-22d
 STYLE=NKFD9889
 COLOR=
 SIZE=
 TITLE=
+RAWHEADERS=true
