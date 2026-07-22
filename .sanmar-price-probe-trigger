@@ -1,0 +1,6 @@
+# Read-only: dump every SanMar price field for DM130L Grey Frost, from both the
+# SDL and DIP feeds, to explain the 7.20 Purchase Price on the 2X-Large.
+# run: price-probe-dm130l-2026-07-22
+STYLE=DM130L
+COLOR=Grey Frost
+SIZE=
