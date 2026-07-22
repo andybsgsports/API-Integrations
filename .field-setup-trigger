@@ -1,5 +1,7 @@
-# Create the new custitem_bsg_on_sale checkbox field (On Sale) via the REST
-# itemcustomfield path. Idempotent -- existing fields are reported, not touched.
-# run: create-on-sale-field-2026-07-21
-FIELD_CREATE=true
-SOAP_CREATE=false
+# Create the On Sale checkbox field. REST itemcustomfield returns 404 (NetSuite
+# has no REST endpoint for field *definitions*), so create it via SuiteTalk SOAP
+# instead -- the same add path that created the other 108 custom item fields.
+# Only custitem_bsg_on_sale is missing, so SOAP creates exactly that one.
+# run: create-on-sale-field-soap-2026-07-22
+FIELD_CREATE=false
+SOAP_CREATE=true
