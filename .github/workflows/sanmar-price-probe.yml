@@ -38,6 +38,7 @@ jobs:
             echo "SANMAR_PROBE_STYLE=$(get STYLE)" >> "$GITHUB_ENV"
             echo "SANMAR_PROBE_COLOR=$(get COLOR)" >> "$GITHUB_ENV"
             echo "SANMAR_PROBE_SIZE=$(get SIZE)" >> "$GITHUB_ENV"
+            echo "SANMAR_PROBE_TITLE=$(get TITLE)" >> "$GITHUB_ENV"
           else
             echo "SANMAR_PROBE_STYLE=${{ github.event.inputs.style }}" >> "$GITHUB_ENV"
           fi

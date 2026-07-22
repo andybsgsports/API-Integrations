@@ -34,6 +34,10 @@ def main() -> int:
     }
     color_filter = (os.environ.get("SANMAR_PROBE_COLOR") or "").strip().lower()
     size_filter = (os.environ.get("SANMAR_PROBE_SIZE") or "").strip().lower()
+    # Title substring (case-insensitive) lets us find a style by name when we
+    # don't know its number. A style is probed if its number is in STYLE *or*
+    # its title contains this substring.
+    title_filter = (os.environ.get("SANMAR_PROBE_TITLE") or "").strip().lower()
 
     cfg = get_config()
     styles = parse_styles(_dl(cfg, C.FILE_SDL_N))
@@ -57,8 +61,17 @@ def main() -> int:
 
     matched = 0
     for style in styles:
-        if style.style.upper() not in styles_wanted:
+        by_style = style.style.upper() in styles_wanted
+        by_title = bool(title_filter) and title_filter in (style.title or "").lower()
+        if not (by_style or by_title):
             continue
+        # Dump the raw title + description so we can see exactly what the feed
+        # carries for Store Display Name / Store Description (repr reveals
+        # newlines and bullet characters).
+        print(f"\n=== {style.style}  TITLE / DESCRIPTION (raw from SDL) ===")
+        print(f"TITLE      : {style.title!r}")
+        print(f"DESCRIPTION: {style.description!r}")
+        print(f"DESCRIPTION (rendered):\n{style.description}\n")
         for sku in style.skus:
             if color_filter and color_filter not in (sku.color_name or "").lower():
                 continue
