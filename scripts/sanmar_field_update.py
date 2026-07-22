@@ -12,6 +12,7 @@ runs are small. Honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
 from __future__ import annotations
 
 import os
+from datetime import date, datetime
 from pathlib import Path
 
 from native_pricing import add_native_diffs, read_base_prices
@@ -71,8 +72,47 @@ def _make_put(entry: dict[str, object]):
     return put
 
 
+# Optional checkbox field flagged when an item is currently on sale. Left blank
+# until the field exists in NetSuite (set SANMAR_ON_SALE_FIELD to its script id,
+# e.g. custitem_bsg_on_sale); the sale-aware Purchase Price below needs no field.
+ON_SALE_FIELD = os.environ.get("SANMAR_ON_SALE_FIELD", "").strip()
+
+
+def _parse_sale_date(s: object) -> date | None:
+    text = str(s or "").strip()
+    if not text:
+        return None
+    text = text.split()[0].split("T")[0]  # drop any time component
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def effective_cost(piece_price, sale_price, sale_start, sale_end, today: date):
+    """Return ``(cost, on_sale)``.
+
+    ``cost`` is the active sale price when a genuine, in-window sale is running
+    (sale price > 0 and below the regular piece price, and today within any
+    start/end dates), else the regular piece price. Evaluated every run, so cost
+    reverts automatically when the sale ends.
+    """
+    reg = None if piece_price is None else float(piece_price)
+    if sale_price is None or reg is None:
+        return reg, False
+    sp = float(sale_price)
+    if sp <= 0 or sp >= reg:  # not a genuine discount
+        return reg, False
+    start, end = _parse_sale_date(sale_start), _parse_sale_date(sale_end)
+    if (start and today < start) or (end and today > end):
+        return reg, False  # sale not active today
+    return sp, True
+
+
 def build_payloads(
-    styles, inventory
+    styles, inventory, today: date | None = None
 ) -> tuple[dict[str, dict[str, object]], dict[str, tuple]]:
     """GTIN -> field payload for every feed SKU carrying a barcode, plus
     GTIN -> (base price, cost, weight) for the native-field writes.
@@ -80,11 +120,15 @@ def build_payloads(
     Values are typed (numbers as numbers) and empty values are omitted —
     NetSuite 400s on an empty string in a numeric/currency field.
     """
+    today = today or date.today()
     total_by_key: dict[str, int] = {}
     qtys_by_key: dict[str, dict[str, int]] = {}
+    # unique_key -> (each_sale_price, sale_start, sale_end) from the dip feed.
+    sale_by_key: dict[str, tuple] = {}
     unknown_whse: set[str] = set()
     for rec in inventory:
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
+        sale_by_key[rec.unique_key] = (rec.each_sale_price, rec.sale_start, rec.sale_end)
         if rec.warehouses:
             # Zero-fill every column so a warehouse that drops out of the
             # feed clears to 0 instead of keeping yesterday's count.
@@ -105,7 +149,7 @@ def build_payloads(
 
     payloads: dict[str, dict[str, object]] = {}
     natives: dict[str, tuple] = {}
-    map_seen = sku_total = 0
+    map_seen = sku_total = on_sale_count = 0
     for style in styles:
         for sku in style.skus:
             if not sku.gtin:
@@ -115,6 +159,16 @@ def build_payloads(
                 map_seen += 1
             entry: dict[str, object] = {}
             put = _make_put(entry)
+            # Purchase Price tracks the active sale price when SanMar has one
+            # running; reverts to the regular piece price when it ends.
+            sale_price, sale_start, sale_end = sale_by_key.get(sku.unique_key, (None, "", ""))
+            cost, on_sale = effective_cost(
+                sku.piece_price, sale_price, sale_start, sale_end, today
+            )
+            if on_sale:
+                on_sale_count += 1
+            if ON_SALE_FIELD:
+                put(ON_SALE_FIELD, on_sale)
             qty = total_by_key.get(sku.unique_key, sku.available_qty)
             put("custitem_sanmar_unique_key", sku.unique_key)
             put("custitem_sanmar_inventory_key", sku.inventory_key)
@@ -143,13 +197,16 @@ def build_payloads(
                 payloads[sku.gtin] = entry
                 natives[sku.gtin] = (
                     None if sku.msrp is None else float(sku.msrp),
-                    None if sku.piece_price is None else float(sku.piece_price),
+                    cost,  # effective cost: sale price while on sale, else regular
                     None if sku.piece_weight is None else float(sku.piece_weight),
                 )
     # Ground truth on whether SanMar's feed carries MAP at all: value brands
     # (e.g. Gildan) usually have no MAP, so a blank MAP field can be correct.
     print(f"SanMar MAP coverage: {map_seen}/{sku_total} feed SKUs carry a MAP "
           f"price (blank MAP on a no-MAP brand like Gildan is expected)")
+    flag = f" (flagged via {ON_SALE_FIELD})" if ON_SALE_FIELD else " (On Sale field not configured)"
+    print(f"SanMar on sale today: {on_sale_count}/{sku_total} SKUs "
+          f"-> Purchase Price = sale price{flag}")
     return payloads, natives
 
 

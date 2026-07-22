@@ -1,6 +1,6 @@
 # DIAGNOSTIC dry run: re-run the nightly Field Update read-only to see whether
 # the 18:07 failure (#43) was transient contention from today's heavy catalog
 # writes, or a real error the new items surfaced. Dry = reads only, no writes.
-# run: field-update-diagnostic-dryrun-2026-07-21
+# run: field-update-sale-pricing-dryrun-2026-07-21
 DRY_RUN=true
 MAX_ITEMS=0
