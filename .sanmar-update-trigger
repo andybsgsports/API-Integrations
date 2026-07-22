@@ -1,6 +1,8 @@
-# DIAGNOSTIC dry run: re-run the nightly Field Update read-only to see whether
-# the 18:07 failure (#43) was transient contention from today's heavy catalog
-# writes, or a real error the new items surfaced. Dry = reads only, no writes.
-# run: field-update-sale-pricing-dryrun-2026-07-21
+# DRY run of the new CASE-price cost basis. Reads only -- shows how many items'
+# Purchase Price would change now that cost = case price (sanmar.com "Original
+# Price") instead of the single-piece price, plus the on-sale count under the
+# case-level sale price. Review the "price/cost/weight updated" count, then flip
+# DRY_RUN=false to apply (or let the 10:00 UTC nightly run it live).
+# run: field-update-case-cost-dryrun-2026-07-22
 DRY_RUN=true
 MAX_ITEMS=0
