@@ -1,29 +1,31 @@
 queried columns: displayname, description, purchasedescription
-supplier-matched items: 5,739
-custitem_sanmar_unique_key: copy for 161,013 feed SKUs
-custitem_mtec_item_sku: copy for 103,587 feed SKUs
+supplier-matched items: 29,034
+custitem_sanmar_unique_key: copy for 161,208 feed SKUs
+custitem_mtec_item_sku: copy for 103,586 feed SKUs
 S&S style titles fetched: 5,655
-custitem_ss_sku: copy for 195,422 feed SKUs
-  sample item 132911 [custitem_mtec_item_sku]:
-    salesDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
-    purchaseDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
-  sample item 209014 [custitem_mtec_item_sku]:
-    salesDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
-    purchaseDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
-  sample item 209073 [custitem_mtec_item_sku]:
-    salesDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
-    purchaseDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
-  sample item 199482 [custitem_sanmar_unique_key]:
-    displayName: 'DISCONTINUED Nike Dri-FIT Micro Pique Polo' -> 'Nike Dri-FIT Micro Pique Polo'
-    salesDescription: 'Nike Dri Fit Golf Polo' -> 'Nike Dri-FIT Micro Pique Polo'
-    purchaseDescription: 'Nike Dri Fit Golf Polo' -> 'Nike Dri-FIT Micro Pique Polo'
-  sample item 199901 [custitem_sanmar_unique_key]:
-    displayName: 'Gildan® Heavy Cotton\x99 Toddler T-Shirt' -> 'Gildan Heavy Cotton Toddler T-Shirt'
-    salesDescription: 'Toddler Heavy Cotton T-Shirt' -> 'Gildan Heavy Cotton Toddler T-Shirt'
-    purchaseDescription: 'Toddler Heavy Cotton T-Shirt' -> 'Gildan Heavy Cotton Toddler T-Shirt'
-  sample item 25219 [custitem_sanmar_unique_key]:
-    displayName: 'Jerzees Youth NuBlend Crewneck Sweatshirt' -> 'Jerzees - Youth NuBlend Crewneck Sweatshirt'
-    salesDescription: 'Youth Nublend Crew Sweatshirt' -> 'Jerzees - Youth NuBlend Crewneck Sweatshirt'
-    purchaseDescription: 'Youth Nublend Crew Sweatshirt' -> 'Jerzees - Youth NuBlend Crewneck Sweatshirt'
+custitem_ss_sku: copy for 195,423 feed SKUs
+  sample item 244489 [custitem_sanmar_unique_key]:
+    displayName: 'OGIO - Transfer Duffel. 108084' -> 'OGIO - Transfer Duffel'
+    salesDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
+    purchaseDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
+  sample item 244490 [custitem_sanmar_unique_key]:
+    displayName: 'OGIO - Transfer Duffel. 108084' -> 'OGIO - Transfer Duffel'
+    salesDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
+    purchaseDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
+  sample item 244491 [custitem_sanmar_unique_key]:
+    displayName: 'OGIO - Transfer Duffel. 108084' -> 'OGIO - Transfer Duffel'
+    salesDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
+    purchaseDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
+  sample item 102058 [custitem_mtec_item_sku]:
+    displayName: 'Knicker Crush  Baseball Pant' -> 'Crush Baseball Knicker'
+    salesDescription: 'Knicker Crush  Baseball Pant' -> 'Crush Baseball Knicker'
+    purchaseDescription: 'Knicker Crush  Baseball Pant' -> 'Crush Baseball Knicker'
+  sample item 129373 [custitem_mtec_item_sku]:
+    displayName: 'All Day Tri Blend Tee' -> 'All-Day Core Basic Tri-Blend Tee'
+    salesDescription: 'All Day Tri Blend Tee' -> 'All-Day Core Basic Tri-Blend Tee'
+    purchaseDescription: 'All Day Tri Blend Tee' -> 'All-Day Core Basic Tri-Blend Tee'
+  sample item 194770 [custitem_mtec_item_sku]:
+    salesDescription: 'Russell Integrated 7-Piece Pad Football Pant' -> 'Integrated 7-Piece Pad Football Pant'
+    purchaseDescription: 'Russell Integrated 7-Piece Pad Football Pant' -> 'Integrated 7-Piece Pad Football Pant'
 
-description update: wrote 56 item(s); unchanged: 5683; no feed copy: 0; failures: 0
+description update: WOULD write (dry run) 14135 item(s); unchanged: 14894; no feed copy: 5; failures: 0
