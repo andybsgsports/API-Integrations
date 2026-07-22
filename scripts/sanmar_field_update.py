@@ -17,6 +17,7 @@ import re
 from datetime import date, datetime
 from pathlib import Path
 
+from concurrent_writes import write_records
 from native_pricing import add_native_diffs, read_base_prices
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
@@ -318,6 +319,13 @@ def main() -> int:
     cols = ", ".join(FIELD_ORDER + SEEN_FIELDS + store_cols)
     gtins = sorted(payloads)
     considered = written = unchanged = priced = stored = failures = 0
+    _fail_shown = [0]
+
+    def _on_err(rid: str, exc: Exception) -> None:
+        _fail_shown[0] += 1
+        if _fail_shown[0] <= 10:
+            print(f"  FAILED item {rid}: {str(exc)[:150]}")
+
     for i in range(0, len(gtins), 250):
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
@@ -327,6 +335,7 @@ def main() -> int:
         )
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
         base_by_rid = read_base_prices(client, id_list)
+        write_jobs: list[tuple[str, dict]] = []
         for row in rows:
             gtin = str(row.get("upccode") or "")
             want = payloads.get(gtin)
@@ -369,13 +378,13 @@ def main() -> int:
             if not allow_write:
                 written += 1
                 continue
-            try:
-                client.update_record("inventoryItem", str(row["id"]), body)
-                written += 1
-            except Exception as exc:  # noqa: BLE001
-                failures += 1
-                if failures <= 10:
-                    print(f"  FAILED item {row['id']}: {str(exc)[:150]}")
+            write_jobs.append((str(row["id"]), body))
+
+        # Write this chunk's records with bounded concurrency -- individual
+        # sequential PATCHes are throttle-bound and can run for hours.
+        w, f = write_records(client, "inventoryItem", write_jobs, on_error=_on_err)
+        written += w
+        failures += f
 
     if CAP_STATS["locations"]:
         print(

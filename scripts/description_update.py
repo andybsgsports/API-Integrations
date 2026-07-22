@@ -25,6 +25,8 @@ import re
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from concurrent_writes import write_records
+
 from momentec_netsuite.config import get_config as mtec_config
 from momentec_netsuite.feeds import parse_product_data
 from sanmar_netsuite.config import get_config as ns_config
@@ -185,6 +187,7 @@ def main() -> int:
 
     considered = written = unchanged = nocopy = failures = 0
     samples: dict[str, int] = {}
+    write_jobs: list[tuple[str, dict]] = []
     for row in items:
         rid = str(row["id"])
         want = None
@@ -222,14 +225,22 @@ def main() -> int:
         if not allow_write:
             written += 1
             continue
-        try:
-            client.update_record("inventoryItem", rid, body)
-            written += 1
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            if failures <= 10:
-                detail = getattr(exc, "payload", "")
-                print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
+        write_jobs.append((rid, body))
+
+    # Write with bounded concurrency -- sequential PATCHes over ~14k items are
+    # throttle-bound and can run for hours; parallel (within the account's
+    # concurrency budget, with 429 backoff) finishes far faster.
+    _fail_shown = [0]
+
+    def _on_err(rid: str, exc: Exception) -> None:
+        _fail_shown[0] += 1
+        if _fail_shown[0] <= 10:
+            detail = getattr(exc, "payload", "")
+            print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
+
+    w, f = write_records(client, "inventoryItem", write_jobs, on_error=_on_err)
+    written += w
+    failures += f
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\ndescription update: {verb} {written} item(s); unchanged: {unchanged}; "
