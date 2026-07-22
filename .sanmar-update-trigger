@@ -3,6 +3,9 @@
 # Price") instead of the single-piece price, plus the on-sale count under the
 # case-level sale price. Review the "price/cost/weight updated" count, then flip
 # DRY_RUN=false to apply (or let the 10:00 UTC nightly run it live).
-# run: field-update-case-cost-dryrun-2026-07-22
+# Now also covers the new Store Display Name (SanMar title minus style#) and
+# Store Description (AVAILABLE_SIZES line + marketing paragraph from the feed).
+# Watch "store name/desc updated: N" alongside the case-price cost impact.
+# run: field-update-case-cost-store-dryrun-2026-07-22
 DRY_RUN=true
 MAX_ITEMS=0
