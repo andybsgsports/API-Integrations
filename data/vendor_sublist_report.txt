@@ -1,8 +1,8 @@
-supplier-matched items: 21,221
-  plan item 161864: preferred=512, lines=[('370', False), ('510', False), ('512', True)]
-  plan item 161839: preferred=512, lines=[('370', False), ('510', False), ('512', True)]
-  plan item 161827: preferred=512, lines=[('510', False), ('370', False), ('512', True)]
-  plan item 161835: preferred=512, lines=[('370', False), ('510', False), ('512', True)]
-  plan item 161790: preferred=512, lines=[('510', False), ('370', False), ('512', True)]
+supplier-matched items: 45,839
+  plan item 203360: preferred=510, lines=[('504', False), ('510', True)]
+  plan item 244489: preferred=512, lines=[('512', True)]
+  plan item 244490: preferred=512, lines=[('512', True)]
+  plan item 244491: preferred=512, lines=[('512', True)]
+  plan item 244494: preferred=512, lines=[('512', True)]
 
-vendor sublist: wrote 681 item(s); unchanged: 20540; failures: 0
+vendor sublist: WOULD write (dry run) 25 item(s); unchanged: 4903; failures: 0
