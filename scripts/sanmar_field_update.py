@@ -18,7 +18,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from concurrent_writes import write_records
-from native_pricing import add_native_diffs, read_base_prices
+from native_pricing import add_native_diffs, read_base_prices, weight_display
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -268,10 +268,13 @@ def build_payloads(
             put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry
+                weight_lb = None if sku.piece_weight is None else float(sku.piece_weight)
+                disp_weight, weight_unit = weight_display(weight_lb)
                 natives[sku.gtin] = (
                     None if sku.msrp is None else float(sku.msrp),
                     cost,  # effective cost: sale price while on sale, else regular
-                    None if sku.piece_weight is None else float(sku.piece_weight),
+                    disp_weight,
+                    weight_unit,
                 )
                 store_by_gtin[sku.gtin] = (disp, sdesc)
     # Ground truth on whether SanMar's feed carries MAP at all: value brands
@@ -333,8 +336,8 @@ def main() -> int:
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         try:
             rows = client.suiteql(
-                f"SELECT id, upccode, cost, weight, manufacturer, custitem_ss_brand, {cols} "
-                f"FROM item WHERE upccode IN ({in_list})"
+                f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
+                f"custitem_ss_brand, {cols} FROM item WHERE upccode IN ({in_list})"
             )
         except Exception as exc:  # noqa: BLE001 - sustained throttling shouldn't crash
             # the whole run and discard every chunk already written; skip this
@@ -356,10 +359,10 @@ def main() -> int:
             # S&S brand wins the Manufacturer field on multi-vendor items.
             if "manufacturer" in body and str(row.get("custitem_ss_brand") or "").strip():
                 del body["manufacturer"]
-            price, cost, weight = natives.get(gtin, (None, None, None))
+            price, cost, weight, weight_unit = natives.get(gtin, (None, None, None, None))
             add_native_diffs(
                 body, row, base_by_rid, str(row["id"]),
-                price=price, cost=cost, weight=weight, same=_same,
+                price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
             )
             # Store Display Name + Store/Stock Description (native web-store
             # fields). Store and Stock Description carry the same marketing copy.
@@ -380,7 +383,7 @@ def main() -> int:
             if max_items and considered >= max_items:
                 continue
             considered += 1
-            if "price" in body or "cost" in body or "weight" in body:
+            if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
             if any(k in body for k in ("storeDisplayName", "storeDescription", "stockDescription")):
                 stored += 1

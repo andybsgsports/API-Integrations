@@ -24,7 +24,7 @@ import os
 import time
 from pathlib import Path
 
-from native_pricing import add_native_diffs, read_base_prices
+from native_pricing import add_native_diffs, read_base_prices, weight_display
 from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -191,10 +191,13 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
 
 
 def natives_for(p: dict) -> tuple:
-    """(base price, cost, weight, on_sale) for the native-field writes.
+    """(base price, cost, weight, weight_unit, on_sale) for the native-field
+    writes.
 
     Cost follows the S&S sale price while a promotion is live, otherwise our
-    customer (program) price, otherwise the piece price.
+    customer (program) price, otherwise the piece price. S&S reports weight
+    in pounds (see docs/SS_ACTIVEWEAR.md); weight_display picks the more
+    natural display unit (ounces under 1 lb) and converts the number to match.
     """
     def num(key):
         v = p.get(key)
@@ -206,7 +209,8 @@ def natives_for(p: dict) -> tuple:
     if regular is None:
         regular = num("piece_price")
     cost, on_sale = effective_cost(regular, num("sale_price"))
-    return (num("msrp"), cost, num("weight"), on_sale)
+    disp_weight, weight_unit = weight_display(num("weight"))
+    return (num("msrp"), cost, disp_weight, weight_unit, on_sale)
 
 
 def fetch_warehouses(skus: list[str]) -> dict[str, list[dict]]:
@@ -340,7 +344,7 @@ def main() -> int:
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         base_by_rid = read_base_prices(client, in_list)
         for row in client.suiteql(
-            f"SELECT id, upccode, cost, weight, manufacturer, {cols} "
+            f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
             f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
@@ -348,7 +352,7 @@ def main() -> int:
             if p is None:
                 continue
             want = payload_for(p, whse_by_sku.get(str(p.get("sku") or "")))
-            price, cost, weight, on_sale = natives_for(p)
+            price, cost, weight, weight_unit, on_sale = natives_for(p)
             if on_sale:
                 on_sale_count += 1
             if on_sale_field:
@@ -367,7 +371,7 @@ def main() -> int:
                 body["upcCode"] = gtin
             add_native_diffs(
                 body, row, base_by_rid, rid,
-                price=price, cost=cost, weight=weight, same=_same,
+                price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
             )
             stamp(body, row, "ss")
             if not body:
@@ -378,7 +382,7 @@ def main() -> int:
             considered += 1
             if "upcCode" in body:
                 upc_filled += 1
-            if "price" in body or "cost" in body or "weight" in body:
+            if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
             if not allow_write:
                 written += 1

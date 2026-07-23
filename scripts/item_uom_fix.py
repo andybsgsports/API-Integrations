@@ -1,11 +1,13 @@
-"""Fill Units of Measure + Weight Unit on every matrix item that's missing them.
+"""Fill Units Type / Stock / Purchase / Sale Unit on every matrix item that's
+missing them.
 
 These were wrongly dropped from the create-import (I excluded them as "inherited"
 -- they're actually per-item settable, as item 161098 shows). Rather than guess
 the UOM record ids, this reads a REFERENCE item that already has them and copies
-its Units Type / Stock / Purchase / Sale Unit + Weight Unit down. (Store
-Description is owned by the SanMar field update, which builds the rich feed copy;
-it is intentionally not written here to avoid two writers on one field.)
+them down. (Store Description is owned by the SanMar field update, which builds
+the rich feed copy; Weight Unit is owned by the field update / S&S backfill,
+which pick oz vs lb per item from its own weight and keep the paired weight
+NUMBER in sync -- neither is written here, to avoid two writers on one field.)
 
 Diff-aware (writes only what's blank), id-range-chunked, dry-run by default. The
 dry run prints the reference values it would copy, so they can be eyeballed
@@ -20,13 +22,15 @@ import os
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
-# REST field -> its SuiteQL column, for the "is it blank?" scan.
+# REST field -> its SuiteQL column, for the "is it blank?" scan. Weight Unit is
+# intentionally absent -- it's per-item (oz vs lb based on the item's own
+# weight), owned by the field update / S&S backfill alongside the weight
+# number itself, not blanket-copied from a reference item.
 UOM_FIELDS = {
     "unitsType": "unitstype",
     "stockUnit": "stockunit",
     "purchaseUnit": "purchaseunit",
     "saleUnit": "saleunit",
-    "weightUnit": "weightunit",
 }
 
 

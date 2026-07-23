@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from description_update import _copy, _polish_name  # noqa: E402
-from native_pricing import add_native_diffs, base_price_body  # noqa: E402
+from native_pricing import add_native_diffs, base_price_body, weight_display  # noqa: E402
 from parent_sync import _mode  # noqa: E402
 from ss_backfill import _abs_url, natives_for  # noqa: E402
 
@@ -80,13 +80,14 @@ class TestSsHelpers:
         assert _abs_url(None) is None
 
     def test_natives_prefers_customer_price(self):
-        # no sale price -> cost is the customer price; on_sale False
+        # no sale price -> cost is the customer price; on_sale False.
+        # weight 0.4 lb is under the oz threshold -> converted to 6.4 oz.
         assert natives_for(
             {"msrp": "28", "customer_price": "11.5", "piece_price": "12", "weight": "0.4"}
-        ) == (28.0, 11.5, 0.4, False)
+        ) == (28.0, 11.5, 6.4, "oz", False)
 
     def test_natives_falls_back_to_piece_price(self):
-        assert natives_for({"piece_price": "12"}) == (None, 12.0, None, False)
+        assert natives_for({"piece_price": "12"}) == (None, 12.0, None, None, False)
 
 
 class TestNativeDiffs:
@@ -127,6 +128,46 @@ class TestNativeDiffs:
             price=None, cost=None, weight=None, same=_same,
         )
         assert body == {}
+
+    def test_weight_unit_written_when_it_differs(self):
+        body: dict = {}
+        add_native_diffs(
+            body, {"cost": "11.2", "weight": "0.5", "weightunit": "lb"}, {}, "1",
+            price=None, cost=11.2, weight=0.5, weight_unit="oz", same=_same,
+        )
+        assert body == {"weightUnit": "oz"}  # weight itself unchanged (0.5 == 0.5)
+
+    def test_weight_unit_unchanged_writes_nothing(self):
+        body: dict = {}
+        add_native_diffs(
+            body, {"cost": "11.2", "weight": "0.5", "weightunit": "lb"}, {}, "1",
+            price=None, cost=11.2, weight=0.5, weight_unit="lb", same=_same,
+        )
+        assert body == {}
+
+    def test_weight_and_unit_written_together(self):
+        # A light item switching from lb to oz: both the converted number and
+        # the new unit land in the same body.
+        body: dict = {}
+        add_native_diffs(
+            body, {"cost": None, "weight": "0.3", "weightunit": "lb"}, {}, "1",
+            price=None, cost=None, weight=4.8, weight_unit="oz", same=_same,
+        )
+        assert body == {"weight": 4.8, "weightUnit": "oz"}
+
+
+class TestWeightDisplay:
+    def test_light_item_converts_to_ounces(self):
+        assert weight_display(0.3) == (4.8, "oz")
+
+    def test_heavy_item_stays_pounds(self):
+        assert weight_display(1.15) == (1.15, "lb")
+
+    def test_exactly_at_threshold_is_pounds(self):
+        assert weight_display(1.0) == (1.0, "lb")
+
+    def test_none_returns_none_none(self):
+        assert weight_display(None) == (None, None)
 
 
 class TestPerWarehouseFields:

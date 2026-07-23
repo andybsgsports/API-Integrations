@@ -101,9 +101,57 @@ CSV_COLUMNS = [
 ]
 
 
+# Garment-type keyword -> Class, in priority order (checked first to last).
+# SanMar's CATEGORY_NAME is a semicolon-delimited list mixing garment type
+# with audience/segment tags, e.g. "T-Shirts ;Tall;Activewear" -- an exact
+# match against CATEGORY_TO_CLASS only ever hit ~54% of SKUs (single-tag
+# categories); everything else landed with a blank Class. Matching by
+# keyword against each tag catches the garment-type tag regardless of what
+# audience tags ride along with it, or what order they're in.
+#
+# Only class VALUES already proven in production are used here (i.e. every
+# entry maps to something CATEGORY_TO_CLASS already wrote successfully for a
+# real single-tag category). "pant"/"short" are kept for forward-compat but
+# have zero real hits in the current feed (SanMar's generic "Bottoms" tag
+# never distinguishes pants from shorts) -- confirm before relying on them.
+_KEYWORD_CLASS: list[tuple[str, str]] = [
+    ("cap", "Uniforms : Headwear"),
+    ("headwear", "Uniforms : Headwear"),
+    ("bag", "Bags"),
+    ("sweatshirt", "Tops : Sweatshirts"),
+    ("fleece", "Tops : Sweatshirts"),
+    ("polo", "Tops : Polos"),
+    ("knit", "Tops : Polos"),
+    ("outerwear", "Outerwear : Jackets"),
+    ("t-shirt", "Tops : Tees"),
+    ("tee shirt", "Tops : Tees"),
+    ("woven shirt", "Tops"),
+    ("activewear", "Tops"),
+    ("pant", "Bottoms : Pants"),  # unverified -- not observed in the feed yet
+    ("short", "Bottoms : Shorts"),  # unverified -- not observed in the feed yet
+]
+
+
 def class_for_category(category: str) -> str:
-    """Map a SanMar category to a NetSuite Class path, or '' if unmapped."""
-    return CATEGORY_TO_CLASS.get((category or "").strip().lower(), "")
+    """Map a SanMar category to a NetSuite Class path, or '' if unmapped.
+
+    Splits on ";" (SanMar packs multiple tags into one CATEGORY_NAME field)
+    and checks _KEYWORD_CLASS in priority order across ALL tags -- so a
+    specific garment-type tag (e.g. "T-Shirts") wins over a generic one
+    (e.g. "Activewear") regardless of which comes first in the raw string.
+    Every entry in the old exact-match CATEGORY_TO_CLASS table is reproduced
+    by a keyword here (see its values), so checking tag order first would
+    silently let a lower-priority tag that happens to be an exact key (like
+    a bare "activewear" listed before "t-shirts") win -- that was the bug
+    this replaced. Categories made up entirely of non-garment tags
+    (Workwear, Personal Protection, Accessories, Infant & Toddler, or a bare
+    audience tag like "Women's") are left unmapped rather than guessed.
+    """
+    tags = [t.strip().lower() for t in (category or "").split(";") if t.strip()]
+    for keyword, cls in _KEYWORD_CLASS:
+        if any(keyword in tag for tag in tags):
+            return cls
+    return ""
 
 
 def _child_item_name(style: str, color: str, size: str) -> str:

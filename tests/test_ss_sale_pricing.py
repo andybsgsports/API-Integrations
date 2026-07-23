@@ -38,23 +38,24 @@ def test_no_regular_uses_sale_without_flag():
 
 
 def test_natives_prefers_customer_price_as_regular():
-    # customer (program) price is our regular cost; sale below it -> on sale
+    # customer (program) price is our regular cost; sale below it -> on sale.
+    # weight 0.5 lb is under the oz threshold -> converted to 8.0 oz.
     p = {"msrp": "9.00", "customer_price": "6.50", "piece_price": "7.75",
          "sale_price": "4.99", "weight": "0.5"}
-    base, cost, weight, on_sale = natives_for(p)
-    assert (base, cost, weight, on_sale) == (9.0, 4.99, 0.5, True)
+    base, cost, weight, weight_unit, on_sale = natives_for(p)
+    assert (base, cost, weight, weight_unit, on_sale) == (9.0, 4.99, 8.0, "oz", True)
 
 
 def test_natives_falls_back_to_piece_price():
     # no customer price -> piece price is the regular; no sale -> cost = piece
     p = {"msrp": "9.00", "piece_price": "7.75", "weight": "0.5"}
-    base, cost, weight, on_sale = natives_for(p)
-    assert (base, cost, weight, on_sale) == (9.0, 7.75, 0.5, False)
+    base, cost, weight, weight_unit, on_sale = natives_for(p)
+    assert (base, cost, weight, weight_unit, on_sale) == (9.0, 7.75, 8.0, "oz", False)
 
 
 def test_natives_sale_between_customer_and_piece_not_flagged():
     # sale (7.00) is below list piece (7.75) but ABOVE our customer price (6.50):
     # not a discount to us, so cost stays at customer price and on_sale is False
     p = {"customer_price": "6.50", "piece_price": "7.75", "sale_price": "7.00"}
-    _base, cost, _weight, on_sale = natives_for(p)
+    _base, cost, _weight, _weight_unit, on_sale = natives_for(p)
     assert (cost, on_sale) == (6.50, False)

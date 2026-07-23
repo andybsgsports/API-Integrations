@@ -1,7 +1,8 @@
 """Unit test for the UOM body builder (scripts/item_uom_fix).
 
-Store Description is owned by the SanMar field update now, so this builder is
-UOM-only.
+Store Description is owned by the SanMar field update now, and Weight Unit by
+the field update / S&S backfill (per-item oz vs lb, paired with the weight
+number), so this builder covers Units Type / Stock / Purchase / Sale Unit only.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from item_uom_fix import build_body  # noqa: E402
 
 UOM = {
     "unitsType": {"id": "1"}, "stockUnit": {"id": "2"},
-    "purchaseUnit": {"id": "2"}, "saleUnit": {"id": "2"}, "weightUnit": "lb",
+    "purchaseUnit": {"id": "2"}, "saleUnit": {"id": "2"},
 }
 
 
