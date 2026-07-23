@@ -67,3 +67,85 @@ def test_call_restlet_requires_script_and_deploy_ids():
     client = NetSuiteClient(_sandbox_config())
     with pytest.raises(RuntimeError, match="script/deploy ids"):
         client.call_restlet("", "", {"items": []})
+
+
+class _StatusResp:
+    reason = "Bad Request"
+    content = b"{}"
+
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = "err"
+
+    def json(self):
+        return self._payload
+
+
+def test_suiteql_retries_transient_400(monkeypatch):
+    """A transient SuiteQL 400 is retried and then succeeds (read-only, safe)."""
+    client = NetSuiteClient(_sandbox_config())
+    calls = {"n": 0}
+
+    def fake_request(method, url, *, json_body=None, headers=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _StatusResp(400, {"title": "Bad Request"})
+        return _StatusResp(200, {"items": [{"id": 1}], "hasMore": False})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr("sanmar_netsuite.netsuite.client.time.sleep", lambda *_: None)
+
+    assert client.suiteql("SELECT id FROM item") == [{"id": 1}]
+    assert calls["n"] == 2  # one retry
+
+
+def test_request_builds_a_fresh_auth_object_each_call(monkeypatch):
+    """Regression test: NetSuiteClient must not reuse one OAuth1 signer across
+    requests. requests_oauthlib/oauthlib's Client stores the nonce/timestamp it
+    generates as instance state during signing, so sharing one OAuth1 object
+    across concurrent requests is a data race -- two threads can interleave
+    inside sign() and end up with the same nonce/timestamp, which NetSuite
+    rejects (seen as a near-total 400 failure rate once writes were run
+    concurrently against a single shared auth instance). Each call must get its
+    own OAuth1 instance."""
+    client = NetSuiteClient(_sandbox_config())
+    captured_auths = []
+
+    class _Resp:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {}
+
+    def fake_session_request(method, url, *, auth, json, headers, timeout):
+        captured_auths.append(auth)
+        return _Resp()
+
+    monkeypatch.setattr(client._session, "request", fake_session_request)
+
+    client._request("GET", "https://example.invalid/x")
+    client._request("GET", "https://example.invalid/x")
+
+    assert len(captured_auths) == 2
+    assert captured_auths[0] is not captured_auths[1]
+
+
+def test_suiteql_gives_up_after_attempts(monkeypatch):
+    """A persistent 400 still raises (after the bounded retries)."""
+    from sanmar_netsuite.netsuite.client import NetSuiteError
+
+    client = NetSuiteClient(_sandbox_config())
+    calls = {"n": 0}
+
+    def fake_request(method, url, *, json_body=None, headers=None):
+        calls["n"] += 1
+        return _StatusResp(400, {"title": "Bad Request"})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr("sanmar_netsuite.netsuite.client.time.sleep", lambda *_: None)
+
+    with pytest.raises(NetSuiteError):
+        client.suiteql("SELECT id FROM item")
+    assert calls["n"] == 3  # bounded attempts, no infinite retry

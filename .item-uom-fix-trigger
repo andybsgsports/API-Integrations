@@ -1,0 +1,10 @@
+# LIVE: fill Units of Measure (Units Type + Stock/Purchase/Sale Unit), Weight
+# Unit, and Store Description on every matrix item still missing them. The dry
+# run confirmed the reference UOM (item 161098) resolves cleanly and only ~50
+# items remain (the 42k matrix children already inherited UOM at import), 0
+# failures. Uncapped so it clears them all. Store Description = each item's own
+# detailed description. Sandbox-gated.
+# run: uom-fix-live-2026-07-22
+DRY_RUN=false
+MAX_ITEMS=0
+UOM_REFERENCE_ID=161098

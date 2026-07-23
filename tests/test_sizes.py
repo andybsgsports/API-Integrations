@@ -34,6 +34,15 @@ from sanmar_netsuite.transform.sizes import normalize_size
         # One-size variants
         ("OSFA", "One Size"),
         ("OS", "One Size"),
+        # Combined sizes spell out each side (BSG spells sizes out).
+        ("S/M", "Small/Medium"),
+        ("M/L", "Medium/Large"),
+        ("L/XL", "Large/X-Large"),
+        # Infant / toddler sizes.
+        ("NB", "Newborn"),
+        ("06M", "0-6 Months"),
+        ("24M", "24 Months"),
+        ("6T", "6T"),
     ],
 )
 def test_known_sizes_are_spelled_out(raw, expected):

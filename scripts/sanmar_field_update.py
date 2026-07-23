@@ -11,10 +11,14 @@ runs are small. Honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
 
 from __future__ import annotations
 
+import html
 import os
+import re
+from datetime import date, datetime
 from pathlib import Path
 
-from native_pricing import add_native_diffs, read_base_prices
+from concurrent_writes import write_records
+from native_pricing import add_native_diffs, read_base_prices, weight_display
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -71,20 +75,120 @@ def _make_put(entry: dict[str, object]):
     return put
 
 
+# Checkbox field flagged when an item is currently on sale. Auto-detected at
+# runtime (used only if it exists in NetSuite), so it self-enables once created
+# -- no sequencing/env needed. The sale-aware Purchase Price below needs no field.
+ON_SALE_FIELD = os.environ.get("SANMAR_ON_SALE_FIELD", "custitem_bsg_on_sale").strip()
+
+
+def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
+    if not scriptid:
+        return False
+    try:
+        client.suiteql(f"SELECT {scriptid} FROM item WHERE rownum <= 1")
+        return True
+    except Exception:  # noqa: BLE001 - unknown column -> field not created yet
+        return False
+
+
+def _parse_sale_date(s: object) -> date | None:
+    text = str(s or "").strip()
+    if not text:
+        return None
+    text = text.split()[0].split("T")[0]  # drop any time component
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def effective_cost(piece_price, sale_price, sale_start, sale_end, today: date):
+    """Return ``(cost, on_sale)``.
+
+    ``cost`` is the active sale price when a genuine, in-window sale is running
+    (sale price > 0 and below the regular piece price, and today within any
+    start/end dates), else the regular piece price. Evaluated every run, so cost
+    reverts automatically when the sale ends.
+    """
+    reg = None if piece_price is None else float(piece_price)
+    if sale_price is None or reg is None:
+        return reg, False
+    sp = float(sale_price)
+    if sp <= 0 or sp >= reg:  # not a genuine discount
+        return reg, False
+    start, end = _parse_sale_date(sale_start), _parse_sale_date(sale_end)
+    if (start and today < start) or (end and today > end):
+        return reg, False  # sale not active today
+    return sp, True
+
+
+def _projects(client: NetSuiteClient, col: str) -> bool:
+    try:
+        client.suiteql(f"SELECT {col} FROM item WHERE rownum <= 1")
+        return True
+    except Exception:  # noqa: BLE001 - column not queryable
+        return False
+
+
+_STATUS_PREFIX = re.compile(r"^(DISCONTINUED|CLOSEOUT|NEW)\b[\s:–-]*", re.I)
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(text or "")).strip()
+
+
+def store_display_name(title: str, style: str) -> str:
+    """Clean product name = the feed title with any status prefix and trailing
+    style number stripped, Title-cased if it arrived ALL CAPS.
+
+    This deliberately mirrors ``description_update._polish_name`` so the web
+    Store Display Name matches the item's Display Name / Description exactly
+    (those are set from the same feed title by the description-update job)."""
+    name = _STATUS_PREFIX.sub("", _clean(title))
+    if style:
+        name = re.sub(rf"[\s.,-]*{re.escape(style)}[\s.]*$", "", name, flags=re.I)
+    name = name.strip(" .,-")
+    if name.isupper():
+        name = name.title()
+    return name
+
+
+def store_description(available_sizes: str, description: str) -> str:
+    """Store/Stock Description = the marketing copy, with a real size list
+    ("Women's Sizes: S-2XL") prepended when the feed carries one. One-size items
+    (no "Sizes:" line) get just the copy. SanMar's flat feed strips commas and
+    ships the features as prose (no bullet column exists); the fully punctuated,
+    bulleted copy is only available via their content web service."""
+    sizes = _clean(available_sizes)
+    body = _clean(description)
+    # Only prepend a genuine size list, not "One Size" / blank.
+    if sizes and ":" in sizes and body:
+        return f"{sizes}\n\n{body}"
+    return body or sizes
+
+
 def build_payloads(
-    styles, inventory
-) -> tuple[dict[str, dict[str, object]], dict[str, tuple]]:
+    styles, inventory, today: date | None = None, on_sale_field: str = ""
+) -> tuple[dict[str, dict[str, object]], dict[str, tuple], dict[str, tuple]]:
     """GTIN -> field payload for every feed SKU carrying a barcode, plus
     GTIN -> (base price, cost, weight) for the native-field writes.
 
     Values are typed (numbers as numbers) and empty values are omitted —
     NetSuite 400s on an empty string in a numeric/currency field.
     """
+    today = today or date.today()
     total_by_key: dict[str, int] = {}
     qtys_by_key: dict[str, dict[str, int]] = {}
+    # unique_key -> (case_sale_price, each_sale_price, sale_start, sale_end) from dip.
+    sale_by_key: dict[str, tuple] = {}
     unknown_whse: set[str] = set()
     for rec in inventory:
         total_by_key[rec.unique_key] = sum(w.quantity for w in rec.warehouses)
+        sale_by_key[rec.unique_key] = (
+            rec.case_sale_price, rec.each_sale_price, rec.sale_start, rec.sale_end
+        )
         if rec.warehouses:
             # Zero-fill every column so a warehouse that drops out of the
             # feed clears to 0 instead of keeping yesterday's count.
@@ -105,12 +209,39 @@ def build_payloads(
 
     payloads: dict[str, dict[str, object]] = {}
     natives: dict[str, tuple] = {}
+    # gtin -> (store display name, store description) from the feed.
+    store_by_gtin: dict[str, tuple] = {}
+    map_seen = sku_total = on_sale_count = 0
     for style in styles:
+        disp = store_display_name(style.title, style.style)
+        sdesc = store_description(style.available_sizes, style.description)
         for sku in style.skus:
             if not sku.gtin:
                 continue
+            sku_total += 1
+            if sku.map_price is not None:
+                map_seen += 1
             entry: dict[str, object] = {}
             put = _make_put(entry)
+            # Cost basis = the CASE price (SanMar's by-the-case unit price, i.e.
+            # the "Original Price" shown on sanmar.com) -- NOT the single-piece
+            # (open-stock) price, which runs ~$1 higher and is what made the
+            # Purchase Price read too high. Compare against the case-level sale
+            # price for the same reason; fall back to piece-level when a style
+            # carries no case data. (The true contract/Program price is lower
+            # still but is not in the SFTP feeds.)
+            case_sale, each_sale, sale_start, sale_end = sale_by_key.get(
+                sku.unique_key, (None, None, "", "")
+            )
+            regular = sku.case_price if sku.case_price is not None else sku.piece_price
+            sale_price = case_sale if case_sale is not None else each_sale
+            cost, on_sale = effective_cost(
+                regular, sale_price, sale_start, sale_end, today
+            )
+            if on_sale:
+                on_sale_count += 1
+            if on_sale_field:
+                put(on_sale_field, on_sale)
             qty = total_by_key.get(sku.unique_key, sku.available_qty)
             put("custitem_sanmar_unique_key", sku.unique_key)
             put("custitem_sanmar_inventory_key", sku.inventory_key)
@@ -137,12 +268,23 @@ def build_payloads(
             put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry
+                weight_lb = None if sku.piece_weight is None else float(sku.piece_weight)
+                disp_weight, weight_unit = weight_display(weight_lb)
                 natives[sku.gtin] = (
                     None if sku.msrp is None else float(sku.msrp),
-                    None if sku.piece_price is None else float(sku.piece_price),
-                    None if sku.piece_weight is None else float(sku.piece_weight),
+                    cost,  # effective cost: sale price while on sale, else regular
+                    disp_weight,
+                    weight_unit,
                 )
-    return payloads, natives
+                store_by_gtin[sku.gtin] = (disp, sdesc)
+    # Ground truth on whether SanMar's feed carries MAP at all: value brands
+    # (e.g. Gildan) usually have no MAP, so a blank MAP field can be correct.
+    print(f"SanMar MAP coverage: {map_seen}/{sku_total} feed SKUs carry a MAP "
+          f"price (blank MAP on a no-MAP brand like Gildan is expected)")
+    flag = f" (flagged via {on_sale_field})" if on_sale_field else " (On Sale field not created)"
+    print(f"SanMar on sale today: {on_sale_count}/{sku_total} SKUs "
+          f"-> Purchase Price = sale price{flag}")
+    return payloads, natives, store_by_gtin
 
 
 def _same(current: object, new: object) -> bool:
@@ -162,22 +304,50 @@ def main() -> int:
 
     styles = parse_styles(_dl(cfg, C.FILE_SDL_N))
     inventory = parse_inventory(_dl(cfg, C.FILE_DIP))
-    payloads, natives = build_payloads(styles, inventory)
-    print(f"feed SKUs with GTIN: {len(payloads):,}")
-
     client = NetSuiteClient(cfg.netsuite)
-    cols = ", ".join(FIELD_ORDER + SEEN_FIELDS)
+    # Use the On Sale checkbox only once it exists in NetSuite (self-enabling).
+    on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
+    payloads, natives, store_by_gtin = build_payloads(
+        styles, inventory, on_sale_field=on_sale_field
+    )
+    print(f"feed SKUs with GTIN: {len(payloads):,}")
+    # Store Display Name + Store/Stock Description are native fields; write them
+    # only where the column is queryable so the diff works (self-enabling).
+    store_cols = [
+        c for c in ("storedisplayname", "storedescription", "stockdescription")
+        if _projects(client, c)
+    ]
+    if store_cols:
+        print(f"store fields active: {store_cols}")
+    cols = ", ".join(FIELD_ORDER + SEEN_FIELDS + store_cols)
     gtins = sorted(payloads)
-    considered = written = unchanged = priced = failures = 0
+    considered = written = unchanged = priced = stored = failures = 0
+    _fail_shown = [0]
+
+    def _on_err(rid: str, exc: Exception) -> None:
+        _fail_shown[0] += 1
+        if _fail_shown[0] <= 10:
+            detail = getattr(exc, "payload", "")
+            print(f"  FAILED item {rid}: {str(exc)[:150]} :: {str(detail)[:300]}")
+
+    chunks_skipped = 0
     for i in range(0, len(gtins), 250):
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
-        rows = client.suiteql(
-            f"SELECT id, upccode, cost, weight, manufacturer, custitem_ss_brand, {cols} "
-            f"FROM item WHERE upccode IN ({in_list})"
-        )
+        try:
+            rows = client.suiteql(
+                f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
+                f"custitem_ss_brand, {cols} FROM item WHERE upccode IN ({in_list})"
+            )
+        except Exception as exc:  # noqa: BLE001 - sustained throttling shouldn't crash
+            # the whole run and discard every chunk already written; skip this
+            # one (it'll be picked up next run -- diff-aware) and keep going.
+            chunks_skipped += 1
+            print(f"  SKIPPED chunk starting at {i}: read failed ({str(exc)[:150]})")
+            continue
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
         base_by_rid = read_base_prices(client, id_list)
+        write_jobs: list[tuple[str, dict]] = []
         for row in rows:
             gtin = str(row.get("upccode") or "")
             want = payloads.get(gtin)
@@ -189,11 +359,23 @@ def main() -> int:
             # S&S brand wins the Manufacturer field on multi-vendor items.
             if "manufacturer" in body and str(row.get("custitem_ss_brand") or "").strip():
                 del body["manufacturer"]
-            price, cost, weight = natives.get(gtin, (None, None, None))
+            price, cost, weight, weight_unit = natives.get(gtin, (None, None, None, None))
             add_native_diffs(
                 body, row, base_by_rid, str(row["id"]),
-                price=price, cost=cost, weight=weight, same=_same,
+                price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
             )
+            # Store Display Name + Store/Stock Description (native web-store
+            # fields). Store and Stock Description carry the same marketing copy.
+            disp, sdesc = store_by_gtin.get(gtin, ("", ""))
+            if ("storedisplayname" in store_cols and disp
+                    and not _same(row.get("storedisplayname"), disp)):
+                body["storeDisplayName"] = disp
+            if ("storedescription" in store_cols and sdesc
+                    and not _same(row.get("storedescription"), sdesc)):
+                body["storeDescription"] = sdesc
+            if ("stockdescription" in store_cols and sdesc
+                    and not _same(row.get("stockdescription"), sdesc)):
+                body["stockDescription"] = sdesc
             stamp(body, row, "sanmar")
             if not body:
                 unchanged += 1
@@ -201,18 +383,20 @@ def main() -> int:
             if max_items and considered >= max_items:
                 continue
             considered += 1
-            if "price" in body or "cost" in body or "weight" in body:
+            if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
+            if any(k in body for k in ("storeDisplayName", "storeDescription", "stockDescription")):
+                stored += 1
             if not allow_write:
                 written += 1
                 continue
-            try:
-                client.update_record("inventoryItem", str(row["id"]), body)
-                written += 1
-            except Exception as exc:  # noqa: BLE001
-                failures += 1
-                if failures <= 10:
-                    print(f"  FAILED item {row['id']}: {str(exc)[:150]}")
+            write_jobs.append((str(row["id"]), body))
+
+        # Write this chunk's records with bounded concurrency -- individual
+        # sequential PATCHes are throttle-bound and can run for hours.
+        w, f = write_records(client, "inventoryItem", write_jobs, on_error=_on_err)
+        written += w
+        failures += f
 
     if CAP_STATS["locations"]:
         print(
@@ -223,11 +407,18 @@ def main() -> int:
             f"Uncapped depth is only available via SanMar's Web Service / "
             f"PromoStandards inventory API."
         )
+    if chunks_skipped:
+        print(
+            f"NOTE: {chunks_skipped} chunk(s) skipped after their SuiteQL read "
+            f"kept failing (sustained NetSuite throttling) -- those items were "
+            f"not considered this run; diff-aware, so the next run picks them up."
+        )
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
-          f"failures: {failures}")
-    return 1 if failures else 0
+          f"store name/desc updated: {stored}; failures: {failures}; "
+          f"chunks skipped: {chunks_skipped}")
+    return 1 if (failures or chunks_skipped) else 0
 
 
 if __name__ == "__main__":

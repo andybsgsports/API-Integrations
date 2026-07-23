@@ -87,6 +87,7 @@ define(["N/record", "N/search"], (record, search) => {
     setIf(rec, "salesdescription", it.description);
     setIf(rec, "purchasedescription", it.description);
     setIf(rec, "vendorname", it.vendorName);
+    setIf(rec, "upccode", it.upc);
     setIf(rec, "incomeaccount", it.incomeAccount && resolveAccount(it.incomeAccount));
     setIf(rec, "cogsaccount", it.cogsAccount && resolveAccount(it.cogsAccount));
     setIf(rec, "assetaccount", it.assetAccount && resolveAccount(it.assetAccount));

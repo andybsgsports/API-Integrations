@@ -1,0 +1,10 @@
+# Read-only: dump the FULL raw column list of the SDL and EPDD product feeds,
+# plus one raw NKFD9889 row -- to find whether SanMar carries the marketing
+# bullet points / "sizes" line anywhere in the flat feeds (our reader only keeps
+# the columns it maps, so unmapped bullet/feature columns would be invisible).
+# run: rawheaders-probe-2026-07-22d
+STYLE=NKFD9889
+COLOR=
+SIZE=
+TITLE=
+RAWHEADERS=true

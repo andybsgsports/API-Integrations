@@ -1,0 +1,7 @@
+# GO LIVE: the nightly SanMar auto-create now actually creates new items each
+# night (create-preview -> ensure-values -> RESTlet import -> child-finalize).
+# Bumping this file also fires one live cycle now -- which end-to-end tests the
+# bsg_csv_import RESTlet + the NETSUITE_CSVIMPORT_* secrets on whatever new
+# existing-parent children the feed has today.
+# run: autocreate-LIVE-2026-07-21
+AUTOCREATE_LIVE=true

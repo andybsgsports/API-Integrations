@@ -1,0 +1,6 @@
+# GO LIVE, uncapped: set Warehouse + Preferred Location = Badger Sporting Goods
+# on every matrix item (parent AND child). Diff-aware + id-chunked, so it only
+# writes what's missing. Fixes the gap seen on TMA42778 and everywhere else.
+# run: location-fix-LIVE-uncapped-2026-07-21
+DRY_RUN=false
+MAX_ITEMS=0

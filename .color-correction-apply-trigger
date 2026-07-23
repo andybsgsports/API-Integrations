@@ -1,0 +1,6 @@
+# run: correction-apply-8000-retry-LIVE-2026-07-20
+# LIVE retry: reactivate the inactive Carolina Blue (id 1016) before assigning,
+# then repoint + rename the 8 Columbia Blue items. The 8 Heather Deep Royal
+# items already succeeded (idempotent skip). 695HBM already done.
+DRY_RUN=false
+MAX_ITEMS=0

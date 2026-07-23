@@ -1,1 +1,3 @@
-# run: fresh-sandbox-audit-post-rebuild
+# run: misspelling-scope-audit-2026-07-20
+# Read-only: quantify duplicate/misspelled color values (e.g. Forrest Green vs
+# Forest Green) and the items/supplier colors they block from adoption.

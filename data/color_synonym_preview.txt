@@ -1,0 +1,22 @@
+synonyms loaded: 3 -> [('collegiate blue', 'columbia blue'), ('j.navy', 'navy'), ('true red', 'red')]
+feed SKUs matched -- baseline: 974; with synonyms: 1,008 (+34 unlocked)
+
+colour-correction candidates (would rename to vendor name): 39
+  'Navy' -> 'J.NAVY': 13 item(s)
+  'Red' -> 'TRUE RED': 12 item(s)
+  'Columbia Blue' -> 'COLLEGIATE BLUE': 9 item(s)
+  'Carbon Heather/Athletic Heather' -> 'CH/AH': 4 item(s)
+  'Nahe' -> 'NAVY HEATHER': 1 item(s)
+    sample: 223246-Carbon Heather/Athletic Heather-2X-Large (id 210286) 'Carbon Heather/Athletic Heather' -> 'CH/AH' [option:abbrev]
+    sample: 223246-Carbon Heather/Athletic Heather-Large (id 210287) 'Carbon Heather/Athletic Heather' -> 'CH/AH' [option:abbrev]
+    sample: 223246-Carbon Heather/Athletic Heather-Medium (id 210288) 'Carbon Heather/Athletic Heather' -> 'CH/AH' [option:abbrev]
+    sample: 223246-Carbon Heather/Athletic Heather-X-Large (id 210290) 'Carbon Heather/Athletic Heather' -> 'CH/AH' [option:abbrev]
+    sample: 596HBM-Navy-Large (id 207823) 'Navy' -> 'J.NAVY' [option:synonym]
+    sample: 6959 (id 129373) 'Nahe' -> 'NAVY HEATHER' [option:heur]
+    sample: 695HBM-Columbia Blue-2X-Large (id 5332) 'Columbia Blue' -> 'COLLEGIATE BLUE' [option:synonym]
+    sample: 695HBM-Columbia Blue-3X-Large (id 5333) 'Columbia Blue' -> 'COLLEGIATE BLUE' [option:synonym]
+    sample: 695HBM-Columbia Blue-Large (id 5330) 'Columbia Blue' -> 'COLLEGIATE BLUE' [option:synonym]
+    sample: 695HBM-Columbia Blue-Medium (id 5329) 'Columbia Blue' -> 'COLLEGIATE BLUE' [option:synonym]
+    sample: 695HBM-Columbia Blue-Small (id 5328) 'Columbia Blue' -> 'COLLEGIATE BLUE' [option:synonym]
+    sample: 695HBM-Columbia Blue-X-Large (id 5331) 'Columbia Blue' -> 'COLLEGIATE BLUE' [option:synonym]
+wrote /home/runner/work/API-Integrations/API-Integrations/data/color_synonym_preview.csv

@@ -78,6 +78,7 @@ _SDL_ALIASES = {
     "UNIQUEKEY": "unique_key",
     "PRODUCTTITLE": "title",
     "PRODUCTDESCRIPTION": "description",
+    "AVAILABLESIZES": "available_sizes",
     "STYLE#": "style",
     "STYLE": "style",
     "COLORNAME": "color_name",
@@ -94,7 +95,11 @@ _SDL_ALIASES = {
     "SUBCATEGORYNAME": "subcategory",
     "PRODUCTSTATUS": "product_status",
     "MSRP": "msrp",
+    # SanMar has spelled the MAP column a few ways across SDL/EPDD revisions;
+    # accept the known variants so a rename doesn't silently drop MAP.
     "MAPPRICING": "map_price",
+    "MAPPRICE": "map_price",
+    "MAP": "map_price",
     "GTIN": "gtin",
     "QTY": "available_qty",
     "FRONTMODELIMAGEURL": "front_model_url",
@@ -176,6 +181,7 @@ class _StyleBuilder:
         self.style = style
         self.title = first_row.get("title", "")
         self.description = first_row.get("description", "")
+        self.available_sizes = first_row.get("available_sizes", "")
         self.brand = first_row.get("brand", "")
         self.category = first_row.get("category", "")
         self.subcategory = first_row.get("subcategory", "")
@@ -237,6 +243,7 @@ class _StyleBuilder:
             category=self.category,
             subcategory=self.subcategory,
             product_status=self.product_status,
+            available_sizes=self.available_sizes,
             skus=self._skus,
             images_by_color=self._images,
         )

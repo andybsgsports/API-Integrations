@@ -1,0 +1,13 @@
+# Reconcile the 634 colours + 7 sizes the create-import couldn't resolve against
+# the live matrix lists. DRY RUN first: reports how many are genuinely NEW (to be
+# created) vs spelling variants of values you already have (to remap, not
+# duplicate), and writes data/sanmar_color_plan.csv + data/sanmar_size_plan.csv.
+# Dry run: 593 NEW colours + 7 sizes to create; 41 variants remap to existing
+# (not duplicated). First LIVE run capped at 50 colours to confirm abbreviation
+# generation, then uncap to 0.
+# Capped-50 live run created 50 colours cleanly (0 failures). UNCAP to create
+# the rest (~543 remaining colours + 7 sizes). Idempotent -- already-created
+# values are skipped.
+# run: ensure-values-LIVE-uncapped-2026-07-21
+DRY_RUN=false
+CREATE_MAX=0

@@ -61,7 +61,7 @@ def main() -> int:
     try:
         resp = requests.get(
             url,
-            auth=client._auth,  # noqa: SLF001 - reuse the OAuth1 signer, read-only GET
+            auth=client._new_auth(),  # noqa: SLF001 - build a signer for this GET
             headers={"Accept": "application/swagger+json"},
             timeout=60,
         )

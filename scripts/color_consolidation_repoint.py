@@ -29,9 +29,12 @@ def load_plan() -> tuple[dict[str, str], list[str]]:
     """(retire_id -> canonical_id for rows with items, ALL retire_ids)."""
     with_items: dict[str, str] = {}
     all_retired: list[str] = []
-    with (ROOT / "data" / "color_consolidation_plan.csv").open(
-        encoding="utf-8", newline=""
-    ) as fh:
+    # Default: the exact-name consolidation plan. Override COLOR_PLAN_FILE to
+    # drive a targeted merge (e.g. the Forrest->Forest misspelling fix) through
+    # the same repoint + list-value-retirement logic.
+    plan_path = ROOT / (os.environ.get("COLOR_PLAN_FILE")
+                        or "data/color_consolidation_plan.csv")
+    with plan_path.open(encoding="utf-8", newline="") as fh:
         for r in csv.DictReader(fh):
             all_retired.append(r["retire_id"])
             if int(r["items_to_repoint"] or 0) > 0:

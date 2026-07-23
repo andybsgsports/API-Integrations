@@ -1,3 +1,7 @@
-# All fields present (incl. Champro reference-doc links). Neutralized.
+# Create the On Sale checkbox field. REST itemcustomfield returns 404 (NetSuite
+# has no REST endpoint for field *definitions*), so create it via SuiteTalk SOAP
+# instead -- the same add path that created the other 108 custom item fields.
+# Only custitem_bsg_on_sale is missing, so SOAP creates exactly that one.
+# run: create-on-sale-field-soap-2026-07-22
 FIELD_CREATE=false
-SOAP_CREATE=false
+SOAP_CREATE=true

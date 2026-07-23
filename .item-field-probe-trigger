@@ -1,0 +1,4 @@
+# run: probe-695hbm-jnavy-VERIFY-2026-07-20
+# Read-only re-probe: verify the 2 J.Navy items' Display Name / Purchase
+# Description now read "Dri-Power(R) Fleece Hoodie" after the normalise.
+ITEMS=695HBM-J.Navy-2X-Large,695HBM-J.Navy-3X-Large,695HBM-J.Navy-Large

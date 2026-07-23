@@ -1,0 +1,111 @@
+name: SanMar Create Preview + Ensure Values (pre-flight)
+
+# Prepares the CSV auto-create run in the correct order so an import never fails
+# on a missing matrix option:
+#   1. create-preview -- reads the feed + live catalog, writes the importable
+#      child CSV, AND lists the distinct colours/sizes those new children use.
+#   2. ensure-values (PRE-FLIGHT) -- creates any of those colours/sizes the matrix
+#      lists don't carry yet (variants of existing values are remapped, not
+#      duplicated), BEFORE the items reference them.
+# Only the ensure step writes to NetSuite (create-only, colour/size list values);
+# create-preview is read-only. PREFLIGHT_CREATE=false makes the ensure step a
+# dry-run report instead of creating.
+
+permissions:
+  contents: write
+  issues: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      preflight_create:
+        description: "Create missing colours/sizes (false = report only)"
+        required: true
+        default: "true"
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".sanmar-create-preview-trigger"]
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve run parameters (inputs, or trigger file on push)
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            get() { grep -E "^$1=" .sanmar-create-preview-trigger | tail -1 | cut -d= -f2- | tr -d ' \r'; }
+            PREFLIGHT_CREATE=$(get PREFLIGHT_CREATE)
+          else
+            PREFLIGHT_CREATE="${{ github.event.inputs.preflight_create }}"
+          fi
+          # Default to creating missing values (the whole point of the pre-flight).
+          [ "$PREFLIGHT_CREATE" = "false" ] && ENSURE_DRY="true" || ENSURE_DRY="false"
+          echo "ENSURE_DRY=$ENSURE_DRY" >> "$GITHUB_ENV"
+          echo "Resolved: preflight_create=${PREFLIGHT_CREATE:-true} (ensure dry_run=$ENSURE_DRY)"
+      - name: Write .env from repo secrets
+        run: |
+          # create-preview has no NetSuite writes, so SYNC_DRY_RUN only gates the
+          # ensure step's colour/size creates.
+          cat > .env <<EOF2
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=${ENSURE_DRY}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+      - name: 1) Create preview (read-only) -- writes CSV + colour/size lists
+        run: |
+          set -o pipefail
+          python scripts/sanmar_create_preview.py | tee sanmar_create_preview.txt
+      - name: 2) Ensure matrix values exist (pre-flight, before any import)
+        run: |
+          set -o pipefail
+          python scripts/sanmar_ensure_matrix_values.py | tee -a sanmar_create_preview.txt
+      # The full child CSV is ~30 MB and over the Import Assistant's 25k-line
+      # limit, so it is NOT committed (data/ is gitignored). The importable
+      # <25k-line PARTS + the full file ship as a downloadable run artifact.
+      - name: Upload importable CSV parts (artifact, 14-day retention)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanmar-new-children-${{ github.run_id }}
+          path: |
+            data/sanmar_new_children_part*.csv
+            data/sanmar_new_children.csv
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Commit lightweight report + plans back to this branch
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p data && cp sanmar_create_preview.txt data/ 2>/dev/null || true
+          git add -f data/sanmar_new_parents.txt data/sanmar_create_preview.txt \
+            data/sanmar_color_plan.csv data/sanmar_size_plan.csv \
+            data/sanmar_new_children_colors.txt data/sanmar_new_children_sizes.txt 2>/dev/null || true
+          git commit -m "SanMar create preview + ensure (run ${{ github.run_id }}) [skip ci]" || exit 0
+          git pull --rebase origin ${{ github.ref_name }} || true
+          git push origin HEAD:${{ github.ref_name }} || echo "push failed - report in log only"
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

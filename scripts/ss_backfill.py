@@ -9,8 +9,11 @@ Match priority per SKU:
 
 Writes the ``custitem_ss_*`` set and fills ``upcCode`` only where empty,
 plus the NATIVE money/shipping fields: Base Price = S&S MSRP, Purchase
-Price (``cost``) = S&S customer price (our account cost; falls back to
-piece price), ``weight`` = S&S weight. Diff-aware; honors ``SYNC_DRY_RUN``;
+Price (``cost``) = S&S customer/program price, and ``weight`` = S&S weight.
+When S&S is running a sale (``salePrice`` below our regular cost), the
+Purchase Price tracks that sale price and the On Sale checkbox
+(``custitem_bsg_on_sale``) is ticked -- both revert automatically once the
+sale price leaves the feed. Diff-aware; honors ``SYNC_DRY_RUN``;
 ``UPDATE_MAX_ITEMS`` caps writes.
 """
 
@@ -21,7 +24,7 @@ import os
 import time
 from pathlib import Path
 
-from native_pricing import add_native_diffs, read_base_prices
+from native_pricing import add_native_diffs, read_base_prices, weight_display
 from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -58,6 +61,43 @@ UNKNOWN_WHSE: set[str] = set()
 INVENTORY_CAP_VALUE = 500
 CAP_SKUS: set[str] = set()
 CAP_STATS: dict[str, int] = {"locations": 0}
+
+# On Sale flag: ticked when S&S's sale price undercuts our regular cost. Shared
+# with the SanMar side; the write is self-enabling -- skipped until the field
+# actually exists in NetSuite (see _field_exists below).
+ON_SALE_FIELD = os.environ.get("SS_ON_SALE_FIELD", "custitem_bsg_on_sale").strip()
+
+
+def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
+    if not scriptid:
+        return False
+    try:
+        client.suiteql(f"SELECT {scriptid} FROM item WHERE rownum <= 1")
+        return True
+    except Exception:  # noqa: BLE001 - unknown column -> field not created yet
+        return False
+
+
+def effective_cost(regular, sale_price):
+    """Return ``(cost, on_sale)`` for one product.
+
+    ``regular`` is our normal cost (customer/program price, or piece price when
+    S&S doesn't quote a customer price). S&S publishes ``salePrice`` only while a
+    promotion is live -- there is no start/end window in the feed -- so a sale
+    price above 0 and below the regular cost is an active discount. Evaluated
+    every run, so the cost reverts the moment the sale price drops out.
+    """
+    reg = None if regular is None else float(regular)
+    if sale_price is None:
+        return reg, False
+    sp = float(sale_price)
+    if sp <= 0:
+        return reg, False
+    if reg is None:
+        return sp, False  # no regular to compare against -> use it, don't flag
+    if sp >= reg:
+        return reg, False  # not a genuine discount
+    return sp, True
 
 
 def _put_into(want: dict[str, object]):
@@ -112,7 +152,13 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
     put("custitem_ss_gtin", p.get("gtin"))
     put("custitem_ss_brand", p.get("brand_name"))
     put("manufacturer", p.get("brand_name"))  # native Manufacturer = Brand
-    put("custitem_ss_map", num("map_price"))
+    # S&S publishes mapPrice 0.01 as a "no MAP restriction" placeholder; writing
+    # literal pennies onto the item reads as bad data, so treat <=1c as no MAP.
+    # (The saved snapshot can still carry the raw 0.01 even though the API parser
+    # filters it, so re-apply the rule here on the live-write path.) The write
+    # loop's clear-stale-0.01 branch then nulls any placeholder already stored.
+    _mp = num("map_price")
+    put("custitem_ss_map", None if (_mp is not None and _mp <= 0.011) else _mp)
     put("custitem_ss_msrp", num("msrp"))
     put("custitem_ss_piece_price", num("piece_price"))
     put("custitem_ss_dozen_price", num("dozen_price"))
@@ -145,14 +191,26 @@ def payload_for(p: dict, whse_rows: list[dict] | None = None) -> dict[str, objec
 
 
 def natives_for(p: dict) -> tuple:
-    """(base price, cost, weight) for the native-field writes."""
+    """(base price, cost, weight, weight_unit, on_sale) for the native-field
+    writes.
+
+    Cost follows the S&S sale price while a promotion is live, otherwise our
+    customer (program) price, otherwise the piece price. S&S reports weight
+    in pounds (see docs/SS_ACTIVEWEAR.md); weight_display picks the more
+    natural display unit (ounces under 1 lb) and converts the number to match.
+    """
     def num(key):
         v = p.get(key)
         try:
             return None if v is None else float(v)
         except (TypeError, ValueError):
             return None
-    return (num("msrp"), num("customer_price") or num("piece_price"), num("weight"))
+    regular = num("customer_price")
+    if regular is None:
+        regular = num("piece_price")
+    cost, on_sale = effective_cost(regular, num("sale_price"))
+    disp_weight, weight_unit = weight_display(num("weight"))
+    return (num("msrp"), cost, disp_weight, weight_unit, on_sale)
 
 
 def fetch_warehouses(skus: list[str]) -> dict[str, list[dict]]:
@@ -277,13 +335,16 @@ def main() -> int:
     # -- write phase (diff-aware)
     ids = sorted(matched)
     cols = ", ".join(FIELDS + SEEN_FIELDS)
+    # Tick the On Sale checkbox only once the field exists in NetSuite.
+    on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     considered = written = unchanged = upc_filled = priced = failures = 0
+    on_sale_count = 0
     for i in range(0, len(ids), 200):
         chunk = ids[i : i + 200]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         base_by_rid = read_base_prices(client, in_list)
         for row in client.suiteql(
-            f"SELECT id, upccode, cost, weight, manufacturer, {cols} "
+            f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
             f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
@@ -291,6 +352,11 @@ def main() -> int:
             if p is None:
                 continue
             want = payload_for(p, whse_by_sku.get(str(p.get("sku") or "")))
+            price, cost, weight, weight_unit, on_sale = natives_for(p)
+            if on_sale:
+                on_sale_count += 1
+            if on_sale_field:
+                want[on_sale_field] = on_sale
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             # Clear stale 0.01 placeholder MAPs written before the no-MAP rule
             # (REST PATCH null empties the field).
@@ -303,10 +369,9 @@ def main() -> int:
             gtin = (p.get("gtin") or "").strip()
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
-            price, cost, weight = natives_for(p)
             add_native_diffs(
                 body, row, base_by_rid, rid,
-                price=price, cost=cost, weight=weight, same=_same,
+                price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
             )
             stamp(body, row, "ss")
             if not body:
@@ -317,7 +382,7 @@ def main() -> int:
             considered += 1
             if "upcCode" in body:
                 upc_filled += 1
-            if "price" in body or "cost" in body or "weight" in body:
+            if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
             if not allow_write:
                 written += 1
@@ -343,6 +408,9 @@ def main() -> int:
             f"higher). Ask S&S to enable full inventory visibility to see real "
             f"quantities above {INVENTORY_CAP_VALUE}."
         )
+    flag = f" (flagged via {on_sale_field})" if on_sale_field else " (On Sale field not created)"
+    print(f"S&S on sale today: {on_sale_count}/{len(matched)} matched items "
+          f"-> Purchase Price = sale price{flag}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "

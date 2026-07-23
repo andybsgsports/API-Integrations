@@ -1,4 +1,8 @@
-# Full SanMar refresh: correct stale warehouse values + exercise 1500-cap detection.
-# run: sanmar-cap-refresh-2026-07-19
+# LIVE, capped small-scale validation FIRST. Run #41's 100% failure was a real
+# bug (shared OAuth1 signer racing under concurrency, not throttling) -- fixed
+# in the client (fresh auth per request, see client._new_auth). Before
+# re-launching the full ~28K-item write, prove it actually works: 50 real
+# writes with concurrency on. Expect failures: 0. Then scale to MAX_ITEMS=0.
+# run: field-update-concurrent-fix-validate-2026-07-22
 DRY_RUN=false
-MAX_ITEMS=0
+MAX_ITEMS=50

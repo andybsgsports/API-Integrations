@@ -1,0 +1,9 @@
+# Copy Department / Class / Purchase Description / Sales Description from each
+# SanMar matrix parent down onto its children, and set Location = Badger Sporting
+# Goods. Fill-blanks-only (never overwrites) + SanMar children only + diff-aware.
+# Capped-50 live run landed clean (0 failures). UNCAP to finalize every SanMar
+# child now that the bulk of the create-import has landed. Idempotent, so it's
+# safe to re-run for later stragglers.
+# run: child-finalize-LIVE-uncapped-2026-07-21
+DRY_RUN=false
+MAX_ITEMS=0

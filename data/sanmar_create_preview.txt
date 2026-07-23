@@ -1,0 +1,6 @@
+SanMar feed: 4081 styles, 161190 SKUs
+NetSuite catalog: 581 of 4081 styles already exist as parents; 3733 colour/size combo(s) already present
+
+NEW children under existing parents :  42743  -> data/sanmar_new_children.csv (import-ready)
+NEW rows under net-new parent styles: 114714  across 3500 style(s) -> data/sanmar_new_parents.txt (need parent first)
+  net-new styles: 108084, 108085, 108087, 108089, 108090, 108091, 108105, 110172, 112FPC, 112PFP, 112PL, 112PM, 112PT, 112T, 112WH, 115, 117023, 12000, 1466, 1467Y (+3480 more)

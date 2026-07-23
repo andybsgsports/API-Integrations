@@ -34,6 +34,13 @@ _EXACT: dict[str, str] = {
     "OS": "One Size",
     "OSFM": "One Size",
     "ONESIZE": "One Size",
+    # Infant / toddler sizes, spelled out per BSG convention. "6T" is the
+    # standard toddler label and stays as-is; checked here before the Tall-suffix
+    # rule so it isn't mis-read as "6 Tall".
+    "NB": "Newborn",
+    "06M": "0-6 Months",
+    "24M": "24 Months",
+    "6T": "6T",
 }
 
 
@@ -100,4 +107,11 @@ def normalize_size(raw: str | None) -> str:
     if not s:
         return s
     key = s.upper().replace(" ", "").replace("/", "")
-    return _lookup(key) or s
+    exact = _lookup(key)
+    if exact:
+        return exact
+    # Combined sizes (S/M, M/L, L/XL): spell out each side and rejoin, so the
+    # matrix value reads "Small/Medium" not "S/M" -- BSG spells sizes out.
+    if "/" in s:
+        return "/".join(normalize_size(part) for part in s.split("/"))
+    return s

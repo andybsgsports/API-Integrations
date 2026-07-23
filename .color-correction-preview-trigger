@@ -1,0 +1,4 @@
+# run: correction-preview-2026-07-20
+# Read-only: per-style colour correction (695HBM only): how many items sit on
+# the wrong colour (Columbia Blue/Red/Navy) that should be the vendor name
+# (Collegiate Blue/True Red/J.Navy), and whether the target values exist.

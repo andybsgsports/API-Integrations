@@ -1,4 +1,7 @@
-# Smoke: verify writer works after retiring qty_by_whse + adding 6 fields.
-# run: post-blob-smoke-2026-07-19
-DRY_RUN=false
-MAX_ITEMS=25
+# DRY validation of the new sale-aware Purchase Price + On Sale flag on the S&S
+# side (mirrors the SanMar change). Reads only: downloads a fresh catalog and
+# reports how many matched items are on sale today ("S&S on sale today: X/Y")
+# without writing. Flip DRY_RUN=false (or let the nightly cron run) to apply.
+# run: ss-sale-pricing-dryrun-2026-07-22
+DRY_RUN=true
+MAX_ITEMS=0

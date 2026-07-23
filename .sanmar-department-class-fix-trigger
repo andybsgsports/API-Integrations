@@ -1,0 +1,8 @@
+# DRY run: shows how many SanMar-keyed items would get a corrected
+# Department/Class under the new semicolon-aware category mapping (the old
+# exact-match table left 74,468/161,210 feed SKUs with no mapped class).
+# Watch "no resolvable class" (categories we're deliberately not guessing) and
+# "no style match" (items whose style isn't in today's feed). Small cap first.
+# run: department-class-fix-dryrun-2026-07-23
+DRY_RUN=true
+MAX_ITEMS=50

@@ -1,0 +1,5 @@
+# DRY run: shows how many matrix items have an Atlas image but aren't marked
+# Display in Web Site (isOnline) yet. Small cap first.
+# run: web-display-fix-dryrun-2026-07-23
+DRY_RUN=true
+MAX_ITEMS=50

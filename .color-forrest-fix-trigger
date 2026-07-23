@@ -1,0 +1,5 @@
+# run: forrest-fix-LIVE-2026-07-20
+# LIVE: dry verified 72 items on Forrest Green (672) -> Forest Green (1017),
+# 0 failures, then inactivate value 672. Andy approved this specific fix.
+DRY_RUN=false
+MAX_ITEMS=0

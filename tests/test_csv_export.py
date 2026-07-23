@@ -82,6 +82,31 @@ def test_class_maps_from_category() -> None:
     assert class_for_category("something unmapped") == ""
 
 
+def test_class_maps_multi_tag_category() -> None:
+    """SanMar's CATEGORY_NAME is a semicolon-delimited list mixing garment
+    type with audience/segment tags (real values from the live feed) -- the
+    exact-match table alone leaves ~46% of SKUs with a blank Class."""
+    assert class_for_category("T-Shirts ;Tall;Activewear") == "Tops : Tees"
+    assert class_for_category("Outerwear;Women's") == "Outerwear : Jackets"
+    assert class_for_category("Sweatshirts/Fleece;Women's") == "Tops : Sweatshirts"
+    assert class_for_category("Polos/Knits;Women's") == "Tops : Polos"
+    assert class_for_category("Caps;Youth") == "Uniforms : Headwear"
+    assert class_for_category("Youth;Caps") == "Uniforms : Headwear"
+    assert class_for_category("Women's;Woven Shirts") == "Tops"
+    assert class_for_category("Activewear;T-Shirts ;Women's") == "Tops : Tees"
+
+
+def test_class_leaves_non_garment_tags_unmapped() -> None:
+    """Categories made entirely of audience/segment/PPE tags with no garment
+    type are left blank rather than guessed."""
+    assert class_for_category("Workwear;Bottoms") == ""
+    assert class_for_category("Personal Protection;Workwear") == ""
+    assert class_for_category("Accessories") == ""
+    assert class_for_category("Infant & Toddler") == ""
+    assert class_for_category("Women's") == ""
+    assert class_for_category("") == ""
+
+
 def test_accounts_and_tax_default_and_override(tmp_path: Path) -> None:
     rows = _read(write_matrix_csv(parse_styles(FIXTURE), tmp_path / "a.csv"))
     # Accounts are referenced by number (BSG's import map resolves numbers).

@@ -1,0 +1,4 @@
+# Read-only, lightweight (a metadata-catalog GET + a few sample SuiteQL rows --
+# not a bulk read/write): find the exact "Display in Web Site" field name so
+# the fix targets it correctly instead of guessing.
+# run: web-display-probe-2026-07-23
