@@ -27,6 +27,7 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from concurrent_writes import write_records
 from dcos_backfill import SUPPLIERS as DCOS_SUPPLIERS
 from dcos_backfill import get_sellable_styles, get_style_images
 
@@ -277,6 +278,7 @@ def main() -> int:
     file_id_by_url: dict[str, str] = {}
     considered = written = unchanged = nourl = failures = upload_failures = 0
     samples: dict[str, int] = {}
+    write_jobs: list[tuple[str, dict]] = []
     for row in items:
         rid = str(row["id"])
         if str(row.get(FIELD) or "").strip():
@@ -320,14 +322,21 @@ def main() -> int:
         if not allow_write:
             written += 1
             continue
-        try:
-            client.update_record("inventoryItem", rid, {FIELD: file_id})
-            written += 1
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            if failures <= 10:
-                detail = getattr(exc, "payload", "")
-                print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
+        write_jobs.append((rid, {FIELD: file_id}))
+
+    # PATCHes are independent per item -- issue them with bounded concurrency
+    # instead of one-at-a-time, which is throttle-bound and can run for hours.
+    _fail_shown = [0]
+
+    def _on_err(rid: str, exc: Exception) -> None:
+        _fail_shown[0] += 1
+        if _fail_shown[0] <= 10:
+            detail = getattr(exc, "payload", "")
+            print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
+
+    w, f = write_records(client, "inventoryItem", write_jobs, on_error=_on_err)
+    written += w
+    failures += f
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(
