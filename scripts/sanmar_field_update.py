@@ -324,15 +324,24 @@ def main() -> int:
     def _on_err(rid: str, exc: Exception) -> None:
         _fail_shown[0] += 1
         if _fail_shown[0] <= 10:
-            print(f"  FAILED item {rid}: {str(exc)[:150]}")
+            detail = getattr(exc, "payload", "")
+            print(f"  FAILED item {rid}: {str(exc)[:150]} :: {str(detail)[:300]}")
 
+    chunks_skipped = 0
     for i in range(0, len(gtins), 250):
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
-        rows = client.suiteql(
-            f"SELECT id, upccode, cost, weight, manufacturer, custitem_ss_brand, {cols} "
-            f"FROM item WHERE upccode IN ({in_list})"
-        )
+        try:
+            rows = client.suiteql(
+                f"SELECT id, upccode, cost, weight, manufacturer, custitem_ss_brand, {cols} "
+                f"FROM item WHERE upccode IN ({in_list})"
+            )
+        except Exception as exc:  # noqa: BLE001 - sustained throttling shouldn't crash
+            # the whole run and discard every chunk already written; skip this
+            # one (it'll be picked up next run -- diff-aware) and keep going.
+            chunks_skipped += 1
+            print(f"  SKIPPED chunk starting at {i}: read failed ({str(exc)[:150]})")
+            continue
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
         base_by_rid = read_base_prices(client, id_list)
         write_jobs: list[tuple[str, dict]] = []
@@ -395,11 +404,18 @@ def main() -> int:
             f"Uncapped depth is only available via SanMar's Web Service / "
             f"PromoStandards inventory API."
         )
+    if chunks_skipped:
+        print(
+            f"NOTE: {chunks_skipped} chunk(s) skipped after their SuiteQL read "
+            f"kept failing (sustained NetSuite throttling) -- those items were "
+            f"not considered this run; diff-aware, so the next run picks them up."
+        )
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
-          f"store name/desc updated: {stored}; failures: {failures}")
-    return 1 if failures else 0
+          f"store name/desc updated: {stored}; failures: {failures}; "
+          f"chunks skipped: {chunks_skipped}")
+    return 1 if (failures or chunks_skipped) else 0
 
 
 if __name__ == "__main__":
