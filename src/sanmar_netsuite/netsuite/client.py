@@ -82,8 +82,20 @@ class NetSuiteClient:
         self._config = config
         self._timeout = timeout
         self._session = requests.Session()
-        # NetSuite TBA: realm is the account id (uppercase), HMAC-SHA256.
-        self._auth = OAuth1(
+
+    def _new_auth(self) -> OAuth1:
+        """Build a fresh OAuth1 signer for one request.
+
+        ``requests_oauthlib``/``oauthlib``'s ``Client`` stores the nonce and
+        timestamp it generates as instance state during signing, so reusing one
+        ``OAuth1`` object across concurrent requests is a data race: two
+        threads can interleave inside ``sign()`` and end up sharing a
+        nonce/timestamp pair, which NetSuite then rejects (seen as near-total
+        400s once writes were parallelized). Constructing a new, cheap OAuth1
+        object per request removes the shared mutable state entirely.
+        """
+        config = self._config
+        return OAuth1(
             client_key=config.consumer_key,
             client_secret=config.consumer_secret,
             resource_owner_key=config.token_id,
@@ -115,7 +127,7 @@ class NetSuiteClient:
         resp = self._session.request(
             method,
             url,
-            auth=self._auth,
+            auth=self._new_auth(),
             json=json_body,
             headers=merged_headers,
             timeout=self._timeout,

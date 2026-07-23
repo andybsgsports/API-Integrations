@@ -100,6 +100,38 @@ def test_suiteql_retries_transient_400(monkeypatch):
     assert calls["n"] == 2  # one retry
 
 
+def test_request_builds_a_fresh_auth_object_each_call(monkeypatch):
+    """Regression test: NetSuiteClient must not reuse one OAuth1 signer across
+    requests. requests_oauthlib/oauthlib's Client stores the nonce/timestamp it
+    generates as instance state during signing, so sharing one OAuth1 object
+    across concurrent requests is a data race -- two threads can interleave
+    inside sign() and end up with the same nonce/timestamp, which NetSuite
+    rejects (seen as a near-total 400 failure rate once writes were run
+    concurrently against a single shared auth instance). Each call must get its
+    own OAuth1 instance."""
+    client = NetSuiteClient(_sandbox_config())
+    captured_auths = []
+
+    class _Resp:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {}
+
+    def fake_session_request(method, url, *, auth, json, headers, timeout):
+        captured_auths.append(auth)
+        return _Resp()
+
+    monkeypatch.setattr(client._session, "request", fake_session_request)
+
+    client._request("GET", "https://example.invalid/x")
+    client._request("GET", "https://example.invalid/x")
+
+    assert len(captured_auths) == 2
+    assert captured_auths[0] is not captured_auths[1]
+
+
 def test_suiteql_gives_up_after_attempts(monkeypatch):
     """A persistent 400 still raises (after the bounded retries)."""
     from sanmar_netsuite.netsuite.client import NetSuiteError
