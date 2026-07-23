@@ -1,9 +1,8 @@
-# LIVE smoke (200-item cap): first real write for this correction script.
-# The dry run validated the diff logic (0 failures) but never wrote; this
-# confirms the classification/fullname-resolved Class ids are actually
-# accepted on a real PATCH before uncapping to the full catalog. Sequential
-# with the other live writers -- never run two write workflows at once
-# (concurrent writes were what caused the earlier throttling storm).
-# run: department-class-fix-LIVE-smoke-2026-07-23
+# FULL live run: the 200-cap smoke wrote 200 with 0 failures and confirmed the
+# classification/fullname-resolved Class ids land on real PATCHes. Uncapping to
+# correct Department/Class across every SanMar-keyed item. Diff-aware (only
+# ~thousands actually change; the rest are already correct). Sequential with the
+# other live writers -- never two write workflows at once.
+# run: department-class-fix-LIVE-full-2026-07-23
 DRY_RUN=false
-MAX_ITEMS=200
+MAX_ITEMS=0
