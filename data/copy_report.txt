@@ -1,33 +1,42 @@
 queried columns: displayname, description, purchasedescription
-supplier-matched items: 29,034
-custitem_sanmar_unique_key: copy for 161,208 feed SKUs
-custitem_mtec_item_sku: copy for 103,586 feed SKUs
-S&S style titles fetched: 5,655
-custitem_ss_sku: copy for 195,423 feed SKUs
-  sample item 244489 [custitem_sanmar_unique_key]:
-    displayName: 'OGIO - Transfer Duffel. 108084' -> 'OGIO - Transfer Duffel'
-    salesDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
-    purchaseDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
-  sample item 244490 [custitem_sanmar_unique_key]:
-    displayName: 'OGIO - Transfer Duffel. 108084' -> 'OGIO - Transfer Duffel'
-    salesDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
-    purchaseDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
-  sample item 244491 [custitem_sanmar_unique_key]:
-    displayName: 'OGIO - Transfer Duffel. 108084' -> 'OGIO - Transfer Duffel'
-    salesDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
-    purchaseDescription: "The traveler's must-have with a huge cargo area and ventilated areas. " -> 'OGIO - Transfer Duffel'
-  FAILED item 244194: 429 Too Many Requests :: 
-  FAILED item 244387: 429 Too Many Requests :: 
-  FAILED item 242376: 429 Too Many Requests :: 
-  FAILED item 243234: 429 Too Many Requests :: 
-  FAILED item 233232: 429 Too Many Requests :: 
-  FAILED item 234090: 429 Too Many Requests :: 
-  FAILED item 234069: 429 Too Many Requests :: 
-  FAILED item 233687: 429 Too Many Requests :: 
-  FAILED item 240709: 429 Too Many Requests :: 
-  FAILED item 241813: 429 Too Many Requests :: 
-  sample item 194770 [custitem_mtec_item_sku]:
-    salesDescription: 'Russell Integrated 7-Piece Pad Football Pant' -> 'Integrated 7-Piece Pad Football Pant'
-    purchaseDescription: 'Russell Integrated 7-Piece Pad Football Pant' -> 'Integrated 7-Piece Pad Football Pant'
+supplier-matched items: 45,018
+custitem_sanmar_unique_key: copy for 161,210 feed SKUs
+custitem_mtec_item_sku: copy for 103,598 feed SKUs
+S&S style titles fetched: 5,654
+custitem_ss_sku: copy for 195,381 feed SKUs
+  sample item 132911 [custitem_mtec_item_sku]:
+    salesDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
+    purchaseDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
+  sample item 209014 [custitem_mtec_item_sku]:
+    salesDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
+    purchaseDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
+  sample item 257420 [custitem_sanmar_unique_key]:
+    displayName: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+    salesDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+    purchaseDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+  sample item 257425 [custitem_sanmar_unique_key]:
+    displayName: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+    salesDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+    purchaseDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+  sample item 257410 [custitem_sanmar_unique_key]:
+    displayName: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+    salesDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+    purchaseDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
+  sample item 247907 [custitem_ss_sku]:
+    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+  sample item 247908 [custitem_ss_sku]:
+    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+  sample item 247905 [custitem_ss_sku]:
+    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
+  sample item 247966 [custitem_mtec_item_sku]:
+    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Youth Attain Wicking Two-Button Baseball Jersey'
+    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Youth Attain Wicking Two-Button Baseball Jersey'
+    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Youth Attain Wicking Two-Button Baseball Jersey'
 
-description update: wrote 12953 item(s); unchanged: 16061; no feed copy: 5; failures: 15
+description update: wrote 15885 item(s); unchanged: 29128; no feed copy: 5; failures: 0
