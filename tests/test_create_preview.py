@@ -74,3 +74,37 @@ def test_split_csv_leaves_small_file_as_one_part(tmp_path):
     src.write_text("External ID,Name\nSANMAR-1,1\n", encoding="utf-8")
     parts = split_csv(src, tmp_path, "small", 1000)
     assert parts == [src]  # fits in one -> returned unchanged, no _partNN files
+
+
+def test_cap_children_skips_beyond_cap_and_recounts():
+    from sanmar_create_preview import cap_children
+
+    styles = [
+        _style("K420", [_sku("A", "Black", "S"), _sku("B", "Navy", "S"),
+                        _sku("E", "Navy", "M")]),
+        _style("9999", [_sku("C", "Red", "S")]),  # net-new parent, never counts
+    ]
+    parent_refs = {"K420": "50286"}
+    split = split_missing(styles, parent_refs, {"SANMAR-A"})
+    assert split.new_children == 2  # B and E eligible
+
+    cap_children(styles, parent_refs, split, 1)
+
+    assert split.new_children == 1
+    # exactly one of B/E stays importable; the other joins the skip set
+    assert "SANMAR-B" not in split.child_only_skip
+    assert "SANMAR-E" in split.child_only_skip
+
+
+def test_cap_children_zero_is_noop():
+    from sanmar_create_preview import cap_children
+
+    styles = [_style("K420", [_sku("A", "Black", "S"), _sku("B", "Navy", "S")])]
+    parent_refs = {"K420": "1"}
+    split = split_missing(styles, parent_refs, set())
+    before = set(split.child_only_skip)
+
+    cap_children(styles, parent_refs, split, 0)
+
+    assert split.new_children == 2
+    assert split.child_only_skip == before
