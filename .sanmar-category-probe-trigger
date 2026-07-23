@@ -1,0 +1,5 @@
+# Read-only, SFTP-only (no NetSuite calls -- safe while the NetSuite account
+# cools down): list every SanMar (category, subcategory) pair with SKU counts,
+# flagging which ones aren't mapped to a NetSuite Class yet. Used to build a
+# complete Department/Class mapping.
+# run: category-probe-2026-07-23
