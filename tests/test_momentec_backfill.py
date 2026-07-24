@@ -12,7 +12,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from momentec_backfill import UNKNOWN_WEIGHT_UNITS, _weight_unit  # noqa: E402
+from momentec_backfill import (  # noqa: E402
+    UNKNOWN_WEIGHT_UNITS,
+    _weight_unit,
+    is_closeout,
+)
 
 
 def test_recognizes_lb_variants():
@@ -33,3 +37,11 @@ def test_unrecognized_unit_left_blank_and_logged():
     UNKNOWN_WEIGHT_UNITS.clear()
     assert _weight_unit("kg") == ""
     assert "kg" in UNKNOWN_WEIGHT_UNITS
+
+
+def test_closeout_from_ribbon():
+    assert is_closeout("Closeout")
+    assert is_closeout("CLOSEOUT")
+    assert not is_closeout("")
+    assert not is_closeout("New")
+    assert not is_closeout(None)  # type: ignore[arg-type]

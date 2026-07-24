@@ -5,10 +5,6 @@ permissions:
   issues: write
 
 on:
-  schedule:
-    # 15:00 UTC nightly, after parent-sync (14:00). The schedule branch runs
-    # every LIVE supplier in sequence (see the run step).
-    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       supplier:

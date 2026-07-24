@@ -42,6 +42,9 @@ class MomentecSku:
     # weight_display()), the ASG Standard Data Feed spec supplies the unit
     # directly per row (Weight_Unit, e.g. "lb") -- no heuristic needed.
     weight_unit: str = ""
+    # ASG feed "Ribbon" -- a marketing tag such as "Closeout". Used to flag
+    # closeout items (custitem_mtec_is_closeout).
+    ribbon: str = ""
 
     @property
     def color_code(self) -> str:

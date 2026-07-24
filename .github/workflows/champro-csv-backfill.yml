@@ -5,10 +5,6 @@ permissions:
   issues: write
 
 on:
-  schedule:
-    # 15:40 UTC, after the DC OneSource backfill (15:00) so the live feed owns
-    # keys/inventory and this only fills the gaps it misses. Diff-aware.
-    - cron: "40 15 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

@@ -8,7 +8,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from sanmar_field_update import store_description, store_display_name  # noqa: E402
+from sanmar_field_update import (  # noqa: E402
+    is_closeout,
+    store_description,
+    store_display_name,
+)
+
+
+def test_closeout_detected_from_title_prefix():
+    assert is_closeout("CLOSEOUT District Perfect Tri Tee. DT130")
+    assert is_closeout("closeout - Some Item")
+    # the prefix must be CLOSEOUT specifically, not other status words
+    assert not is_closeout("DISCONTINUED Some Item")
+    assert not is_closeout("NEW Arrival Polo")
+    assert not is_closeout("Perfect Tri Tee")
+    # not a false match on a name that merely contains the word mid-string
+    assert not is_closeout("Warehouse Closeout Special Tee")
 
 
 def test_display_name_strips_trailing_style():

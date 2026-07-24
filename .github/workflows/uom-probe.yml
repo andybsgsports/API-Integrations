@@ -1,0 +1,41 @@
+name: UOM Probe (read-only)
+
+# Finds the Units Type + unit ids needed to set bottoms to "Pair(s)" instead
+# of "Each". Read-only; no concurrency group (a metadata read shouldn't queue
+# behind a multi-hour write).
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/festive-carson-oj4y8n"]
+    paths: [".uom-probe-trigger"]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: Run UOM probe
+        run: python scripts/uom_probe.py

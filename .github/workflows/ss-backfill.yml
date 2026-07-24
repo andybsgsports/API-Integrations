@@ -5,15 +5,6 @@ permissions:
   issues: write
 
 on:
-  schedule:
-    # Nightly steady-state run (diff-aware); staggered so live
-    # writers never overlap on the same records.
-    - cron: "0 8 * * *"
-    # Intraday inventory refresh: ~7am and ~1pm Central (UTC-5, CDT). The
-    # writers are diff-aware, so intraday these push only what changed
-    # (mainly inventory). Drifts ~1h during standard time (CST).
-    - cron: "5 12 * * *"
-    - cron: "5 18 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

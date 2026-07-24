@@ -1,0 +1,5 @@
+# Re-fire: find the REST id space for stock/purchase/sale unit (id 13 from
+# SuiteQL was rejected on the live pair write). GETs a real UOM item + the
+# unitsType records.
+# run: uom-probe-2026-07-24b
+PROBE=2
