@@ -1,42 +1,39 @@
 queried columns: displayname, description, purchasedescription
-supplier-matched items: 45,018
-custitem_sanmar_unique_key: copy for 161,210 feed SKUs
-custitem_mtec_item_sku: copy for 103,598 feed SKUs
-S&S style titles fetched: 5,654
-custitem_ss_sku: copy for 195,381 feed SKUs
+supplier-matched items: 46,738
+custitem_sanmar_unique_key: copy for 161,209 feed SKUs
+custitem_mtec_item_sku: copy for 103,610 feed SKUs
+S&S style titles fetched: 5,655
+custitem_ss_sku: copy for 195,386 feed SKUs
+  sample item 261669 [custitem_sanmar_unique_key]:
+    displayName: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+    salesDescription: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+    purchaseDescription: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+  sample item 261670 [custitem_sanmar_unique_key]:
+    displayName: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+    salesDescription: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+    purchaseDescription: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+  sample item 261671 [custitem_sanmar_unique_key]:
+    displayName: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+    salesDescription: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
+    purchaseDescription: 'Richardson Garment Washed Trucker 111' -> 'Richardson Garment Washed Trucker'
   sample item 132911 [custitem_mtec_item_sku]:
     salesDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
     purchaseDescription: 'Badger Sport Ladies Athletic Fleece Crop Hoodie' -> 'Ladies Athletic Fleece Crop Hoodie'
   sample item 209014 [custitem_mtec_item_sku]:
     salesDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
     purchaseDescription: 'Augusta Sportswear Ladies Pulse Shorts' -> 'Ladies Pulse Shorts'
-  sample item 257420 [custitem_sanmar_unique_key]:
-    displayName: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-    salesDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-    purchaseDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-  sample item 257425 [custitem_sanmar_unique_key]:
-    displayName: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-    salesDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-    purchaseDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-  sample item 257410 [custitem_sanmar_unique_key]:
-    displayName: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-    salesDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-    purchaseDescription: 'Comfort Colors Lightweight Hooded Sweatshirt 1467' -> 'Comfort Colors Lightweight Hooded Sweatshirt'
-  sample item 247907 [custitem_ss_sku]:
-    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-  sample item 247908 [custitem_ss_sku]:
-    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-  sample item 247905 [custitem_ss_sku]:
-    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Comfort Colors Unisex Garment-Dyed Crewneck Sweatshirt'
-  sample item 247966 [custitem_mtec_item_sku]:
-    displayName: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Youth Attain Wicking Two-Button Baseball Jersey'
-    salesDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Youth Attain Wicking Two-Button Baseball Jersey'
-    purchaseDescription: 'COMFORT COLORS  Ring Spun Crewneck Sweatshirt. 1566' -> 'Youth Attain Wicking Two-Button Baseball Jersey'
+  sample item 209073 [custitem_mtec_item_sku]:
+    salesDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
+    purchaseDescription: 'Holloway Ladies Effortless Hoodie' -> 'Ladies Effortless Hoodie'
+  FAILED item 261678: 429 Too Many Requests :: 
+  FAILED item 261685: 429 Too Many Requests :: 
+  FAILED item 248012: 429 Too Many Requests :: 
+  FAILED item 248065: 429 Too Many Requests :: 
+  FAILED item 247751: 429 Too Many Requests :: 
+  FAILED item 247752: 429 Too Many Requests :: 
+  FAILED item 247722: 429 Too Many Requests :: 
+  FAILED item 247702: 429 Too Many Requests :: 
+  FAILED item 247644: 429 Too Many Requests :: 
+  FAILED item 247524: 429 Too Many Requests :: 
 
-description update: wrote 15885 item(s); unchanged: 29128; no feed copy: 5; failures: 0
+description update: wrote 6382 item(s); unchanged: 40257; no feed copy: 5; failures: 94
