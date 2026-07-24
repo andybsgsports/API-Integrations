@@ -1,0 +1,4 @@
+# Fire the recent-items probe: did the 25-child CSV import (run 30061538882,
+# task COMPLETE) actually create records, or did every row reject?
+# run: recent-items-2026-07-24a
+HOURS=3
