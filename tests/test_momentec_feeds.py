@@ -46,7 +46,7 @@ def test_parse_synthetic_feed(tmp_path):
         "Color_Hex_Value,Status,ProductVideoUrl,Ribbon,Country_Of_Origin,GTIN\n"
         '"029HBM","029HBM.BLK.2XL","711293000000","Sweatpant","60","ASI","d",'
         '"Adult | FLEECE","31.8","15.9","USD",,,"https://x/img.jpg",,,,"Size,Color",'
-        '"BLACK","2XL","1.2","lb","344","cu in","12","#101820","20",,,"HONDURAS",'
+        '"BLACK","2XL","1.2","lb","344","cu in","12","#101820","20",,"Closeout","HONDURAS",'
         '"00711293000000"\n'
     )
     f = tmp_path / "feed.csv"
@@ -58,3 +58,4 @@ def test_parse_synthetic_feed(tmp_path):
     assert sku.color_code == "BLK" and sku.size_code == "2XL"
     assert sku.gtin == "00711293000000" and sku.cost == "15.9"
     assert sku.weight == "1.2" and sku.weight_unit == "lb"
+    assert sku.ribbon == "Closeout"

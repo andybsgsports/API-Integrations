@@ -31,6 +31,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_sanmar_case_price", "SanMar Case Price", "CURRENCY", ""),
     ("custitem_sanmar_case_size", "SanMar Case Size", "INTEGER", ""),
     ("custitem_sanmar_status", "SanMar Product Status", "TEXT", ""),
+    ("custitem_sanmar_is_closeout", "SanMar Is Closeout", "CHECKBOX", ""),
     ("custitem_sanmar_qty_available", "SanMar Qty Available", "INTEGER", ""),
     ("custitem_sanmar_front_image_url", "SanMar Front Image URL", "URL", ""),
     # S&S Activewear
@@ -68,6 +69,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_mtec_front_image_url", "Momentec Back Image URL", "URL", ""),
     ("custitem_mtec_size_guide", "Momentec Size Guide", "URL", ""),
     ("custitem_mtec_instock_guaranteed", "Momentec In-Stock Guaranteed", "CHECKBOX", ""),
+    ("custitem_mtec_is_closeout", "Momentec Is Closeout", "CHECKBOX", ""),
     # Under Armour (DC OneSource)
     ("custitem_ua_part_id", "UA Part ID", "TEXT", ""),
     ("custitem_ua_style", "UA Style", "TEXT", ""),

@@ -38,7 +38,16 @@ FIELDS = [
     "custitem_mtec_front_image_url",
     "custitem_mtec_size_guide",
     "custitem_mtec_instock_guaranteed",
+    "custitem_mtec_is_closeout",
 ]
+
+# ASG "Ribbon" values that mean the item is a closeout.
+CLOSEOUT_FIELD = "custitem_mtec_is_closeout"
+
+
+def is_closeout(ribbon: str) -> bool:
+    """The ASG feed marks closeouts with a 'Closeout' Ribbon value."""
+    return "closeout" in (ribbon or "").lower()
 
 # Momentec's feed carries Brand as a numeric code (per the ASG feed spec's
 # Brand definition), so we translate it to the real brand name for the native
@@ -279,6 +288,14 @@ def main() -> int:
                 weight=_num(sku.weight), weight_unit=_weight_unit(sku.weight_unit),
                 same=_same,
             )
+            # Closeout checkbox from the feed Ribbon -- explicit boolean diff
+            # (NetSuite returns T/F, which _same can't compare to a bool).
+            if CLOSEOUT_FIELD in present:
+                closeout = is_closeout(sku.ribbon)
+                cur_co = str(row.get(CLOSEOUT_FIELD) or "").strip().upper() in (
+                    "T", "TRUE", "YES", "1")
+                if cur_co != closeout:
+                    body[CLOSEOUT_FIELD] = closeout
             stamp(body, row, "momentec")
             if not body:
                 unchanged += 1

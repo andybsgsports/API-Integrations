@@ -80,6 +80,14 @@ def _make_put(entry: dict[str, object]):
 # -- no sequencing/env needed. The sale-aware Purchase Price below needs no field.
 ON_SALE_FIELD = os.environ.get("SANMAR_ON_SALE_FIELD", "custitem_bsg_on_sale").strip()
 
+# Checkbox flagged when SanMar marks the style a closeout. SanMar signals this
+# by prefixing the product TITLE with "CLOSEOUT " (the same prefix
+# store_display_name strips); the PRODUCTSTATUS column carries no closeout
+# value. Self-enabling like the on-sale flag -- written only if it exists.
+CLOSEOUT_FIELD = os.environ.get(
+    "SANMAR_CLOSEOUT_FIELD", "custitem_sanmar_is_closeout"
+).strip()
+
 
 def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
     if not scriptid:
@@ -133,10 +141,16 @@ def _projects(client: NetSuiteClient, col: str) -> bool:
 
 
 _STATUS_PREFIX = re.compile(r"^(DISCONTINUED|CLOSEOUT|NEW)\b[\s:–-]*", re.I)
+_CLOSEOUT_PREFIX = re.compile(r"^\s*CLOSEOUT\b", re.I)
 
 
 def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(text or "")).strip()
+
+
+def is_closeout(title: str) -> bool:
+    """SanMar flags a closeout by prefixing the product title with CLOSEOUT."""
+    return bool(_CLOSEOUT_PREFIX.match(_clean(title)))
 
 
 def store_display_name(title: str, style: str) -> str:
@@ -171,7 +185,9 @@ def store_description(available_sizes: str, description: str) -> str:
 
 def build_payloads(
     styles, inventory, today: date | None = None, on_sale_field: str = ""
-) -> tuple[dict[str, dict[str, object]], dict[str, tuple], dict[str, tuple]]:
+) -> tuple[
+    dict[str, dict[str, object]], dict[str, tuple], dict[str, tuple], dict[str, bool]
+]:
     """GTIN -> field payload for every feed SKU carrying a barcode, plus
     GTIN -> (base price, cost, weight) for the native-field writes.
 
@@ -211,10 +227,13 @@ def build_payloads(
     natives: dict[str, tuple] = {}
     # gtin -> (store display name, store description) from the feed.
     store_by_gtin: dict[str, tuple] = {}
+    # gtin -> whether SanMar marks the style a closeout (title-prefixed).
+    closeout_by_gtin: dict[str, bool] = {}
     map_seen = sku_total = on_sale_count = 0
     for style in styles:
         disp = store_display_name(style.title, style.style)
         sdesc = store_description(style.available_sizes, style.description)
+        closeout = is_closeout(style.title)
         for sku in style.skus:
             if not sku.gtin:
                 continue
@@ -277,6 +296,7 @@ def build_payloads(
                     weight_unit,
                 )
                 store_by_gtin[sku.gtin] = (disp, sdesc)
+                closeout_by_gtin[sku.gtin] = closeout
     # Ground truth on whether SanMar's feed carries MAP at all: value brands
     # (e.g. Gildan) usually have no MAP, so a blank MAP field can be correct.
     print(f"SanMar MAP coverage: {map_seen}/{sku_total} feed SKUs carry a MAP "
@@ -284,7 +304,7 @@ def build_payloads(
     flag = f" (flagged via {on_sale_field})" if on_sale_field else " (On Sale field not created)"
     print(f"SanMar on sale today: {on_sale_count}/{sku_total} SKUs "
           f"-> Purchase Price = sale price{flag}")
-    return payloads, natives, store_by_gtin
+    return payloads, natives, store_by_gtin, closeout_by_gtin
 
 
 def _same(current: object, new: object) -> bool:
@@ -305,12 +325,17 @@ def main() -> int:
     styles = parse_styles(_dl(cfg, C.FILE_SDL_N))
     inventory = parse_inventory(_dl(cfg, C.FILE_DIP))
     client = NetSuiteClient(cfg.netsuite)
-    # Use the On Sale checkbox only once it exists in NetSuite (self-enabling).
+    # Use the On Sale / Closeout checkboxes only once they exist in NetSuite
+    # (self-enabling).
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
-    payloads, natives, store_by_gtin = build_payloads(
+    closeout_field = CLOSEOUT_FIELD if _field_exists(client, CLOSEOUT_FIELD) else ""
+    payloads, natives, store_by_gtin, closeout_by_gtin = build_payloads(
         styles, inventory, on_sale_field=on_sale_field
     )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
+    if closeout_field:
+        n_co = sum(1 for v in closeout_by_gtin.values() if v)
+        print(f"closeout flag active ({closeout_field}): {n_co:,} SKU(s) marked closeout")
     # Store Display Name + Store/Stock Description are native fields; write them
     # only where the column is queryable so the diff works (self-enabling).
     store_cols = [
@@ -319,7 +344,10 @@ def main() -> int:
     ]
     if store_cols:
         print(f"store fields active: {store_cols}")
-    cols = ", ".join(FIELD_ORDER + SEEN_FIELDS + store_cols)
+    cols = ", ".join(
+        FIELD_ORDER + SEEN_FIELDS + store_cols
+        + ([closeout_field] if closeout_field else [])
+    )
     gtins = sorted(payloads)
     considered = written = unchanged = priced = stored = failures = 0
     _fail_shown = [0]
@@ -376,6 +404,14 @@ def main() -> int:
             if ("stockdescription" in store_cols and sdesc
                     and not _same(row.get("stockdescription"), sdesc)):
                 body["stockDescription"] = sdesc
+            # Closeout checkbox: explicit boolean diff (NetSuite returns T/F,
+            # not a Python bool, so _same can't compare it).
+            if closeout_field:
+                cur_co = str(row.get(closeout_field) or "").strip().upper() in (
+                    "T", "TRUE", "YES", "1")
+                want_co = closeout_by_gtin.get(gtin, False)
+                if cur_co != want_co:
+                    body[closeout_field] = want_co
             stamp(body, row, "sanmar")
             if not body:
                 unchanged += 1
