@@ -1,8 +1,0 @@
-supplier-matched items: 45,839
-  plan item 203360: preferred=510, lines=[('504', False), ('510', True)]
-  plan item 244489: preferred=512, lines=[('512', True)]
-  plan item 244490: preferred=512, lines=[('512', True)]
-  plan item 244491: preferred=512, lines=[('512', True)]
-  plan item 244494: preferred=512, lines=[('512', True)]
-
-vendor sublist: WOULD write (dry run) 25 item(s); unchanged: 4903; failures: 0
