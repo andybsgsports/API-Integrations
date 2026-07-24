@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 
+from concurrent_writes import write_records
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.repository import _sql_escape
@@ -54,6 +56,7 @@ def main() -> int:
 
     considered = written = unchanged = failures = 0
     sample_shown = 0
+    write_jobs: list[tuple[str, dict]] = []
     for rid in ids:
         row = by_id[rid]
         cur = existing.get(rid, {})
@@ -102,13 +105,22 @@ def main() -> int:
         if not allow_write:
             written += 1
             continue
-        try:
-            client.update_record("inventoryItem", rid, {"itemVendor": {"items": lines}})
-            written += 1
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            if failures <= 10:
-                print(f"  FAILED item {rid}: {str(exc)[:150]}")
+        write_jobs.append((rid, {"itemVendor": {"items": lines}}))
+
+    # Bounded-concurrency writes -- sequential PATCHes here were throttle-bound
+    # and could run past the CI job's 6h wall-clock (run 30062342121). Each
+    # sublist write is independent and idempotent, so parallelism is safe.
+    _fail_shown = [0]
+
+    def _on_err(rid: str, exc: Exception) -> None:
+        _fail_shown[0] += 1
+        if _fail_shown[0] <= 10:
+            detail = getattr(exc, "payload", "")
+            print(f"  FAILED item {rid}: {str(exc)[:150]} :: {str(detail)[:200]}")
+
+    w, f = write_records(client, "inventoryItem", write_jobs, on_error=_on_err)
+    written += w
+    failures += f
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nvendor sublist: {verb} {written} item(s); unchanged: {unchanged}; "

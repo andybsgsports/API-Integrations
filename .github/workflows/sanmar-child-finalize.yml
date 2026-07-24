@@ -24,6 +24,13 @@ on:
     branches: ["claude/festive-carson-oj4y8n"]
     paths: [".sanmar-child-finalize-trigger"]
 
+# All NetSuite item-writers share one concurrency group so they QUEUE
+# instead of running at once -- the sandbox throttles hard (429s) when
+# multiple writers overlap. cancel-in-progress:false = wait, don't kill.
+concurrency:
+  group: netsuite-writes
+  cancel-in-progress: false
+
 jobs:
   finalize:
     runs-on: ubuntu-latest
