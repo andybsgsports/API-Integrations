@@ -49,6 +49,17 @@ jobs:
           SAMPLE_SIZE: ${{ github.event.inputs.sample_size }}
         run: python scripts/sanmar_sample_mapping.py
 
+      # Also echo both CSVs into the log. Artifact zips are served from Azure
+      # blob storage, which some networks block, so the log is the copy that is
+      # always reachable.
+      - name: Print sample to log
+        run: |
+          echo "===== data/sanmar_sample_mapping.csv ====="
+          cat data/sanmar_sample_mapping.csv
+          echo ""
+          echo "===== data/sanmar_sample_items.csv ====="
+          cat data/sanmar_sample_items.csv
+
       - name: Upload sample
         uses: actions/upload-artifact@v4
         with:
