@@ -1,6 +1,29 @@
-SanMar feed: 4081 styles, 161190 SKUs
-NetSuite catalog: 581 of 4081 styles already exist as parents; 3733 colour/size combo(s) already present
+SanMar feed: 4080 styles, 161210 SKUs
+NetSuite catalog: 585 of 4080 styles already exist as parents; 41827 colour/size combo(s) already present
+new children reference 174 distinct colour(s), 31 size(s) -> ensure-values checks/creates these first
 
-NEW children under existing parents :  42743  -> data/sanmar_new_children.csv (import-ready)
-NEW rows under net-new parent styles: 114714  across 3500 style(s) -> data/sanmar_new_parents.txt (need parent first)
-  net-new styles: 108084, 108085, 108087, 108089, 108090, 108091, 108105, 110172, 112FPC, 112PFP, 112PL, 112PM, 112PT, 112T, 112WH, 115, 117023, 12000, 1466, 1467Y (+3480 more)
+NEW children under existing parents :   4686  -> data/sanmar_new_children.csv (import-ready)
+  staged as 1 import part(s) of <= 24000 rows (Import Assistant caps a file at 25,000 lines):
+    data/sanmar_new_children_part01.csv: 4686 rows
+NEW rows under net-new parent styles: 114697  across 3495 style(s) -> data/sanmar_new_parents.txt (need parent first)
+  net-new styles: 108091, 108105, 110172, 112FPC, 112PFP, 112PL, 112PM, 112PT, 112T, 112WH, 115, 117023, 12000, 1466, 1467Y, 1468, 1566L, 1580, 15BT, 168 (+3475 more)
+reading colours from sanmar_new_children_colors.txt, sizes from sanmar_new_children_sizes.txt
+colors: 174 missing -> 1 NEW, 89 variant(s) of existing values
+sizes : 31 missing -> 0 NEW, 0 variant(s) of existing values
+
+sample colour variants (map to existing, NOT created):
+  'Ash Grey' -> 'ASH GREY'
+  'Black/ Anthracite/ White' -> 'Black/Anthracite/White'
+  'Black/ Black' -> 'Black/Black'
+  'Black/ Black/ Red' -> 'Black/Black/Red'
+  'Black/ Charcoal' -> 'Black/Charcoal'
+  'Black/ Dark Grey' -> 'Black/Dark Grey'
+  'Black/ Gold' -> 'Black/Gold'
+  'Black/ Graphite' -> 'Black/Graphite'
+  'Black/ Graphite/ White' -> 'Black/Graphite/White'
+  'Black/ Heather Grey' -> 'Black/Heather Grey'
+  'Black/ Orange' -> 'Black/Orange'
+  'Black/ Red' -> 'Black/Red'
+
+ensure values: created 1 colour(s) + 0 size(s); variants left for remap: 89; failures: 0
+plans written: data/sanmar_color_plan.csv, data/sanmar_size_plan.csv
