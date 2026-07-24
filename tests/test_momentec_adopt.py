@@ -33,6 +33,11 @@ def _sku(item_sku, color, size) -> MomentecSku:
     )
 
 
+def test_momentec_sku_weight_unit_defaults_blank():
+    sku = _sku("020000.BLK.M", "Black", "M")
+    assert sku.weight_unit == ""
+
+
 def _style(*skus) -> MomentecStyle:
     return MomentecStyle(parent_sku=skus[0].parent_sku, skus=list(skus))
 

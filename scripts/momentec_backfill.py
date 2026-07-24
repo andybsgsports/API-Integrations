@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from native_pricing import add_native_diffs, read_base_prices
+from native_pricing import WEIGHT_UNIT_LB, WEIGHT_UNIT_OZ, add_native_diffs, read_base_prices
 
 from momentec_netsuite.adopt import match_momentec
 from momentec_netsuite.config import get_config
@@ -55,6 +55,27 @@ BRAND_NAMES = {
     "88": "C2",
 }
 UNKNOWN_BRANDS: set[str] = set()
+
+# The ASG feed supplies weightUnit directly per row (unlike SanMar/S&S, where
+# it's inferred from a pounds-only value) -- normalize its free-text spelling
+# to NetSuite's enum string. Unrecognized units are logged, never guessed.
+WEIGHT_UNITS = {
+    "lb": WEIGHT_UNIT_LB, "lbs": WEIGHT_UNIT_LB, "pound": WEIGHT_UNIT_LB,
+    "pounds": WEIGHT_UNIT_LB,
+    "oz": WEIGHT_UNIT_OZ, "ounce": WEIGHT_UNIT_OZ, "ounces": WEIGHT_UNIT_OZ,
+}
+UNKNOWN_WEIGHT_UNITS: set[str] = set()
+
+
+def _weight_unit(raw: str) -> str:
+    key = raw.strip().lower()
+    if not key:
+        return ""
+    unit = WEIGHT_UNITS.get(key)
+    if unit is None:
+        UNKNOWN_WEIGHT_UNITS.add(raw)
+        return ""
+    return unit
 
 # Negotiated invoice discount off Momentec's wholesale price. Per the vendor
 # program terms ("Discount is half MSRP less 15% on all stock and custom
@@ -208,8 +229,8 @@ def main() -> int:
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         rows = client.suiteql(
-            f"SELECT id, upccode, cost, weight, manufacturer, custitem_ss_brand, {cols} "
-            f"FROM item WHERE id IN ({in_list})"
+            f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
+            f"custitem_ss_brand, {cols} FROM item WHERE id IN ({in_list})"
         )
         base_by_rid = read_base_prices(client, in_list)
         for row in rows:
@@ -255,7 +276,8 @@ def main() -> int:
             add_native_diffs(
                 body, row, base_by_rid, rid,
                 price=_num(sku.msrp), cost=net_cost,
-                weight=_num(sku.weight), same=_same,
+                weight=_num(sku.weight), weight_unit=_weight_unit(sku.weight_unit),
+                same=_same,
             )
             stamp(body, row, "momentec")
             if not body:
@@ -266,7 +288,7 @@ def main() -> int:
             considered += 1
             if "upcCode" in body:
                 upc_filled += 1
-            if "price" in body or "cost" in body or "weight" in body:
+            if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
             if not allow_write:
                 written += 1
@@ -283,6 +305,10 @@ def main() -> int:
         print(f"WARNING: unmapped Momentec brand code(s) -- Manufacturer left "
               f"unchanged for these (add them to BRAND_NAMES): "
               f"{sorted(UNKNOWN_BRANDS)}")
+    if UNKNOWN_WEIGHT_UNITS:
+        print(f"WARNING: unrecognized Momentec Weight_Unit value(s) -- "
+              f"weightUnit left unchanged for these (add them to WEIGHT_UNITS): "
+              f"{sorted(UNKNOWN_WEIGHT_UNITS)}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nmomentec backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "

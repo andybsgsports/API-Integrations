@@ -57,3 +57,4 @@ def test_parse_synthetic_feed(tmp_path):
     assert sku.parent_sku == "029HBM"
     assert sku.color_code == "BLK" and sku.size_code == "2XL"
     assert sku.gtin == "00711293000000" and sku.cost == "15.9"
+    assert sku.weight == "1.2" and sku.weight_unit == "lb"

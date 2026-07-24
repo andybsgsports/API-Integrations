@@ -27,6 +27,10 @@ on:
         description: "Actually create + import (false = dry-run report)"
         required: true
         default: "false"
+      max_children:
+        description: "Cap on children created (0 = no cap; use a small number to validate the import map)"
+        required: false
+        default: "0"
   push:
     branches: ["claude/festive-carson-oj4y8n"]
     paths: [".sanmar-autocreate-trigger"]
@@ -48,15 +52,18 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             LIVE="${{ github.event.inputs.live }}"
+            MAX_CHILDREN="${{ github.event.inputs.max_children }}"
           else
             LIVE=$(grep -E "^AUTOCREATE_LIVE=" .sanmar-autocreate-trigger | tail -1 | cut -d= -f2- | tr -d ' \r')
+            MAX_CHILDREN=$(grep -E "^AUTOCREATE_MAX_CHILDREN=" .sanmar-autocreate-trigger | tail -1 | cut -d= -f2- | tr -d ' \r')
           fi
           # Fail safe: only an explicit "true" turns writes on.
           [ "$LIVE" = "true" ] || LIVE="false"
           [ "$LIVE" = "true" ] && DRY="false" || DRY="true"
           echo "SYNC_DRY_RUN=$DRY" >> "$GITHUB_ENV"
+          echo "AUTOCREATE_MAX_CHILDREN=${MAX_CHILDREN:-0}" >> "$GITHUB_ENV"
           echo "IMPORT_STAMP=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
-          echo "Resolved: live=$LIVE (SYNC_DRY_RUN=$DRY)"
+          echo "Resolved: live=$LIVE (SYNC_DRY_RUN=$DRY) max_children=${MAX_CHILDREN:-0}"
       - name: Write .env from repo secrets
         run: |
           cat > .env <<EOF2
@@ -67,16 +74,26 @@ jobs:
           NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
           NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
           NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
-          NETSUITE_CSVIMPORT_SCRIPT_ID=${{ secrets.NETSUITE_CSVIMPORT_SCRIPT_ID }}
-          NETSUITE_CSVIMPORT_DEPLOY_ID=${{ secrets.NETSUITE_CSVIMPORT_DEPLOY_ID }}
-          NETSUITE_CSVIMPORT_FOLDER_ID=${{ secrets.NETSUITE_CSVIMPORT_FOLDER_ID }}
-          NETSUITE_CSVIMPORT_CHILD_MAP=${{ secrets.NETSUITE_CSVIMPORT_CHILD_MAP }}
+          # RESTlet route + map + folder are IDENTIFIERS, not credentials (the
+          # auth is the token pair above), so they live here in the clear where
+          # a mismatch is debuggable. Values verified live via the NS RESTlet
+          # IDs probe (run 30061460094) + the operator's UI: script 2344 /
+          # deploy customdeploy_bsg_csv_import, File Cabinet folder "BSG
+          # Imports" = 33710, saved map custimport_bsg_sanmar_child (id 121).
+          # The old NETSUITE_CSVIMPORT_* secrets carried values that 404'd
+          # (SSS_INVALID_SCRIPTLET_ID, run 30061173066).
+          NETSUITE_CSVIMPORT_SCRIPT_ID=customscript_bsg_csv_import
+          NETSUITE_CSVIMPORT_DEPLOY_ID=customdeploy_bsg_csv_import
+          NETSUITE_CSVIMPORT_FOLDER_ID=33710
+          NETSUITE_CSVIMPORT_CHILD_MAP=custimport_bsg_sanmar_child
           SYNC_DRY_RUN=${SYNC_DRY_RUN}
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF2
       - name: NetSuite auth preflight (no secrets printed)
         run: python scripts/ns_auth_check.py
       - name: 1) create-preview -- CSV parts + colour/size lists (read-only)
+        env:
+          AUTOCREATE_MAX_CHILDREN: ${{ env.AUTOCREATE_MAX_CHILDREN }}
         run: |
           set -o pipefail
           python scripts/sanmar_create_preview.py | tee autocreate.txt

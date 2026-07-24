@@ -1,7 +1,9 @@
-# GO LIVE: the nightly SanMar auto-create now actually creates new items each
-# night (create-preview -> ensure-values -> RESTlet import -> child-finalize).
-# Bumping this file also fires one live cycle now -- which end-to-end tests the
-# bsg_csv_import RESTlet + the NETSUITE_CSVIMPORT_* secrets on whatever new
-# existing-parent children the feed has today.
-# run: autocreate-LIVE-2026-07-21
+# LIVE but CAPPED: the saved import map (custimport_bsg_sanmar_child) now
+# exists, so autocreate can actually import -- but the map has never been
+# validated with a real batch. Cap the first cycles to 25 children so the
+# initial live import is a controlled validation, not tens of thousands of
+# creates through an unproven map. Raise/remove the cap once a capped cycle
+# lands 25 clean children (right parent, colour/size, cost, vendor).
+# run: autocreate-LIVE-capped-validation-2026-07-23
 AUTOCREATE_LIVE=true
+AUTOCREATE_MAX_CHILDREN=25

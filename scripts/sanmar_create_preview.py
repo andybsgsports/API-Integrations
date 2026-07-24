@@ -22,6 +22,7 @@ builds/validates the saved import map against (see docs/CSV_AUTOCREATE.md).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from sanmar_netsuite.config import get_config
@@ -77,19 +78,50 @@ def split_missing(styles, parent_refs: dict[str, str], skip: set[str]) -> Missin
     return out
 
 
+def cap_children(styles, parent_refs: dict[str, str], split: MissingSplit,
+                 max_children: int) -> None:
+    """Keep only the first ``max_children`` importable children; skip the rest.
+
+    Used for the first controlled live validation of a new import map -- the
+    cap flows through everything downstream (child CSV, the colour/size
+    pre-flight lists, the import, finalize) because they all honor
+    ``child_only_skip``. No-op when ``max_children`` is 0.
+    """
+    if max_children <= 0:
+        return
+    kept = 0
+    for s in styles:
+        if s.style not in parent_refs:
+            continue
+        for sku in s.skus:
+            eid = child_external_id(sku.unique_key)
+            if eid in split.child_only_skip:
+                continue
+            if kept < max_children:
+                kept += 1
+            else:
+                split.child_only_skip.add(eid)
+    split.new_children = kept
+
+
 def split_csv(src: Path, out_dir: Path, prefix: str, max_rows: int) -> list[Path]:
     """Split a CSV into <=``max_rows``-data-row parts, header repeated on each.
 
     NetSuite's Import Assistant caps a file at 25,000 lines, so a big create-only
     export has to arrive as several parts. The children are independent (each just
     references its already-existing parent), so the parts import in any order.
-    Returns the part paths ([src] unchanged if it fits in one).
+
+    ALWAYS emits ``_partNN.csv`` files (a single ``_part01.csv`` when the file
+    fits in one) -- the import step globs for part files, so returning the
+    un-split source would silently import nothing. Live-run 30055141790 hit
+    exactly that: a 25-row capped CSV produced no parts and the import no-opped.
+    Returns [] when there are no data rows (nothing to import).
     """
     with src.open(encoding="utf-8", newline="") as fh:
         header = fh.readline()
         rows = fh.readlines()
-    if len(rows) <= max_rows:
-        return [src]
+    if not rows:
+        return []
     parts: list[Path] = []
     for i in range(0, len(rows), max_rows):
         part = out_dir / f"{prefix}_part{len(parts) + 1:02d}.csv"
@@ -125,6 +157,14 @@ def main() -> int:
     # Split the "missing" rows into the two buckets; child_only_skip keeps the
     # child CSV to ONLY existing-parent adds.
     split = split_missing(styles, parent_refs, skip)
+
+    # Optional cap for a controlled first import (validating a new map with a
+    # small batch instead of tens of thousands of creates). 0 = no cap.
+    max_children = int(os.environ.get("AUTOCREATE_MAX_CHILDREN", "0") or "0")
+    if max_children > 0:
+        cap_children(styles, parent_refs, split, max_children)
+        print(f"AUTOCREATE_MAX_CHILDREN={max_children}: capping the child CSV "
+              f"to the first {split.new_children} importable row(s)")
 
     data = ROOT / "data"
     data.mkdir(parents=True, exist_ok=True)
@@ -176,12 +216,11 @@ def main() -> int:
     print("")
     print(f"NEW children under existing parents : {split.new_children:>6}  "
           f"-> {child_csv.relative_to(ROOT)} (import-ready)")
-    if len(parts) > 1:
-        print(f"  split into {len(parts)} part(s) of <= {MAX_ROWS_PER_PART} rows "
-              f"(Import Assistant caps a file at 25,000 lines):")
-        for p in parts:
-            n = sum(1 for _ in p.open(encoding="utf-8")) - 1  # minus header
-            print(f"    {p.relative_to(ROOT)}: {n} rows")
+    print(f"  staged as {len(parts)} import part(s) of <= {MAX_ROWS_PER_PART} rows "
+          f"(Import Assistant caps a file at 25,000 lines):")
+    for p in parts:
+        n = sum(1 for _ in p.open(encoding="utf-8")) - 1  # minus header
+        print(f"    {p.relative_to(ROOT)}: {n} rows")
     print(f"NEW rows under net-new parent styles: {split.new_parent_rows:>6}  "
           f"across {len(styles_sorted)} style(s) -> "
           f"{parents_txt.relative_to(ROOT)} (need parent first)")

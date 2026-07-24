@@ -38,6 +38,10 @@ class MomentecSku:
     # it's a single generic chart for every brand; kept per-SKU so brand- or
     # style-specific guides flow through automatically if the feed adds them.
     size_chart_url: str = ""
+    # Unlike SanMar/S&S (pounds only, unit inferred by native_pricing.
+    # weight_display()), the ASG Standard Data Feed spec supplies the unit
+    # directly per row (Weight_Unit, e.g. "lb") -- no heuristic needed.
+    weight_unit: str = ""
 
     @property
     def color_code(self) -> str:

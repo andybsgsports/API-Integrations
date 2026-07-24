@@ -69,8 +69,52 @@ def test_split_csv_chunks_under_limit_with_header_on_each(tmp_path):
     assert len(seen) == 2500                           # every row preserved
 
 
-def test_split_csv_leaves_small_file_as_one_part(tmp_path):
+def test_split_csv_small_file_still_emits_part01(tmp_path):
+    # The import step globs _part*.csv, so even a file that fits in one part
+    # must be staged as part01 -- returning the un-split source made the
+    # import silently no-op (live-run 30055141790).
     src = tmp_path / "small.csv"
     src.write_text("External ID,Name\nSANMAR-1,1\n", encoding="utf-8")
     parts = split_csv(src, tmp_path, "small", 1000)
-    assert parts == [src]  # fits in one -> returned unchanged, no _partNN files
+    assert [p.name for p in parts] == ["small_part01.csv"]
+    assert parts[0].read_text(encoding="utf-8") == "External ID,Name\nSANMAR-1,1\n"
+
+
+def test_split_csv_no_rows_emits_no_parts(tmp_path):
+    src = tmp_path / "empty.csv"
+    src.write_text("External ID,Name\n", encoding="utf-8")
+    assert split_csv(src, tmp_path, "empty", 1000) == []
+
+
+def test_cap_children_skips_beyond_cap_and_recounts():
+    from sanmar_create_preview import cap_children
+
+    styles = [
+        _style("K420", [_sku("A", "Black", "S"), _sku("B", "Navy", "S"),
+                        _sku("E", "Navy", "M")]),
+        _style("9999", [_sku("C", "Red", "S")]),  # net-new parent, never counts
+    ]
+    parent_refs = {"K420": "50286"}
+    split = split_missing(styles, parent_refs, {"SANMAR-A"})
+    assert split.new_children == 2  # B and E eligible
+
+    cap_children(styles, parent_refs, split, 1)
+
+    assert split.new_children == 1
+    # exactly one of B/E stays importable; the other joins the skip set
+    assert "SANMAR-B" not in split.child_only_skip
+    assert "SANMAR-E" in split.child_only_skip
+
+
+def test_cap_children_zero_is_noop():
+    from sanmar_create_preview import cap_children
+
+    styles = [_style("K420", [_sku("A", "Black", "S"), _sku("B", "Navy", "S")])]
+    parent_refs = {"K420": "1"}
+    split = split_missing(styles, parent_refs, set())
+    before = set(split.child_only_skip)
+
+    cap_children(styles, parent_refs, split, 0)
+
+    assert split.new_children == 2
+    assert split.child_only_skip == before
