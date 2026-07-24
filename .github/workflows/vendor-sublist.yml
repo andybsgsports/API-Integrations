@@ -18,6 +18,13 @@ on:
     branches: ["claude/festive-carson-oj4y8n"]
     paths: [".vendor-sublist-trigger"]
 
+# All NetSuite item-writers share one concurrency group so they QUEUE
+# instead of running at once -- the sandbox throttles hard (429s) when
+# multiple writers overlap. cancel-in-progress:false = wait, don't kill.
+concurrency:
+  group: netsuite-writes
+  cancel-in-progress: false
+
 jobs:
   backfill:
     runs-on: ubuntu-latest
@@ -66,7 +73,9 @@ jobs:
       - name: Run vendor sublist writer
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
-        run: python scripts/vendor_sublist.py | tee vendor_sublist_report.txt
+        run: |
+          set -o pipefail
+          python scripts/vendor_sublist.py | tee vendor_sublist_report.txt
 
       - name: Commit report back to this branch
         if: always()

@@ -39,7 +39,9 @@ jobs:
           EOF2
 
       - name: Find an image upload folder
-        run: python scripts/ns_folder_probe.py | tee folder_probe.txt
+        run: |
+          set -o pipefail
+          python scripts/ns_folder_probe.py | tee folder_probe.txt
 
       - name: Extract folder id into env
         run: |
