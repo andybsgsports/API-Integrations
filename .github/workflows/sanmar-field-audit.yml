@@ -44,6 +44,9 @@ jobs:
       - name: NetSuite auth preflight (no secrets printed)
         run: python scripts/ns_auth_check.py
 
+      - name: Weight unit probe (what does NetSuite accept?)
+        run: python scripts/ns_weightunit_probe.py
+
       - name: Field coverage audit
         env:
           AUDIT_LOW_WATER: ${{ github.event.inputs.low_water }}
