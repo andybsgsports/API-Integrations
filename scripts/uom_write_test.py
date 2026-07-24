@@ -37,7 +37,8 @@ def _try(client, item_id: str, label: str, body: dict) -> bool:
     try:
         client.update_record("inventoryItem", item_id, body)
     except Exception as exc:  # noqa: BLE001
-        print(f"   REJECTED: {str(exc)[:120]} :: {str(getattr(exc, 'payload', ''))[:220]}")
+        print(f"   REJECTED: {str(exc)[:120]}")
+        print(f"   FULL PAYLOAD: {getattr(exc, 'payload', '')}")
         return False
     print(f"   ACCEPTED; UOM now: {_uom(client, item_id)}")
     return True
