@@ -1,0 +1,7 @@
+# DRY run: list the bottoms (shorts/pants/leggings/...) that WOULD flip from
+# Each to Pair, so the match list can be eyeballed before any writes. Detection
+# is by garment word in the Display Name. Flip to DRY_RUN=false once the list
+# looks right.
+# run: pair-uom-dryrun-2026-07-24
+DRY_RUN=true
+MAX_ITEMS=0
