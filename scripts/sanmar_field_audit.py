@@ -54,7 +54,8 @@ TEXT_FIELDS: list[tuple[str, str]] = [
     ("salesdescription", "Sales Description"),
     ("storedisplayname", "Store Display Name"),
     ("storedescription", "Store Description"),
-    ("stockdescription", "Stock Description"),
+    # Stock Description is intentionally not written (21-char cap) and so is
+    # intentionally not audited -- flagging it would report a permanent GAP.
     ("custitem_feed_source", "Feed Source (heartbeat)"),
     ("custitem_feed_last_seen", "Feed Last Seen (heartbeat)"),
 ]

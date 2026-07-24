@@ -88,12 +88,14 @@ CLOSEOUT_FIELD = os.environ.get(
     "SANMAR_CLOSEOUT_FIELD", "custitem_sanmar_is_closeout"
 ).strip()
 
-# NetSuite's native Stock Description is a legacy short field hard-capped at 21
-# characters. Store Description (storedescription) holds the full marketing copy;
-# Stock Description only gets a truncated head. Exceeding the cap makes NetSuite
-# reject the ENTIRE record PATCH (USER_ERROR), which would nuke every other field
-# update on the item -- so truncate before writing and diff against the truncation.
-STOCK_DESC_MAX = 21
+# NOTE: we deliberately do NOT write NetSuite's native Stock Description.
+# It is a legacy field hard-capped at 21 characters -- far too short for the
+# marketing copy Store Description carries, so anything we put there is a
+# meaningless fragment ("Port Authority Ladies"). Worse, exceeding the cap makes
+# NetSuite reject the ENTIRE record PATCH (USER_ERROR), which silently killed
+# every other field update on the item: five consecutive runs between
+# 2026-07-22 and 2026-07-24 attempted 45,531 items and wrote 0. Store Display
+# Name and Store Description are written below; Stock Description is left alone.
 
 
 def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
@@ -346,7 +348,7 @@ def main() -> int:
     # Store Display Name + Store/Stock Description are native fields; write them
     # only where the column is queryable so the diff works (self-enabling).
     store_cols = [
-        c for c in ("storedisplayname", "storedescription", "stockdescription")
+        c for c in ("storedisplayname", "storedescription")
         if _projects(client, c)
     ]
     if store_cols:
@@ -408,13 +410,8 @@ def main() -> int:
             if ("storedescription" in store_cols and sdesc
                     and not _same(row.get("storedescription"), sdesc)):
                 body["storeDescription"] = sdesc
-            # Stock Description is hard-capped at 21 chars (STOCK_DESC_MAX);
-            # write only the truncated head and diff against it so we don't
-            # 400 the whole record and don't churn on every run.
-            sdesc_stock = sdesc[:STOCK_DESC_MAX]
-            if ("stockdescription" in store_cols and sdesc_stock
-                    and not _same(row.get("stockdescription"), sdesc_stock)):
-                body["stockDescription"] = sdesc_stock
+            # Stock Description intentionally not written -- see the note at the
+            # top of this module (21-char cap rejects the whole record).
             # Closeout checkbox: explicit boolean diff (NetSuite returns T/F,
             # not a Python bool, so _same can't compare it).
             if closeout_field:
@@ -432,7 +429,7 @@ def main() -> int:
             considered += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
-            if any(k in body for k in ("storeDisplayName", "storeDescription", "stockDescription")):
+            if any(k in body for k in ("storeDisplayName", "storeDescription")):
                 stored += 1
             if not allow_write:
                 written += 1
