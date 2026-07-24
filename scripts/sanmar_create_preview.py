@@ -110,13 +110,18 @@ def split_csv(src: Path, out_dir: Path, prefix: str, max_rows: int) -> list[Path
     NetSuite's Import Assistant caps a file at 25,000 lines, so a big create-only
     export has to arrive as several parts. The children are independent (each just
     references its already-existing parent), so the parts import in any order.
-    Returns the part paths ([src] unchanged if it fits in one).
+
+    ALWAYS emits ``_partNN.csv`` files (a single ``_part01.csv`` when the file
+    fits in one) -- the import step globs for part files, so returning the
+    un-split source would silently import nothing. Live-run 30055141790 hit
+    exactly that: a 25-row capped CSV produced no parts and the import no-opped.
+    Returns [] when there are no data rows (nothing to import).
     """
     with src.open(encoding="utf-8", newline="") as fh:
         header = fh.readline()
         rows = fh.readlines()
-    if len(rows) <= max_rows:
-        return [src]
+    if not rows:
+        return []
     parts: list[Path] = []
     for i in range(0, len(rows), max_rows):
         part = out_dir / f"{prefix}_part{len(parts) + 1:02d}.csv"
@@ -211,12 +216,11 @@ def main() -> int:
     print("")
     print(f"NEW children under existing parents : {split.new_children:>6}  "
           f"-> {child_csv.relative_to(ROOT)} (import-ready)")
-    if len(parts) > 1:
-        print(f"  split into {len(parts)} part(s) of <= {MAX_ROWS_PER_PART} rows "
-              f"(Import Assistant caps a file at 25,000 lines):")
-        for p in parts:
-            n = sum(1 for _ in p.open(encoding="utf-8")) - 1  # minus header
-            print(f"    {p.relative_to(ROOT)}: {n} rows")
+    print(f"  staged as {len(parts)} import part(s) of <= {MAX_ROWS_PER_PART} rows "
+          f"(Import Assistant caps a file at 25,000 lines):")
+    for p in parts:
+        n = sum(1 for _ in p.open(encoding="utf-8")) - 1  # minus header
+        print(f"    {p.relative_to(ROOT)}: {n} rows")
     print(f"NEW rows under net-new parent styles: {split.new_parent_rows:>6}  "
           f"across {len(styles_sorted)} style(s) -> "
           f"{parents_txt.relative_to(ROOT)} (need parent first)")
