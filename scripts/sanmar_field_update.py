@@ -88,6 +88,13 @@ CLOSEOUT_FIELD = os.environ.get(
     "SANMAR_CLOSEOUT_FIELD", "custitem_sanmar_is_closeout"
 ).strip()
 
+# NetSuite's native Stock Description is a legacy short field hard-capped at 21
+# characters. Store Description (storedescription) holds the full marketing copy;
+# Stock Description only gets a truncated head. Exceeding the cap makes NetSuite
+# reject the ENTIRE record PATCH (USER_ERROR), which would nuke every other field
+# update on the item -- so truncate before writing and diff against the truncation.
+STOCK_DESC_MAX = 21
+
 
 def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
     if not scriptid:
@@ -401,9 +408,13 @@ def main() -> int:
             if ("storedescription" in store_cols and sdesc
                     and not _same(row.get("storedescription"), sdesc)):
                 body["storeDescription"] = sdesc
-            if ("stockdescription" in store_cols and sdesc
-                    and not _same(row.get("stockdescription"), sdesc)):
-                body["stockDescription"] = sdesc
+            # Stock Description is hard-capped at 21 chars (STOCK_DESC_MAX);
+            # write only the truncated head and diff against it so we don't
+            # 400 the whole record and don't churn on every run.
+            sdesc_stock = sdesc[:STOCK_DESC_MAX]
+            if ("stockdescription" in store_cols and sdesc_stock
+                    and not _same(row.get("stockdescription"), sdesc_stock)):
+                body["stockDescription"] = sdesc_stock
             # Closeout checkbox: explicit boolean diff (NetSuite returns T/F,
             # not a Python bool, so _same can't compare it).
             if closeout_field:
