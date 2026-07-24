@@ -1,18 +1,20 @@
-"""Set bottoms (shorts / pants / leggings / ...) to the "Pair(s)" unit instead
-of "Each".
+"""Detect bottoms (shorts / pants / leggings / ...) and the "Pair(s)" UoM ids.
 
-Vendor-agnostic: the bottoms in scope span SanMar, Augusta/Momentec, S&S, so
-detection is by the garment word in the item's Display Name (falling back to
-its name/code), not by any one vendor's feed. Plural forms are used on purpose
--- "shorts" matches "B-Core Shorts" but NOT "Short Sleeve Tee".
+IMPORTANT -- this does NOT work as an update against EXISTING items. NetSuite
+rejects any Units Type change on a saved item with a hard USER_ERROR: "You may
+not change the units type of an item after it has been set." (Confirmed live,
+run 30106494625; the same rule applies in the UI.) So the 312 existing bottoms
+can't be moved off "Each". An item only gets "Pair" at CREATION time.
 
-Pair ids are the account's UoM setup, confirmed live by scripts/uom_probe.py:
-    Units Type "Pair" = 6 ; Pair unit = 13  (vs Each: type 1, unit 1)
+This module is kept as the reusable BUILDING BLOCKS for the create-time path:
+- ``is_bottom(...)`` -- vendor-agnostic bottom detection by the plural garment
+  word in the Display Name (plural dodges the "Short Sleeve Tee" false match).
+- ``PAIR_BODY`` / the ids -- the account's Pair UoM (Units Type 6, unit 13),
+  confirmed by scripts/uom_probe.py, ready to drop into an item-create payload
+  (or the CSV create map) so newly-created bottoms are born as Pair.
 
-One-directional and diff-aware: only flips a matched bottom whose Units Type
-isn't already Pair; never touches non-bottoms and never flips Pair back to
-Each. Dry-run by default -- the dry run prints what it WOULD flip so the match
-list can be eyeballed before any writes. UPDATE_MAX_ITEMS caps writes.
+``plan_body`` / ``main`` remain only to exercise the detector in tests; running
+main() live would just collect 400s.
 """
 
 from __future__ import annotations

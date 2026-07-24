@@ -1,5 +1,0 @@
-# Re-fire: capture the FULL "may not change the units type" error text to know
-# the exact constraint (is it transaction-based, i.e. new items could still get
-# Pair at creation?).
-# run: uom-write-test-2026-07-24b
-ITEM_ID=30251

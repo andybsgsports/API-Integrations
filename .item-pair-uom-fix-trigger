@@ -1,6 +1,0 @@
-# LIVE: dry run matched 312 bottoms (all genuine shorts/pants/etc., 0 failures,
-# no "Short Sleeve" false positives). Set Units Type/Stock/Purchase/Sale Unit =
-# Pair on them. One-directional, diff-aware, in the netsuite-writes group.
-# run: pair-uom-LIVE-2026-07-24
-DRY_RUN=false
-MAX_ITEMS=0
