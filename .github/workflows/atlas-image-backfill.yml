@@ -5,10 +5,6 @@ permissions:
   issues: write
 
 on:
-  schedule:
-    # Nightly steady-state run (diff-aware); staggered so live
-    # writers never overlap on the same records.
-    - cron: "0 13 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

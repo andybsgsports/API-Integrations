@@ -5,10 +5,6 @@ permissions:
   issues: write
 
 on:
-  schedule:
-    # 16:00 UTC nightly, after every feed writer (last is DCOS at 15:00) so
-    # tonight's last-seen stamps are already in place.
-    - cron: "0 16 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

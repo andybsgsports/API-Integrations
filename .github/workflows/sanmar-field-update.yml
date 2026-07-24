@@ -5,15 +5,6 @@ permissions:
   issues: write
 
 on:
-  schedule:
-    # 10:00 UTC, an hour after the nightly sync window — diff-aware, so
-    # steady-state runs only write what changed since yesterday.
-    - cron: "0 10 * * *"
-    # Intraday inventory refresh: ~7am and ~1pm Central (UTC-5, CDT). Staggered
-    # 15 min behind Momentec so the live writers never overlap on the same
-    # records. Diff-aware, so intraday pushes only what changed (mainly stock).
-    - cron: "35 12 * * *"
-    - cron: "35 18 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
