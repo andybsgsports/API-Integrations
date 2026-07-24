@@ -67,7 +67,8 @@ UNKNOWN_BRANDS: set[str] = set()
 
 # The ASG feed supplies weightUnit directly per row (unlike SanMar/S&S, where
 # it's inferred from a pounds-only value) -- normalize its free-text spelling
-# to NetSuite's enum string. Unrecognized units are logged, never guessed.
+# to NetSuite's unit reference ({"id": ...}, see native_pricing).
+# Unrecognized units are logged, never guessed.
 WEIGHT_UNITS = {
     "lb": WEIGHT_UNIT_LB, "lbs": WEIGHT_UNIT_LB, "pound": WEIGHT_UNIT_LB,
     "pounds": WEIGHT_UNIT_LB,
@@ -76,7 +77,8 @@ WEIGHT_UNITS = {
 UNKNOWN_WEIGHT_UNITS: set[str] = set()
 
 
-def _weight_unit(raw: str) -> str:
+def _weight_unit(raw: str) -> dict[str, str] | str:
+    """Unit reference for the feed's free-text unit; "" when unrecognized."""
     key = raw.strip().lower()
     if not key:
         return ""

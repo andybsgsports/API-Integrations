@@ -368,6 +368,10 @@ def main() -> int:
             print(f"  FAILED item {rid}: {str(exc)[:150]} :: {str(detail)[:300]}")
 
     chunks_skipped = 0
+    # Fields NetSuite rejected and we retried without, so a single bad value
+    # costs that field rather than the whole record. Reported below -- a
+    # silently dropped field is exactly what hid for days.
+    dropped: dict[str, int] = {}
     for i in range(0, len(gtins), 250):
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
@@ -438,7 +442,9 @@ def main() -> int:
 
         # Write this chunk's records with bounded concurrency -- individual
         # sequential PATCHes are throttle-bound and can run for hours.
-        w, f = write_records(client, "inventoryItem", write_jobs, on_error=_on_err)
+        w, f = write_records(
+            client, "inventoryItem", write_jobs, on_error=_on_err, dropped=dropped
+        )
         written += w
         failures += f
 
@@ -457,6 +463,11 @@ def main() -> int:
             f"kept failing (sustained NetSuite throttling) -- those items were "
             f"not considered this run; diff-aware, so the next run picks them up."
         )
+    if dropped:
+        print("\nWARNING: NetSuite rejected these field(s); the rest of each "
+              "record was written without them:")
+        for field, n in sorted(dropped.items(), key=lambda kv: -kv[1]):
+            print(f"  {field}: dropped on {n:,} record(s)")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "

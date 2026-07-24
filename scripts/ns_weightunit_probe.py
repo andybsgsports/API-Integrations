@@ -45,11 +45,21 @@ def main() -> int:
     print("=" * 70)
     print("2. REST representation on items that carry a weight unit")
     print("=" * 70)
-    # Sample a few items that already have the field set -- their REST payload
-    # shows the exact shape/spelling a PATCH must use.
-    sample = client.suiteql(
-        "SELECT id FROM item WHERE weightunit IS NOT NULL AND rownum <= 5"
-    )
+    # One item per DISTINCT stored value, so every id in the account gets
+    # mapped to its unit name -- sampling blindly returns whichever value is
+    # most common and leaves the rarer ids (here, id 2 on just 7 items)
+    # unidentified, which is precisely the guess that has to be avoided.
+    sample = []
+    for r in rows:
+        raw = r.get("wu")
+        if raw is None or str(raw).strip() in ("", "None"):
+            continue
+        hit = client.suiteql(
+            f"SELECT id FROM item WHERE weightunit = '{str(raw).strip()}' "
+            f"AND rownum <= 1"
+        )
+        if hit:
+            sample.append(hit[0])
     if not sample:
         print("  no item carries a weightunit -- nothing to compare against")
     for row in sample:

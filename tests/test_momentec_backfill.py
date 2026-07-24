@@ -20,13 +20,14 @@ from momentec_backfill import (  # noqa: E402
 
 
 def test_recognizes_lb_variants():
+    # weightUnit is a NetSuite reference field -- {"id": ...}, not a bare name.
     for raw in ("lb", "Lb", " LBS ", "pound", "Pounds"):
-        assert _weight_unit(raw) == "lb"
+        assert _weight_unit(raw) == {"id": "1"}
 
 
 def test_recognizes_oz_variants():
     for raw in ("oz", "OZ", "ounce", "Ounces"):
-        assert _weight_unit(raw) == "oz"
+        assert _weight_unit(raw) == {"id": "2"}
 
 
 def test_blank_stays_blank():
