@@ -74,10 +74,18 @@ jobs:
           NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
           NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
           NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
-          NETSUITE_CSVIMPORT_SCRIPT_ID=${{ secrets.NETSUITE_CSVIMPORT_SCRIPT_ID }}
-          NETSUITE_CSVIMPORT_DEPLOY_ID=${{ secrets.NETSUITE_CSVIMPORT_DEPLOY_ID }}
-          NETSUITE_CSVIMPORT_FOLDER_ID=${{ secrets.NETSUITE_CSVIMPORT_FOLDER_ID }}
-          NETSUITE_CSVIMPORT_CHILD_MAP=${{ secrets.NETSUITE_CSVIMPORT_CHILD_MAP }}
+          # RESTlet route + map + folder are IDENTIFIERS, not credentials (the
+          # auth is the token pair above), so they live here in the clear where
+          # a mismatch is debuggable. Values verified live via the NS RESTlet
+          # IDs probe (run 30061460094) + the operator's UI: script 2344 /
+          # deploy customdeploy_bsg_csv_import, File Cabinet folder "BSG
+          # Imports" = 33710, saved map custimport_bsg_sanmar_child (id 121).
+          # The old NETSUITE_CSVIMPORT_* secrets carried values that 404'd
+          # (SSS_INVALID_SCRIPTLET_ID, run 30061173066).
+          NETSUITE_CSVIMPORT_SCRIPT_ID=customscript_bsg_csv_import
+          NETSUITE_CSVIMPORT_DEPLOY_ID=customdeploy_bsg_csv_import
+          NETSUITE_CSVIMPORT_FOLDER_ID=33710
+          NETSUITE_CSVIMPORT_CHILD_MAP=custimport_bsg_sanmar_child
           SYNC_DRY_RUN=${SYNC_DRY_RUN}
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF2
