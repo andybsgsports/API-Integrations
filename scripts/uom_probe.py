@@ -55,14 +55,43 @@ def main() -> int:
                 print("     PAIR? " + ", ".join(f"{k}={v}" for k, v in r.items()))
             break
 
-    # 3. What a real bottoms item carries today (from the screenshot: Ladies
-    #    B-Core Shorts, style 411600). Confirms the fields we'd rewrite.
-    _q(
-        client,
-        "sample bottoms item UOM (style 411600 = B-Core Shorts)",
-        "SELECT id, itemid, unitstype, stockunit, purchaseunit, saleunit "
-        "FROM item WHERE custitem_sanmar_style = '411600' AND rownum <= 3",
-    )
+    # 3. The REST id space (the important part -- writing id 13 for the Pair
+    #    unit was rejected, so REST uses different ids than unitstypeuom).
+    #    GET a real item that already has UOM set and print its unit refs
+    #    verbatim: that shows what a stock/purchase/sale unit id looks like.
+    print("\n== REST view of a UOM-bearing item (real id format) ==")
+    try:
+        ref_rows = client.suiteql(
+            "SELECT id FROM item WHERE unitstype IS NOT NULL "
+            "AND matrixtype IN ('PARENT', 'CHILD') AND rownum <= 1"
+        )
+        if ref_rows:
+            rid = str(ref_rows[0]["id"])
+            rec = client.get_record("inventoryItem", rid)
+            for f in ("unitsType", "stockUnit", "purchaseUnit", "saleUnit"):
+                print(f"  {f}: {rec.get(f)}")
+        else:
+            print("  (no UOM-bearing item found)")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (item GET failed: {str(exc)[:200]})")
+
+    # 4. The unitsType record itself, via REST -- its member units carry the
+    #    ids REST wants for stock/purchase/sale unit. Try Pair (6) and Each (1).
+    for utype in ("1", "6"):
+        print(f"\n== REST unitsType/{utype} (member units + their ids) ==")
+        try:
+            rec = client.get_record("unitsType", utype)
+            print(f"  name: {rec.get('name')}")
+            uoms = rec.get("uom") or rec.get("uomList") or {}
+            items = uoms.get("items") if isinstance(uoms, dict) else uoms
+            for u in (items or []):
+                print(f"    unit id={u.get('internalId') or u.get('id')} "
+                      f"name={u.get('unitName') or u.get('name')} "
+                      f"base={u.get('baseUnit')} abbr={u.get('abbreviation')}")
+            if not items:
+                print(f"  raw: {rec}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  (unitsType GET failed: {str(exc)[:200]})")
     return 0
 
 

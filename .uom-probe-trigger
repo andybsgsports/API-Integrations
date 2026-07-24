@@ -1,4 +1,5 @@
-# Fire the read-only UOM probe: find the Units Type + unit ids for "Pair(s)"
-# so bottoms (shorts/pants/leggings) can be switched off "Each".
-# run: uom-probe-2026-07-24a
-PROBE=1
+# Re-fire: find the REST id space for stock/purchase/sale unit (id 13 from
+# SuiteQL was rejected on the live pair write). GETs a real UOM item + the
+# unitsType records.
+# run: uom-probe-2026-07-24b
+PROBE=2
