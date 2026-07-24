@@ -1,0 +1,5 @@
+# One-item experiment: find the PATCH shape that switches item 30251 (Girls
+# Pulse Team Shorts) to Pair. It's a genuine bottom, so ending up Pair is
+# correct -- no cleanup.
+# run: uom-write-test-2026-07-24a
+ITEM_ID=30251
