@@ -11,6 +11,10 @@ on:
         description: "Flag fields below this coverage percentage"
         required: false
         default: "90"
+      weightunit_write_test:
+        description: "true = PATCH one item's weightUnit and restore it (proves the field shape)"
+        required: false
+        default: "false"
 
 jobs:
   audit:
@@ -45,6 +49,8 @@ jobs:
         run: python scripts/ns_auth_check.py
 
       - name: Weight unit probe (what does NetSuite accept?)
+        env:
+          WEIGHTUNIT_WRITE_TEST: ${{ github.event.inputs.weightunit_write_test }}
         run: python scripts/ns_weightunit_probe.py
 
       - name: Field coverage audit

@@ -20,6 +20,8 @@ Writes nothing.
 
 from __future__ import annotations
 
+import os
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
@@ -78,7 +80,47 @@ def main() -> int:
 
     print()
     print("Whatever shape section 2 prints is what a PATCH must send.")
-    return 0
+
+    if os.environ.get("WEIGHTUNIT_WRITE_TEST", "").strip().lower() != "true":
+        print("\n(set WEIGHTUNIT_WRITE_TEST=true to verify a real PATCH)")
+        return 0
+
+    print()
+    print("=" * 70)
+    print("3. Single-item write test (PATCH, then restore)")
+    print("=" * 70)
+    # Proving the shape on one item costs ~2 minutes; discovering it was wrong
+    # during a full pass costs ~1h45m and writes nothing. Two guesses have
+    # already been paid for at that price, so the round trip is worth it.
+    target = client.suiteql(
+        "SELECT id FROM item WHERE weightunit = '1' AND rownum <= 1"
+    )
+    if not target:
+        print("  no item with weightunit=1 to test against")
+        return 0
+    rid = str(target[0]["id"])
+    before = client.get_record("inventoryItem", rid).get("weightUnit")
+    print(f"  item {rid} before: {before!r}")
+
+    try:
+        client.update_record("inventoryItem", rid, {"weightUnit": {"id": "2"}})
+    except Exception as exc:  # noqa: BLE001 - the whole point is to see this
+        print(f"  PATCH REJECTED: {str(exc)[:160]}")
+        print(f"      payload: {str(getattr(exc, 'payload', ''))[:300]}")
+        return 1
+
+    after = client.get_record("inventoryItem", rid).get("weightUnit")
+    print(f"  item {rid} after PATCH {{'id': '2'}}: {after!r}")
+
+    # Put it back the way we found it, so the probe leaves no trace.
+    client.update_record("inventoryItem", rid, {"weightUnit": {"id": "1"}})
+    restored = client.get_record("inventoryItem", rid).get("weightUnit")
+    print(f"  item {rid} restored: {restored!r}")
+
+    ok = isinstance(after, dict) and str(after.get("id")) == "2"
+    print(f"\n  RESULT: reference-shape PATCH {'ACCEPTED' if ok else 'DID NOT STICK'}"
+          f"; id 2 = {after.get('refName') if isinstance(after, dict) else '?'}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
