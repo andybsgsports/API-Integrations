@@ -1,0 +1,50 @@
+name: SanMar Field Audit (read-only)
+
+# Reports which SanMar fields are actually populated in NetSuite. Writes
+# nothing, so it is deliberately NOT in the netsuite-writes concurrency group
+# and is safe to run while a writer is mid-flight.
+
+on:
+  workflow_dispatch:
+    inputs:
+      low_water:
+        description: "Flag fields below this coverage percentage"
+        required: false
+        default: "90"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+
+      - name: Field coverage audit
+        env:
+          AUDIT_LOW_WATER: ${{ github.event.inputs.low_water }}
+        run: python scripts/sanmar_field_audit.py
