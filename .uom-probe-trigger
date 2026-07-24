@@ -1,0 +1,4 @@
+# Fire the read-only UOM probe: find the Units Type + unit ids for "Pair(s)"
+# so bottoms (shorts/pants/leggings) can be switched off "Each".
+# run: uom-probe-2026-07-24a
+PROBE=1
