@@ -53,6 +53,9 @@ jobs:
           WEIGHTUNIT_WRITE_TEST: ${{ github.event.inputs.weightunit_write_test }}
         run: python scripts/ns_weightunit_probe.py
 
+      - name: Store fields probe (did they persist?)
+        run: python scripts/ns_storefields_probe.py
+
       - name: Field coverage audit
         env:
           AUDIT_LOW_WATER: ${{ github.event.inputs.low_water }}
