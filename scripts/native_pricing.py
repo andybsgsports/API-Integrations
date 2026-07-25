@@ -12,26 +12,37 @@ from __future__ import annotations
 
 BASE_PRICE_LEVEL = "1"
 
-# NetSuite weightUnit enum strings. "oz" is our best-informed guess (matches
-# the item_uom_fix.py convention already used for "lb", which is confirmed
-# live) -- verify against a real single-item write before a broad rollout,
-# same as any other never-before-used enum value in this codebase.
-WEIGHT_UNIT_OZ = "oz"
-WEIGHT_UNIT_LB = "lb"
+# weightUnit is a REFERENCE field, not a string. A REST GET returns
+# {'id': '1', 'refName': 'lb'}, and a PATCH must send {'id': ...} to match --
+# sending the bare string "lb" is rejected with "Invalid Field Value lb for the
+# following field: weightunit", which (because NetSuite validates a record as a
+# unit) failed all 45,531 items on the 2026-07-24 run.
+#
+# Ids confirmed against the account, not assumed: SuiteQL GROUP BY weightunit
+# returns the internal id, and a REST GET of an item carrying each id gives its
+# name. Verified by scripts/ns_weightunit_probe.py.
+WEIGHT_UNIT_LB_ID = "1"
+WEIGHT_UNIT_OZ_ID = "2"
+WEIGHT_UNIT_OZ = {"id": WEIGHT_UNIT_OZ_ID}
+WEIGHT_UNIT_LB = {"id": WEIGHT_UNIT_LB_ID}
 # Items lighter than this display in ounces instead of pounds (0.3 lb reads
 # oddly small; 4.8 oz reads naturally) -- both SanMar and S&S report piece
 # weight in pounds, so the number is converted to match whichever unit wins.
 OZ_THRESHOLD_LB = 1.0
 
 
-def weight_display(weight_lb: float | None) -> tuple[float | None, str | None]:
-    """(display_weight, unit) for a weight expressed in pounds.
+def weight_display(
+    weight_lb: float | None,
+) -> tuple[float | None, dict[str, str] | None]:
+    """(display_weight, unit reference) for a weight expressed in pounds.
 
     weightUnit is a real physical-quantity label (NetSuite uses it for
     shipping calculations), not cosmetic -- so the NUMBER is converted to
     match whichever unit is chosen, never left as a bare pound value under
     an "oz" label. Returns ``(None, None)`` when weight_lb is None (nothing
     to base a choice on -- caller should leave both fields untouched).
+
+    The unit comes back as NetSuite's reference shape ``{"id": ...}``.
     """
     if weight_lb is None:
         return None, None
@@ -77,19 +88,26 @@ def add_native_diffs(
     price: float | None,
     cost: float | None,
     weight: float | None,
-    weight_unit: str | None = None,
+    weight_unit: dict[str, str] | str | None = None,
     same,
 ) -> None:
     """Extend ``body`` with price/cost/weight(+unit) wherever the target differs.
 
     weight and weight_unit are written together -- they must always agree
     (weightUnit is a real unit label, not cosmetic), so callers should
-    compute both from the same source value (see weight_display)."""
+    compute both from the same source value (see weight_display).
+
+    weight_unit is NetSuite's reference shape ``{"id": ...}``; a bare string is
+    accepted and treated as the id, since SuiteQL reports the current value as
+    that id and the diff has to compare like with like."""
     if price is not None and not same(base_by_rid.get(rid), price):
         body["price"] = base_price_body(price)
     if cost is not None and not same(row.get("cost"), cost):
         body["cost"] = cost
     if weight is not None and not same(row.get("weight"), weight):
         body["weight"] = weight
-    if weight_unit and str(row.get("weightunit") or "") != weight_unit:
-        body["weightUnit"] = weight_unit
+    if weight_unit:
+        want_id = weight_unit["id"] if isinstance(weight_unit, dict) else str(weight_unit)
+        # SuiteQL returns the internal id ("1"/"2"), so compare ids, not names.
+        if str(row.get("weightunit") or "") != want_id:
+            body["weightUnit"] = {"id": want_id}
