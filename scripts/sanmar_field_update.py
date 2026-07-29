@@ -85,10 +85,11 @@ def _make_put(entry: dict[str, object]):
 # -- no sequencing/env needed. The sale-aware Purchase Price below needs no field.
 ON_SALE_FIELD = os.environ.get("SANMAR_ON_SALE_FIELD", "custitem_bsg_on_sale").strip()
 
-# Checkbox flagged when SanMar marks the style a closeout. SanMar signals this
-# by prefixing the product TITLE with "CLOSEOUT " (the same prefix
-# store_display_name strips); the PRODUCTSTATUS column carries no closeout
-# value. Self-enabling like the on-sale flag -- written only if it exists.
+# Checkbox for BSG's DERIVED closeout rule (see is_closeout): discontinued
+# with stock remaining. SanMar itself publishes no usable closeout signal --
+# a full scan of 161,271 feed SKUs found 'CloseOut' on exactly one, and the
+# old title-prefix rule matched none. Self-enabling like the on-sale flag --
+# written only if the field exists in NetSuite.
 CLOSEOUT_FIELD = os.environ.get(
     "SANMAR_CLOSEOUT_FIELD", "custitem_sanmar_is_closeout"
 ).strip()
@@ -156,16 +157,30 @@ def _projects(client: NetSuiteClient, col: str) -> bool:
 
 
 _STATUS_PREFIX = re.compile(r"^(DISCONTINUED|CLOSEOUT|NEW)\b[\s:–-]*", re.I)
-_CLOSEOUT_PREFIX = re.compile(r"^\s*CLOSEOUT\b", re.I)
 
 
 def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(text or "")).strip()
 
 
-def is_closeout(title: str) -> bool:
-    """SanMar flags a closeout by prefixing the product title with CLOSEOUT."""
-    return bool(_CLOSEOUT_PREFIX.match(_clean(title)))
+DISCONTINUED_STATUS = "discontinued"
+
+
+def is_closeout(product_status: str, qty: int | None) -> bool:
+    """DERIVED closeout: discontinued but still sellable.
+
+    SanMar publishes no usable closeout signal of its own -- a full scan of
+    all 161,271 feed SKUs found PRODUCTSTATUS values Regular (70.0%),
+    Discontinued (18.4%), Active (6.9%), New (3.9%), Coming soon (0.8%) and
+    'CloseOut' on exactly ONE SKU. The old title-prefix rule matched 0 of
+    160,404. So this is a BSG business rule (Andy, 2026-07-29), not vendor
+    data: an item SanMar has discontinued while stock remains is being
+    cleared out; once the stock reaches zero it is simply gone, not a
+    closeout, so it drops back off the flag on the next run.
+    """
+    if str(product_status or "").strip().lower() != DISCONTINUED_STATUS:
+        return False
+    return qty is not None and int(qty) > 0
 
 
 def store_display_name(title: str, style: str) -> str:
@@ -296,13 +311,13 @@ def build_payloads(
     natives: dict[str, tuple] = {}
     # gtin -> (store display name, store description) from the feed.
     store_by_gtin: dict[str, tuple] = {}
-    # gtin -> whether SanMar marks the style a closeout (title-prefixed).
+    # gtin -> derived closeout (discontinued AND still has stock). Per SKU,
+    # not per style: a style's sizes can differ in both status and stock.
     closeout_by_gtin: dict[str, bool] = {}
     map_seen = sku_total = on_sale_count = 0
     for style in styles:
         disp = store_display_name(style.title, style.style)
         sdesc = store_description(style.available_sizes, style.description)
-        closeout = is_closeout(style.title)
         for sku in style.skus:
             if not sku.gtin:
                 continue
@@ -369,7 +384,10 @@ def build_payloads(
                     weight_unit,
                 )
                 store_by_gtin[sku.gtin] = (disp, sdesc)
-                closeout_by_gtin[sku.gtin] = closeout
+                # Derived per SKU: discontinued AND still has stock.
+                closeout_by_gtin[sku.gtin] = is_closeout(
+                    sku.product_status, qty
+                )
     # Ground truth on whether SanMar's feed carries MAP at all: value brands
     # (e.g. Gildan) usually have no MAP, so a blank MAP field can be correct.
     print(f"SanMar MAP coverage: {map_seen}/{sku_total} feed SKUs carry a MAP "
