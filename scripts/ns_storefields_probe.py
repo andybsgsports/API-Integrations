@@ -20,6 +20,8 @@ Writes nothing.
 
 from __future__ import annotations
 
+import os
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
@@ -100,6 +102,48 @@ def main() -> int:
         if rest_has != sql_has:
             mismatches += 1
             print("  -> MISMATCH: REST and SuiteQL disagree on storeDisplayName")
+        print()
+
+    # Deciding test: does a PATCH stick on a matrix PARENT? Children are
+    # proven futile above. If parents accept it, the fix is to write these
+    # on parents (where parent_sync already runs) instead of on 45k children.
+    if os.environ.get("STOREFIELDS_PARENT_WRITE_TEST", "").strip().lower() == "true":
+        print("=" * 70)
+        print("PARENT write test (PATCH, read back, restore)")
+        print("=" * 70)
+        target = client.suiteql(
+            "SELECT id, itemid, storedisplayname FROM item "
+            "WHERE parent IS NULL AND custitem_sanmar_style IS NOT NULL "
+            "AND rownum <= 1"
+        )
+        if not target:
+            print("  no SanMar matrix parent found to test")
+        else:
+            rid = str(target[0]["id"])
+            before = client.get_record("inventoryItem", rid).get("storeDisplayName")
+            probe_value = "BSG probe -- safe to ignore"
+            print(f"  item {rid} ({target[0].get('itemid')}) before: {before!r}")
+            try:
+                client.update_record(
+                    "inventoryItem", rid, {"storeDisplayName": probe_value}
+                )
+                after = client.get_record(
+                    "inventoryItem", rid).get("storeDisplayName")
+                print(f"  after PATCH: {after!r}")
+                stuck = str(after or "") == probe_value
+                print(f"  RESULT: parent write "
+                      f"{'STICKS -- write store fields on parents' if stuck else 'ALSO DISCARDED'}")
+            except Exception as exc:  # noqa: BLE001 - the point is to see it
+                print(f"  PATCH REJECTED: {str(exc)[:160]}")
+            finally:
+                # Always put it back the way we found it.
+                client.update_record(
+                    "inventoryItem", rid,
+                    {"storeDisplayName": before if before else ""},
+                )
+                restored = client.get_record(
+                    "inventoryItem", rid).get("storeDisplayName")
+                print(f"  restored: {restored!r}")
         print()
 
     print("=" * 70)
