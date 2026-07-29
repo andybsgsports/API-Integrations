@@ -12,6 +12,14 @@ on:
         description: "Comma-separated style numbers to probe"
         required: false
         default: "29M,S500T,PC61"
+      vocab:
+        description: "true = also sample the live productStatus vocabulary"
+        required: false
+        default: "false"
+      vocab_sample:
+        description: "How many styles to sample for the vocabulary"
+        required: false
+        default: "60"
 
 jobs:
   probe:
@@ -39,3 +47,14 @@ jobs:
           SANMAR_WS_PASSWORD: ${{ secrets.SANMAR_WS_PASSWORD }}
           SANMAR_WS_STYLES: ${{ github.event.inputs.styles }}
         run: python scripts/sanmar_ws_probe.py
+
+      - name: productStatus vocabulary (what values exist at all?)
+        if: ${{ github.event.inputs.vocab == 'true' }}
+        env:
+          SANMAR_SFTP_USERNAME: ${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD: ${{ secrets.SANMAR_SFTP_PASSWORD }}
+          SANMAR_WS_CUSTNO: ${{ secrets.SANMAR_WS_CUSTNO }}
+          SANMAR_WS_USERNAME: ${{ secrets.SANMAR_WS_USERNAME }}
+          SANMAR_WS_PASSWORD: ${{ secrets.SANMAR_WS_PASSWORD }}
+          VOCAB_SAMPLE: ${{ github.event.inputs.vocab_sample }}
+        run: python scripts/sanmar_ws_status_vocab.py
