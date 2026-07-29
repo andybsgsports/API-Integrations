@@ -34,7 +34,8 @@ jobs:
         env:
           SANMAR_SFTP_USERNAME: ${{ secrets.SANMAR_SFTP_USERNAME }}
           SANMAR_SFTP_PASSWORD: ${{ secrets.SANMAR_SFTP_PASSWORD }}
-          SANMAR_WS_ID: ${{ secrets.SANMAR_WS_ID }}
+          SANMAR_WS_CUSTNO: ${{ secrets.SANMAR_WS_CUSTNO }}
+          SANMAR_WS_USERNAME: ${{ secrets.SANMAR_WS_USERNAME }}
           SANMAR_WS_PASSWORD: ${{ secrets.SANMAR_WS_PASSWORD }}
           SANMAR_WS_STYLES: ${{ github.event.inputs.styles }}
         run: python scripts/sanmar_ws_probe.py
