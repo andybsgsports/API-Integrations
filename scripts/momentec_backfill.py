@@ -66,8 +66,8 @@ BRAND_NAMES = {
 UNKNOWN_BRANDS: set[str] = set()
 
 # The ASG feed supplies weightUnit directly per row (unlike SanMar/S&S, where
-# it's inferred from a pounds-only value) -- normalize its free-text spelling
-# to NetSuite's unit reference ({"id": ...}, see native_pricing).
+# the feed is pounds-only) -- normalize its free-text spelling to NetSuite's
+# unit reference ({"id": ...}, see native_pricing).
 # Unrecognized units are logged, never guessed.
 WEIGHT_UNITS = {
     "lb": WEIGHT_UNIT_LB, "lbs": WEIGHT_UNIT_LB, "pound": WEIGHT_UNIT_LB,
@@ -87,6 +87,26 @@ def _weight_unit(raw: str) -> dict[str, str] | str:
         UNKNOWN_WEIGHT_UNITS.add(raw)
         return ""
     return unit
+
+
+def _weight_lb(
+    raw_weight: str, raw_unit: str
+) -> tuple[float | None, dict[str, str] | str]:
+    """(weight in pounds, unit reference) from the feed's value+unit pair.
+
+    Shipping weight is kept in POUNDS across the whole catalogue (business
+    decision 2026-07-29, same as native_pricing.weight_display) -- feed rows
+    expressed in ounces are converted, not passed through. A blank or
+    unrecognized unit keeps the old behaviour: the raw number is written and
+    the unit left untouched (logged via UNKNOWN_WEIGHT_UNITS, never guessed).
+    """
+    w = _num(raw_weight)
+    unit = _weight_unit(raw_unit)
+    if w is None:
+        return None, ""
+    if unit == WEIGHT_UNIT_OZ:
+        return round(float(w) / 16.0, 4), WEIGHT_UNIT_LB
+    return float(w), unit
 
 # Negotiated invoice discount off Momentec's wholesale price. Per the vendor
 # program terms ("Discount is half MSRP less 15% on all stock and custom
@@ -284,10 +304,11 @@ def main() -> int:
                 del body["manufacturer"]
             if not str(row.get("upccode") or "").strip() and sku.gtin:
                 body["upcCode"] = sku.gtin
+            weight_lb, weight_unit = _weight_lb(sku.weight, sku.weight_unit)
             add_native_diffs(
                 body, row, base_by_rid, rid,
                 price=_num(sku.msrp), cost=net_cost,
-                weight=_num(sku.weight), weight_unit=_weight_unit(sku.weight_unit),
+                weight=weight_lb, weight_unit=weight_unit,
                 same=_same,
             )
             # Closeout checkbox from the feed Ribbon -- explicit boolean diff

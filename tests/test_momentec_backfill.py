@@ -40,6 +40,24 @@ def test_unrecognized_unit_left_blank_and_logged():
     assert "kg" in UNKNOWN_WEIGHT_UNITS
 
 
+def test_weight_lb_passes_pounds_through():
+    from momentec_backfill import _weight_lb
+    assert _weight_lb("1.2", "lb") == (1.2, {"id": "1"})
+
+
+def test_weight_lb_converts_ounces_to_pounds():
+    # Catalogue-wide decision: shipping weight is always pounds.
+    from momentec_backfill import _weight_lb
+    assert _weight_lb("8", "oz") == (0.5, {"id": "1"})
+
+
+def test_weight_lb_unknown_unit_writes_number_only():
+    from momentec_backfill import _weight_lb
+    UNKNOWN_WEIGHT_UNITS.clear()
+    assert _weight_lb("2.5", "kg") == (2.5, "")
+    assert "kg" in UNKNOWN_WEIGHT_UNITS
+
+
 def test_closeout_from_ribbon():
     assert is_closeout("Closeout")
     assert is_closeout("CLOSEOUT")
