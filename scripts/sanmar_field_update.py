@@ -183,6 +183,60 @@ def store_display_name(title: str, style: str) -> str:
     return name
 
 
+def sync_store_fields_to_parents(
+    client: NetSuiteClient, styles, store_cols: list[str], allow_write: bool
+) -> None:
+    """Write Store Display Name / Description onto matrix PARENTS.
+
+    NetSuite accepts these fields on a parent and silently discards them on a
+    matrix child -- verified live (parent ST841 keeps a PATCHed value; six
+    children read blank on both REST and SuiteQL immediately after a
+    successful write). Parents are the correct home anyway: the parent is the
+    web-store product page, children are size/colour variants.
+
+    Matched by SanMar style number, so it covers whatever parents exist
+    regardless of how they were created. Diff-aware, and honours dry run.
+    """
+    want_by_style = {
+        s.style: (
+            store_display_name(s.title, s.style),
+            store_description(s.available_sizes, s.description),
+        )
+        for s in styles if s.style
+    }
+    rows = client.suiteql(
+        "SELECT id, custitem_sanmar_style AS sty, storedisplayname, "
+        "storedescription FROM item "
+        "WHERE parent IS NULL AND custitem_sanmar_style IS NOT NULL"
+    )
+    jobs: list[tuple[str, dict]] = []
+    for row in rows:
+        disp, sdesc = want_by_style.get(str(row.get("sty") or ""), ("", ""))
+        body: dict[str, object] = {}
+        if ("storedisplayname" in store_cols and disp
+                and not _same(row.get("storedisplayname"), disp)):
+            body["storeDisplayName"] = disp
+        if ("storedescription" in store_cols and sdesc
+                and not _same(row.get("storedescription"), sdesc)):
+            body["storeDescription"] = sdesc
+        if body:
+            jobs.append((str(row["id"]), body))
+
+    verb = "would update" if not allow_write else "updated"
+    if not allow_write:
+        print(f"\nstore fields on parents: {len(jobs):,} of {len(rows):,} "
+              f"parent(s) {verb} (dry run)")
+        return
+    p_dropped: dict[str, int] = {}
+    written, failures = write_records(
+        client, "inventoryItem", jobs, dropped=p_dropped
+    )
+    print(f"\nstore fields on parents: {verb} {written:,} of {len(rows):,} "
+          f"parent(s); failures: {failures}")
+    if p_dropped:
+        print(f"  fields dropped by NetSuite: {p_dropped}")
+
+
 def store_description(available_sizes: str, description: str) -> str:
     """Store/Stock Description = the marketing copy, with a real size list
     ("Women's Sizes: S-2XL") prepended when the feed carries one. One-size items
@@ -472,6 +526,15 @@ def main() -> int:
             f"kept failing (sustained NetSuite throttling) -- those items were "
             f"not considered this run; diff-aware, so the next run picks them up."
         )
+    # Store Display Name / Description live on the matrix PARENT, not on the
+    # children. Proven live 2026-07-29: a PATCH to a child is accepted and
+    # silently discarded (REST and SuiteQL both still read blank right after a
+    # successful write), while the same PATCH on parent ST841 sticks. Parents
+    # are also the right home for it -- the parent is the web-store product
+    # page; children are just size/colour variants.
+    if store_cols:
+        sync_store_fields_to_parents(client, styles, store_cols, allow_write)
+
     if dropped:
         print("\nWARNING: NetSuite rejected these field(s); the rest of each "
               "record was written without them:")
