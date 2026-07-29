@@ -100,7 +100,8 @@ CLOSEOUT_FIELD = os.environ.get(
 # NetSuite reject the ENTIRE record PATCH (USER_ERROR), which silently killed
 # every other field update on the item: five consecutive runs between
 # 2026-07-22 and 2026-07-24 attempted 45,531 items and wrote 0. Store Display
-# Name and Store Description are written below; Stock Description is left alone.
+# Name and Store Description go on the matrix PARENTS (see
+# sync_store_fields_to_parents) -- NetSuite discards them on children.
 
 
 def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
@@ -401,7 +402,7 @@ def main() -> int:
     # (self-enabling).
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     closeout_field = CLOSEOUT_FIELD if _field_exists(client, CLOSEOUT_FIELD) else ""
-    payloads, natives, store_by_gtin, closeout_by_gtin = build_payloads(
+    payloads, natives, _store_by_gtin, closeout_by_gtin = build_payloads(
         styles, inventory, on_sale_field=on_sale_field
     )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
@@ -421,7 +422,7 @@ def main() -> int:
         + ([closeout_field] if closeout_field else [])
     )
     gtins = sorted(payloads)
-    considered = written = unchanged = priced = stored = failures = 0
+    considered = written = unchanged = priced = failures = 0
     _fail_shown = [0]
 
     def _on_err(rid: str, exc: Exception) -> None:
@@ -468,17 +469,11 @@ def main() -> int:
                 body, row, base_by_rid, str(row["id"]),
                 price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
             )
-            # Store Display Name + Store/Stock Description (native web-store
-            # fields). Store and Stock Description carry the same marketing copy.
-            disp, sdesc = store_by_gtin.get(gtin, ("", ""))
-            if ("storedisplayname" in store_cols and disp
-                    and not _same(row.get("storedisplayname"), disp)):
-                body["storeDisplayName"] = disp
-            if ("storedescription" in store_cols and sdesc
-                    and not _same(row.get("storedescription"), sdesc)):
-                body["storeDescription"] = sdesc
-            # Stock Description intentionally not written -- see the note at the
-            # top of this module (21-char cap rejects the whole record).
+            # Store Display Name / Description are NOT written here: NetSuite
+            # accepts them on a matrix child and silently discards the value.
+            # sync_store_fields_to_parents() writes them on the parents, where
+            # they actually stick. Stock Description is skipped too -- see the
+            # note at the top of this module (21-char cap rejects the record).
             # Closeout checkbox: explicit boolean diff (NetSuite returns T/F,
             # not a Python bool, so _same can't compare it).
             if closeout_field:
@@ -496,8 +491,6 @@ def main() -> int:
             considered += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
-            if any(k in body for k in ("storeDisplayName", "storeDescription")):
-                stored += 1
             if not allow_write:
                 written += 1
                 continue
@@ -543,8 +536,7 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
-          f"store name/desc updated: {stored}; failures: {failures}; "
-          f"chunks skipped: {chunks_skipped}")
+          f"failures: {failures}; chunks skipped: {chunks_skipped}")
     return 1 if (failures or chunks_skipped) else 0
 
 
