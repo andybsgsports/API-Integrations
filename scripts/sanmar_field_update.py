@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import os
 import re
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
@@ -210,8 +211,14 @@ def sync_store_fields_to_parents(
     successful write). Parents are the correct home anyway: the parent is the
     web-store product page, children are size/colour variants.
 
-    Matched by SanMar style number, so it covers whatever parents exist
-    regardless of how they were created. Diff-aware, and honours dry run.
+    A PARENT record does not itself carry ``custitem_sanmar_style`` -- that
+    field is written by the UPC-matched child loop above, and matrix parents
+    carry no UPC of their own, so querying it directly on the parent found
+    only ~50 incidental matches instead of the real ~579 parent styles (first
+    live run, 2026-07-29). Fixed the same way ``parent_sync.py`` already
+    solved this: read each parent's style from its CHILDREN via NetSuite's
+    own ``parent`` link, taking the mode so one stray child can't skew it.
+    Diff-aware, and honours dry run.
     """
     want_by_style = {
         s.style: (
@@ -220,14 +227,39 @@ def sync_store_fields_to_parents(
         )
         for s in styles if s.style
     }
-    rows = client.suiteql(
-        "SELECT id, custitem_sanmar_style AS sty, storedisplayname, "
-        "storedescription FROM item "
-        "WHERE parent IS NULL AND custitem_sanmar_style IS NOT NULL"
+    parents = client.suiteql(
+        "SELECT id, storedisplayname, storedescription FROM item "
+        "WHERE parent IS NULL"
     )
+    parents_by_id = {str(p["id"]): p for p in parents}
+
+    # Chunk by parent id (same 250-at-a-time pattern as parent_sync.py) so a
+    # single "parent IN (...)" query never approaches SuiteQL's 100,000-row
+    # result cap across this catalogue's 150k+ children.
+    parent_ids = list(parents_by_id)
+    styles_by_parent: dict[str, list[str]] = {}
+    for i in range(0, len(parent_ids), 250):
+        chunk = parent_ids[i : i + 250]
+        in_list = ", ".join(chunk)
+        rows = client.suiteql(
+            "SELECT parent, custitem_sanmar_style AS sty FROM item "
+            f"WHERE parent IN ({in_list}) AND custitem_sanmar_style IS NOT NULL"
+        )
+        for r in rows:
+            pid = str(r.get("parent") or "")
+            sty = str(r.get("sty") or "").strip()
+            if pid and sty:
+                styles_by_parent.setdefault(pid, []).append(sty)
+
     jobs: list[tuple[str, dict]] = []
-    for row in rows:
-        disp, sdesc = want_by_style.get(str(row.get("sty") or ""), ("", ""))
+    matched = 0
+    for pid, row in parents_by_id.items():
+        child_styles = styles_by_parent.get(pid)
+        if not child_styles:
+            continue
+        style = Counter(child_styles).most_common(1)[0][0]
+        disp, sdesc = want_by_style.get(style, ("", ""))
+        matched += 1
         body: dict[str, object] = {}
         if ("storedisplayname" in store_cols and disp
                 and not _same(row.get("storedisplayname"), disp)):
@@ -236,19 +268,22 @@ def sync_store_fields_to_parents(
                 and not _same(row.get("storedescription"), sdesc)):
             body["storeDescription"] = sdesc
         if body:
-            jobs.append((str(row["id"]), body))
+            jobs.append((pid, body))
+    print(f"\nstore fields on parents: {matched:,} of {len(parents):,} "
+          f"parent(s) matched to a SanMar style via their children")
 
     verb = "would update" if not allow_write else "updated"
     if not allow_write:
-        print(f"\nstore fields on parents: {len(jobs):,} of {len(rows):,} "
-              f"parent(s) {verb} (dry run)")
+        print(f"store fields on parents: {len(jobs):,} of {matched:,} "
+              f"matched parent(s) {verb} (dry run)")
         return
     p_dropped: dict[str, int] = {}
     written, failures = write_records(
         client, "inventoryItem", jobs, dropped=p_dropped
     )
-    print(f"\nstore fields on parents: {verb} {written:,} of {len(rows):,} "
-          f"parent(s); failures: {failures}")
+    print(f"store fields on parents: {verb} {written:,} of {len(jobs):,} "
+          f"differing parent(s) ({matched:,} matched to a style); "
+          f"failures: {failures}")
     if p_dropped:
         print(f"  fields dropped by NetSuite: {p_dropped}")
 
