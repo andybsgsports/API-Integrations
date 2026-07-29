@@ -11,6 +11,10 @@ on:
         description: "Flag fields below this coverage percentage"
         required: false
         default: "90"
+      status_check:
+        description: "true = scan the full feed's PRODUCTSTATUS vocabulary + per-SKU granularity"
+        required: false
+        default: "false"
       weightunit_write_test:
         description: "true = PATCH one item's weightUnit and restore it (proves the field shape)"
         required: false
@@ -55,6 +59,13 @@ jobs:
 
       - name: Store fields probe (did they persist?)
         run: python scripts/ns_storefields_probe.py
+
+      - name: Status granularity + full feed vocabulary
+        if: ${{ github.event.inputs.status_check == 'true' }}
+        env:
+          SANMAR_SFTP_USERNAME: ${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD: ${{ secrets.SANMAR_SFTP_PASSWORD }}
+        run: python scripts/sanmar_status_granularity_check.py
 
       - name: Field coverage audit
         env:
