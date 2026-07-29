@@ -81,10 +81,10 @@ class TestSsHelpers:
 
     def test_natives_prefers_customer_price(self):
         # no sale price -> cost is the customer price; on_sale False.
-        # weight 0.4 lb is under the oz threshold -> converted to 6.4 oz.
+        # shipping weight always stays in pounds (no oz conversion).
         assert natives_for(
             {"msrp": "28", "customer_price": "11.5", "piece_price": "12", "weight": "0.4"}
-        ) == (28.0, 11.5, 6.4, {"id": "2"}, False)
+        ) == (28.0, 11.5, 0.4, {"id": "1"}, False)
 
     def test_natives_falls_back_to_piece_price(self):
         assert natives_for({"piece_price": "12"}) == (None, 12.0, None, None, False)
@@ -146,8 +146,8 @@ class TestNativeDiffs:
         assert body == {}
 
     def test_weight_and_unit_written_together(self):
-        # A light item switching from lb to oz: both the converted number and
-        # the new unit land in the same body.
+        # When both the number and the unit differ from the row, both land in
+        # the same body (mechanics test -- units are arbitrary here).
         body: dict = {}
         add_native_diffs(
             body, {"cost": None, "weight": "0.3", "weightunit": "1"}, {}, "1",
@@ -157,14 +157,13 @@ class TestNativeDiffs:
 
 
 class TestWeightDisplay:
-    def test_light_item_converts_to_ounces(self):
-        assert weight_display(0.3) == (4.8, {"id": "2"})
+    def test_light_item_stays_pounds(self):
+        # Shipping weight is kept in pounds across the catalogue -- no oz
+        # conversion for sub-1-lb items (business decision 2026-07-29).
+        assert weight_display(0.3) == (0.3, {"id": "1"})
 
     def test_heavy_item_stays_pounds(self):
         assert weight_display(1.15) == (1.15, {"id": "1"})
-
-    def test_exactly_at_threshold_is_pounds(self):
-        assert weight_display(1.0) == (1.0, {"id": "1"})
 
     def test_none_returns_none_none(self):
         assert weight_display(None) == (None, None)

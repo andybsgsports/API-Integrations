@@ -25,31 +25,25 @@ WEIGHT_UNIT_LB_ID = "1"
 WEIGHT_UNIT_OZ_ID = "2"
 WEIGHT_UNIT_OZ = {"id": WEIGHT_UNIT_OZ_ID}
 WEIGHT_UNIT_LB = {"id": WEIGHT_UNIT_LB_ID}
-# Items lighter than this display in ounces instead of pounds (0.3 lb reads
-# oddly small; 4.8 oz reads naturally) -- both SanMar and S&S report piece
-# weight in pounds, so the number is converted to match whichever unit wins.
-OZ_THRESHOLD_LB = 1.0
 
 
 def weight_display(
     weight_lb: float | None,
 ) -> tuple[float | None, dict[str, str] | None]:
-    """(display_weight, unit reference) for a weight expressed in pounds.
+    """(weight, unit reference) for a weight expressed in pounds.
 
-    weightUnit is a real physical-quantity label (NetSuite uses it for
-    shipping calculations), not cosmetic -- so the NUMBER is converted to
-    match whichever unit is chosen, never left as a bare pound value under
-    an "oz" label. Returns ``(None, None)`` when weight_lb is None (nothing
-    to base a choice on -- caller should leave both fields untouched).
+    This is the SHIPPING weight of the finished item, and it is always kept
+    in pounds -- one consistent unit across the whole catalogue (business
+    decision 2026-07-29; an earlier version converted sub-1-lb items to
+    ounces for readability, which just made tees look inconsistent next to
+    jackets). Returns ``(None, None)`` when weight_lb is None (nothing to
+    write -- caller should leave both fields untouched).
 
     The unit comes back as NetSuite's reference shape ``{"id": ...}``.
     """
     if weight_lb is None:
         return None, None
-    w = float(weight_lb)
-    if w < OZ_THRESHOLD_LB:
-        return round(w * 16, 2), WEIGHT_UNIT_OZ
-    return w, WEIGHT_UNIT_LB
+    return float(weight_lb), WEIGHT_UNIT_LB
 
 
 def base_price_body(price: float) -> dict:
