@@ -15,15 +15,35 @@ from sanmar_field_update import (  # noqa: E402
 )
 
 
-def test_closeout_detected_from_title_prefix():
-    assert is_closeout("CLOSEOUT District Perfect Tri Tee. DT130")
-    assert is_closeout("closeout - Some Item")
-    # the prefix must be CLOSEOUT specifically, not other status words
-    assert not is_closeout("DISCONTINUED Some Item")
-    assert not is_closeout("NEW Arrival Polo")
-    assert not is_closeout("Perfect Tri Tee")
-    # not a false match on a name that merely contains the word mid-string
-    assert not is_closeout("Warehouse Closeout Special Tee")
+class TestDerivedCloseout:
+    """BSG rule: discontinued AND still has stock = being cleared out.
+
+    SanMar publishes no usable closeout signal (a full 161,271-SKU scan found
+    'CloseOut' on exactly one), so this is our own definition.
+    """
+
+    def test_discontinued_with_stock_is_closeout(self):
+        assert is_closeout("Discontinued", 42)
+
+    def test_discontinued_without_stock_is_not(self):
+        # Sold out and gone -- discontinued, but nothing left to clear.
+        assert not is_closeout("Discontinued", 0)
+
+    def test_discontinued_unknown_qty_is_not(self):
+        # No inventory reading is not evidence of stock; stay conservative.
+        assert not is_closeout("Discontinued", None)
+
+    def test_active_with_stock_is_not(self):
+        assert not is_closeout("Regular", 500)
+        assert not is_closeout("Active", 500)
+        assert not is_closeout("New", 500)
+
+    def test_status_match_is_case_and_space_insensitive(self):
+        assert is_closeout("  discontinued  ", 1)
+
+    def test_blank_status_is_not(self):
+        assert not is_closeout("", 10)
+        assert not is_closeout(None, 10)  # type: ignore[arg-type]
 
 
 def test_display_name_strips_trailing_style():
