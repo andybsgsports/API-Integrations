@@ -46,6 +46,37 @@ def weight_display(
     return float(weight_lb), WEIGHT_UNIT_LB
 
 
+# S&S publishes 0.01 as a "no MAP restriction" placeholder, and a one-cent MAP
+# is never a real price floor for any supplier -- treat anything at or below
+# this as absent rather than letting it quietly lose the comparison.
+MAP_PLACEHOLDER_MAX = 0.011
+
+
+def base_price(
+    msrp: float | None, map_price: float | None = None
+) -> float | None:
+    """Base Price = the higher of MAP and MSRP (business rule, 2026-07-29).
+
+    Either can legitimately be missing -- value brands like Gildan carry no
+    MAP at all, and a few items carry no MSRP -- so this takes the max of
+    whatever is actually present. Returns None only when BOTH are absent, so
+    the caller leaves Base Price untouched instead of writing a zero over a
+    good value.
+    """
+    candidates: list[float] = []
+    try:
+        if msrp is not None and float(msrp) > 0:
+            candidates.append(float(msrp))
+    except (TypeError, ValueError):
+        pass
+    try:
+        if map_price is not None and float(map_price) > MAP_PLACEHOLDER_MAX:
+            candidates.append(float(map_price))
+    except (TypeError, ValueError):
+        pass
+    return max(candidates) if candidates else None
+
+
 def base_price_body(price: float) -> dict:
     return {
         "items": [

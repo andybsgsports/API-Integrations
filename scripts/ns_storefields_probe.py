@@ -30,6 +30,44 @@ def main() -> int:
     cfg = get_config()
     client = NetSuiteClient(cfg.netsuite)
 
+    # THE question: are the ~50 items that DID keep a Store Display Name
+    # matrix PARENTS, while the blank ones are children? JST55 (a parent)
+    # holds the value; 18200B-Sports Grey-X-Large (a child) does not. If that
+    # is the split, NetSuite simply does not persist web-store fields on
+    # matrix children and no amount of retrying will change it.
+    print("Items that DO carry a Store Display Name -- parent or child?")
+    print("=" * 66)
+    have = client.suiteql(
+        "SELECT id, itemid, parent, storedisplayname FROM item "
+        "WHERE storedisplayname IS NOT NULL AND rownum <= 12"
+    )
+    parents = sum(1 for r in have if not str(r.get("parent") or "").strip())
+    for r in have[:8]:
+        kind = "CHILD (parent=" + str(r.get("parent")) + ")" if str(
+            r.get("parent") or "").strip() else "PARENT/standalone"
+        print(f"  {r.get('itemid')}: {kind}")
+    print(f"  -> {parents} of {len(have)} sampled are parents/standalone")
+
+    print()
+    print("Do any matrix CHILDREN carry one?")
+    print("=" * 66)
+    kids = client.suiteql(
+        "SELECT COUNT(*) AS n FROM item "
+        "WHERE storedisplayname IS NOT NULL AND parent IS NOT NULL"
+    )
+    par = client.suiteql(
+        "SELECT COUNT(*) AS n FROM item "
+        "WHERE storedisplayname IS NOT NULL AND parent IS NULL"
+    )
+    n_kids = int(kids[0]["n"]) if kids else 0
+    n_par = int(par[0]["n"]) if par else 0
+    print(f"  children with a Store Display Name: {n_kids:,}")
+    print(f"  parents/standalone with one:        {n_par:,}")
+    if n_kids == 0 and n_par:
+        print("  -> CONFIRMED: only parents keep it. NetSuite discards the "
+              "field on\n     matrix children; writing it there is futile.")
+    print()
+
     rows = client.suiteql(
         "SELECT id, itemid, storedisplayname, storedescription, isonline "
         "FROM item WHERE custitem_sanmar_unique_key IS NOT NULL "

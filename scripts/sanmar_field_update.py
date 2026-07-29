@@ -3,7 +3,7 @@
 Fills the ``custitem_sanmar_*`` fields on every existing item whose upcCode
 matches a feed GTIN — availability (total + per-warehouse), pricing
 (MAP/MSRP/case), status, and the SanMar keys — plus the NATIVE money/shipping
-fields: Base Price = SanMar MSRP, Purchase Price (``cost``) = SanMar piece
+fields: Base Price = the higher of MAP and MSRP, Purchase Price (``cost``) = SanMar piece
 price (our cost), ``weight`` = piece weight. Diff-aware: current values are
 bulk-read first and only changed fields are written, so steady-state nightly
 runs are small. Honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
@@ -18,7 +18,12 @@ from datetime import date, datetime
 from pathlib import Path
 
 from concurrent_writes import write_records
-from native_pricing import add_native_diffs, read_base_prices, weight_display
+from native_pricing import (
+    add_native_diffs,
+    base_price,
+    read_base_prices,
+    weight_display,
+)
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -299,7 +304,11 @@ def build_payloads(
                 weight_lb = None if sku.piece_weight is None else float(sku.piece_weight)
                 disp_weight, weight_unit = weight_display(weight_lb)
                 natives[sku.gtin] = (
-                    None if sku.msrp is None else float(sku.msrp),
+                    # Base Price = the higher of MAP and MSRP.
+                    base_price(
+                        None if sku.msrp is None else float(sku.msrp),
+                        None if sku.map_price is None else float(sku.map_price),
+                    ),
                     cost,  # effective cost: sale price while on sale, else regular
                     disp_weight,
                     weight_unit,
