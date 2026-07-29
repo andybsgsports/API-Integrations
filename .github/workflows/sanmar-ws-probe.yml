@@ -1,0 +1,40 @@
+name: SanMar Web Services Probe (read-only)
+
+# Probes ws.sanmar.com (PromoStandards) for the two things the FTP feed can't
+# provide: the isCloseout flag and uncapped inventory. Read-only against
+# SanMar, touches NetSuite not at all -- deliberately outside the
+# netsuite-writes concurrency group.
+
+on:
+  workflow_dispatch:
+    inputs:
+      styles:
+        description: "Comma-separated style numbers to probe"
+        required: false
+        default: "29M,S500T,PC61"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Probe SanMar web services
+        env:
+          SANMAR_SFTP_USERNAME: ${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD: ${{ secrets.SANMAR_SFTP_PASSWORD }}
+          SANMAR_WS_ID: ${{ secrets.SANMAR_WS_ID }}
+          SANMAR_WS_PASSWORD: ${{ secrets.SANMAR_WS_PASSWORD }}
+          SANMAR_WS_STYLES: ${{ github.event.inputs.styles }}
+        run: python scripts/sanmar_ws_probe.py
