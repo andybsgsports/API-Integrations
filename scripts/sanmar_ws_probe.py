@@ -39,6 +39,10 @@ PROBE_STYLES = [s for s in os.environ.get(
     "SANMAR_WS_STYLES", "29M,S500T,PC61"
 ).split(",") if s.strip()]
 
+# Delta window for the bulk probe. Passed in rather than computed so the
+# probe stays deterministic; a nightly would use "yesterday".
+DELTA_SINCE = os.environ.get("SANMAR_WS_DELTA_SINCE", "2026-07-01")
+
 PRODUCT_NS = "http://www.promostandards.org/WSDL/ProductDataService/2.0.0/"
 PRODUCT_SHARED = f"{PRODUCT_NS}SharedObjects/"
 INVENTORY_NS = "http://www.promostandards.org/WSDL/Inventory/2.0.0/"
@@ -370,6 +374,50 @@ def probe_std_product(custno: str, user: str, pw: str, style: str) -> None:
         print(f"      response head: {text[:400].strip()!r}")
 
 
+def probe_bulk(custno: str, user: str, pw: str) -> None:
+    """Try the BULK product operations -- the only sane shape for a nightly.
+
+    Per-style calls across the whole catalogue would be ~1.7k round trips.
+    getProductBulkInfo (everything) and getProductDeltaInfo (changes since a
+    date) are what a nightly should use, so find out which the account can
+    actually call before designing around either.
+    """
+    path = "/SanMarWebService/SanMarProductInfoServicePort"
+    ns = _service_ns(path) or "http://impl.webservice.integration.sanmar.com/"
+    auth = (f"<sanMarCustomerNumber>{escape(custno)}</sanMarCustomerNumber>"
+            f"<sanMarUserName>{escape(user)}</sanMarUserName>"
+            f"<sanMarUserPassword>{escape(pw)}</sanMarUserPassword>")
+    calls = [
+        ("getProductDeltaInfo",
+         f"<arg0><productStartDate>{DELTA_SINCE}</productStartDate></arg0>"
+         f"<arg1>{auth}</arg1>"),
+        ("getProductBulkInfo", f"<arg0></arg0><arg1>{auth}</arg1>"),
+    ]
+    for op, args in calls:
+        body = (f'<soapenv:Envelope xmlns:soapenv='
+                f'"http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="{ns}">'
+                f"<soapenv:Header/><soapenv:Body><web:{op}>{args}"
+                f"</web:{op}></soapenv:Body></soapenv:Envelope>")
+        try:
+            status, text = _call(f"{WS_BASE}{path}", "", body)
+        except requests.RequestException as exc:
+            print(f"  {op}: REQUEST FAILED: {str(exc)[:120]}")
+            continue
+        for secret in (pw, custno, user):
+            if secret:
+                text = text.replace(secret, "***")
+        err = _tag(text, "errorOccured") + _tag(text, "errorOccurred")
+        msg = _tag(text, "message")
+        styles = _tag(text, "style")
+        statuses = _tag(text, "productStatus")
+        from collections import Counter
+        print(f"  {op}: HTTP {status}  error={err[:1]}  message={msg[:1]}  "
+              f"bytes={len(text):,}  distinct styles={len(set(styles)):,}  "
+              f"productStatus counts={dict(Counter(statuses))}")
+        if not styles:
+            print(f"      response head: {text[:280].strip()!r}")
+
+
 def main() -> int:
     custno, user, pw, which = _creds()
     if not custno or not pw:
@@ -410,6 +458,12 @@ def main() -> int:
     print("=" * 70)
     for style in PROBE_STYLES:
         probe_std_product(custno, user, pw, style.strip())
+
+    print()
+    print("=" * 70)
+    print("4. Bulk operations -- what a nightly would actually call")
+    print("=" * 70)
+    probe_bulk(custno, user, pw)
 
     print("\nIf the calls above failed auth, ask SanMar Integration Support "
           "for web-service credentials\n(customer number + username + "
