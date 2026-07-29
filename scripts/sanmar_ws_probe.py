@@ -396,10 +396,13 @@ def main() -> int:
     print("=" * 70)
     print("2. getInventory (item,user order per the contract)")
     print("=" * 70)
-    # Style-only, and one fully-specified SKU -- if the generic 'Unexpected
-    # Error' is about query shape rather than auth, these will differ.
-    probe_std_inventory(custno, user, pw, "PC61")
-    probe_std_inventory(custno, user, pw, "PC61", color="Black", size="L")
+    # Auth now proven. Style-only answered success-but-empty, and "Black"
+    # is not PC61's catalog color ("ERROR: Invalid Style, Color and/or
+    # Size." -- SanMar wants the exact catalogColor spelling). Try the real
+    # catalog colors to see actual depth vs the 1500 FTP cap.
+    probe_std_inventory(custno, user, pw, "PC61", color="Jet Black", size="L")
+    probe_std_inventory(custno, user, pw, "PC61", color="White", size="L")
+    probe_std_inventory(custno, user, pw, "29M", color="White", size="M")
 
     print()
     print("=" * 70)
