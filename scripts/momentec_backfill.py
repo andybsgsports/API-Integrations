@@ -4,7 +4,8 @@ Re-runs the read-only match, then writes onto every matched existing item the
 ``custitem_mtec_*`` set (keys, MSRP/cost, case pack, availability incl.
 per-warehouse, front image URL) and fills ``upcCode`` ONLY where it is empty —
 items already keyed by a SanMar barcode are never re-keyed. Also writes the
-NATIVE money/shipping fields: Base Price = Momentec MSRP, Purchase Price
+NATIVE money/shipping fields: Base Price = higher of MAP and MSRP (the ASG
+feed carries no MAP, so MSRP stands alone), Purchase Price
 (``cost``) = Momentec cost, ``weight`` = feed weight. Diff-aware and
 honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
 """
@@ -16,7 +17,13 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from native_pricing import WEIGHT_UNIT_LB, WEIGHT_UNIT_OZ, add_native_diffs, read_base_prices
+from native_pricing import (
+    WEIGHT_UNIT_LB,
+    WEIGHT_UNIT_OZ,
+    add_native_diffs,
+    base_price,
+    read_base_prices,
+)
 
 from momentec_netsuite.adopt import match_momentec
 from momentec_netsuite.config import get_config
@@ -307,7 +314,9 @@ def main() -> int:
             weight_lb, weight_unit = _weight_lb(sku.weight, sku.weight_unit)
             add_native_diffs(
                 body, row, base_by_rid, rid,
-                price=_num(sku.msrp), cost=net_cost,
+                # Base Price = higher of MAP and MSRP; the ASG feed
+                # carries no MAP, so MSRP stands alone here.
+                price=base_price(_num(sku.msrp)), cost=net_cost,
                 weight=weight_lb, weight_unit=weight_unit,
                 same=_same,
             )

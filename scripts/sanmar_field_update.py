@@ -3,7 +3,7 @@
 Fills the ``custitem_sanmar_*`` fields on every existing item whose upcCode
 matches a feed GTIN — availability (total + per-warehouse), pricing
 (MAP/MSRP/case), status, and the SanMar keys — plus the NATIVE money/shipping
-fields: Base Price = SanMar MSRP, Purchase Price (``cost``) = SanMar piece
+fields: Base Price = the higher of MAP and MSRP, Purchase Price (``cost``) = SanMar piece
 price (our cost), ``weight`` = piece weight. Diff-aware: current values are
 bulk-read first and only changed fields are written, so steady-state nightly
 runs are small. Honors ``SYNC_DRY_RUN``; ``UPDATE_MAX_ITEMS`` caps writes.
@@ -18,7 +18,12 @@ from datetime import date, datetime
 from pathlib import Path
 
 from concurrent_writes import write_records
-from native_pricing import add_native_diffs, read_base_prices, weight_display
+from native_pricing import (
+    add_native_diffs,
+    base_price,
+    read_base_prices,
+    weight_display,
+)
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -95,7 +100,8 @@ CLOSEOUT_FIELD = os.environ.get(
 # NetSuite reject the ENTIRE record PATCH (USER_ERROR), which silently killed
 # every other field update on the item: five consecutive runs between
 # 2026-07-22 and 2026-07-24 attempted 45,531 items and wrote 0. Store Display
-# Name and Store Description are written below; Stock Description is left alone.
+# Name and Store Description go on the matrix PARENTS (see
+# sync_store_fields_to_parents) -- NetSuite discards them on children.
 
 
 def _field_exists(client: NetSuiteClient, scriptid: str) -> bool:
@@ -176,6 +182,60 @@ def store_display_name(title: str, style: str) -> str:
     if name.isupper():
         name = name.title()
     return name
+
+
+def sync_store_fields_to_parents(
+    client: NetSuiteClient, styles, store_cols: list[str], allow_write: bool
+) -> None:
+    """Write Store Display Name / Description onto matrix PARENTS.
+
+    NetSuite accepts these fields on a parent and silently discards them on a
+    matrix child -- verified live (parent ST841 keeps a PATCHed value; six
+    children read blank on both REST and SuiteQL immediately after a
+    successful write). Parents are the correct home anyway: the parent is the
+    web-store product page, children are size/colour variants.
+
+    Matched by SanMar style number, so it covers whatever parents exist
+    regardless of how they were created. Diff-aware, and honours dry run.
+    """
+    want_by_style = {
+        s.style: (
+            store_display_name(s.title, s.style),
+            store_description(s.available_sizes, s.description),
+        )
+        for s in styles if s.style
+    }
+    rows = client.suiteql(
+        "SELECT id, custitem_sanmar_style AS sty, storedisplayname, "
+        "storedescription FROM item "
+        "WHERE parent IS NULL AND custitem_sanmar_style IS NOT NULL"
+    )
+    jobs: list[tuple[str, dict]] = []
+    for row in rows:
+        disp, sdesc = want_by_style.get(str(row.get("sty") or ""), ("", ""))
+        body: dict[str, object] = {}
+        if ("storedisplayname" in store_cols and disp
+                and not _same(row.get("storedisplayname"), disp)):
+            body["storeDisplayName"] = disp
+        if ("storedescription" in store_cols and sdesc
+                and not _same(row.get("storedescription"), sdesc)):
+            body["storeDescription"] = sdesc
+        if body:
+            jobs.append((str(row["id"]), body))
+
+    verb = "would update" if not allow_write else "updated"
+    if not allow_write:
+        print(f"\nstore fields on parents: {len(jobs):,} of {len(rows):,} "
+              f"parent(s) {verb} (dry run)")
+        return
+    p_dropped: dict[str, int] = {}
+    written, failures = write_records(
+        client, "inventoryItem", jobs, dropped=p_dropped
+    )
+    print(f"\nstore fields on parents: {verb} {written:,} of {len(rows):,} "
+          f"parent(s); failures: {failures}")
+    if p_dropped:
+        print(f"  fields dropped by NetSuite: {p_dropped}")
 
 
 def store_description(available_sizes: str, description: str) -> str:
@@ -299,7 +359,11 @@ def build_payloads(
                 weight_lb = None if sku.piece_weight is None else float(sku.piece_weight)
                 disp_weight, weight_unit = weight_display(weight_lb)
                 natives[sku.gtin] = (
-                    None if sku.msrp is None else float(sku.msrp),
+                    # Base Price = the higher of MAP and MSRP.
+                    base_price(
+                        None if sku.msrp is None else float(sku.msrp),
+                        None if sku.map_price is None else float(sku.map_price),
+                    ),
                     cost,  # effective cost: sale price while on sale, else regular
                     disp_weight,
                     weight_unit,
@@ -338,7 +402,7 @@ def main() -> int:
     # (self-enabling).
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     closeout_field = CLOSEOUT_FIELD if _field_exists(client, CLOSEOUT_FIELD) else ""
-    payloads, natives, store_by_gtin, closeout_by_gtin = build_payloads(
+    payloads, natives, _store_by_gtin, closeout_by_gtin = build_payloads(
         styles, inventory, on_sale_field=on_sale_field
     )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
@@ -358,7 +422,7 @@ def main() -> int:
         + ([closeout_field] if closeout_field else [])
     )
     gtins = sorted(payloads)
-    considered = written = unchanged = priced = stored = failures = 0
+    considered = written = unchanged = priced = failures = 0
     _fail_shown = [0]
 
     def _on_err(rid: str, exc: Exception) -> None:
@@ -405,17 +469,11 @@ def main() -> int:
                 body, row, base_by_rid, str(row["id"]),
                 price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
             )
-            # Store Display Name + Store/Stock Description (native web-store
-            # fields). Store and Stock Description carry the same marketing copy.
-            disp, sdesc = store_by_gtin.get(gtin, ("", ""))
-            if ("storedisplayname" in store_cols and disp
-                    and not _same(row.get("storedisplayname"), disp)):
-                body["storeDisplayName"] = disp
-            if ("storedescription" in store_cols and sdesc
-                    and not _same(row.get("storedescription"), sdesc)):
-                body["storeDescription"] = sdesc
-            # Stock Description intentionally not written -- see the note at the
-            # top of this module (21-char cap rejects the whole record).
+            # Store Display Name / Description are NOT written here: NetSuite
+            # accepts them on a matrix child and silently discards the value.
+            # sync_store_fields_to_parents() writes them on the parents, where
+            # they actually stick. Stock Description is skipped too -- see the
+            # note at the top of this module (21-char cap rejects the record).
             # Closeout checkbox: explicit boolean diff (NetSuite returns T/F,
             # not a Python bool, so _same can't compare it).
             if closeout_field:
@@ -433,8 +491,6 @@ def main() -> int:
             considered += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
-            if any(k in body for k in ("storeDisplayName", "storeDescription")):
-                stored += 1
             if not allow_write:
                 written += 1
                 continue
@@ -463,6 +519,15 @@ def main() -> int:
             f"kept failing (sustained NetSuite throttling) -- those items were "
             f"not considered this run; diff-aware, so the next run picks them up."
         )
+    # Store Display Name / Description live on the matrix PARENT, not on the
+    # children. Proven live 2026-07-29: a PATCH to a child is accepted and
+    # silently discarded (REST and SuiteQL both still read blank right after a
+    # successful write), while the same PATCH on parent ST841 sticks. Parents
+    # are also the right home for it -- the parent is the web-store product
+    # page; children are just size/colour variants.
+    if store_cols:
+        sync_store_fields_to_parents(client, styles, store_cols, allow_write)
+
     if dropped:
         print("\nWARNING: NetSuite rejected these field(s); the rest of each "
               "record was written without them:")
@@ -471,8 +536,7 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
-          f"store name/desc updated: {stored}; failures: {failures}; "
-          f"chunks skipped: {chunks_skipped}")
+          f"failures: {failures}; chunks skipped: {chunks_skipped}")
     return 1 if (failures or chunks_skipped) else 0
 
 

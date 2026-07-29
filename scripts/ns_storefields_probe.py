@@ -20,6 +20,8 @@ Writes nothing.
 
 from __future__ import annotations
 
+import os
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
@@ -29,6 +31,44 @@ FIELDS = ("storeDisplayName", "storeDescription", "displayName", "isOnline")
 def main() -> int:
     cfg = get_config()
     client = NetSuiteClient(cfg.netsuite)
+
+    # THE question: are the ~50 items that DID keep a Store Display Name
+    # matrix PARENTS, while the blank ones are children? JST55 (a parent)
+    # holds the value; 18200B-Sports Grey-X-Large (a child) does not. If that
+    # is the split, NetSuite simply does not persist web-store fields on
+    # matrix children and no amount of retrying will change it.
+    print("Items that DO carry a Store Display Name -- parent or child?")
+    print("=" * 66)
+    have = client.suiteql(
+        "SELECT id, itemid, parent, storedisplayname FROM item "
+        "WHERE storedisplayname IS NOT NULL AND rownum <= 12"
+    )
+    parents = sum(1 for r in have if not str(r.get("parent") or "").strip())
+    for r in have[:8]:
+        kind = "CHILD (parent=" + str(r.get("parent")) + ")" if str(
+            r.get("parent") or "").strip() else "PARENT/standalone"
+        print(f"  {r.get('itemid')}: {kind}")
+    print(f"  -> {parents} of {len(have)} sampled are parents/standalone")
+
+    print()
+    print("Do any matrix CHILDREN carry one?")
+    print("=" * 66)
+    kids = client.suiteql(
+        "SELECT COUNT(*) AS n FROM item "
+        "WHERE storedisplayname IS NOT NULL AND parent IS NOT NULL"
+    )
+    par = client.suiteql(
+        "SELECT COUNT(*) AS n FROM item "
+        "WHERE storedisplayname IS NOT NULL AND parent IS NULL"
+    )
+    n_kids = int(kids[0]["n"]) if kids else 0
+    n_par = int(par[0]["n"]) if par else 0
+    print(f"  children with a Store Display Name: {n_kids:,}")
+    print(f"  parents/standalone with one:        {n_par:,}")
+    if n_kids == 0 and n_par:
+        print("  -> CONFIRMED: only parents keep it. NetSuite discards the "
+              "field on\n     matrix children; writing it there is futile.")
+    print()
 
     rows = client.suiteql(
         "SELECT id, itemid, storedisplayname, storedescription, isonline "
@@ -62,6 +102,48 @@ def main() -> int:
         if rest_has != sql_has:
             mismatches += 1
             print("  -> MISMATCH: REST and SuiteQL disagree on storeDisplayName")
+        print()
+
+    # Deciding test: does a PATCH stick on a matrix PARENT? Children are
+    # proven futile above. If parents accept it, the fix is to write these
+    # on parents (where parent_sync already runs) instead of on 45k children.
+    if os.environ.get("STOREFIELDS_PARENT_WRITE_TEST", "").strip().lower() == "true":
+        print("=" * 70)
+        print("PARENT write test (PATCH, read back, restore)")
+        print("=" * 70)
+        target = client.suiteql(
+            "SELECT id, itemid, storedisplayname FROM item "
+            "WHERE parent IS NULL AND custitem_sanmar_style IS NOT NULL "
+            "AND rownum <= 1"
+        )
+        if not target:
+            print("  no SanMar matrix parent found to test")
+        else:
+            rid = str(target[0]["id"])
+            before = client.get_record("inventoryItem", rid).get("storeDisplayName")
+            probe_value = "BSG probe -- safe to ignore"
+            print(f"  item {rid} ({target[0].get('itemid')}) before: {before!r}")
+            try:
+                client.update_record(
+                    "inventoryItem", rid, {"storeDisplayName": probe_value}
+                )
+                after = client.get_record(
+                    "inventoryItem", rid).get("storeDisplayName")
+                print(f"  after PATCH: {after!r}")
+                stuck = str(after or "") == probe_value
+                print(f"  RESULT: parent write "
+                      f"{'STICKS -- write store fields on parents' if stuck else 'ALSO DISCARDED'}")
+            except Exception as exc:  # noqa: BLE001 - the point is to see it
+                print(f"  PATCH REJECTED: {str(exc)[:160]}")
+            finally:
+                # Always put it back the way we found it.
+                client.update_record(
+                    "inventoryItem", rid,
+                    {"storeDisplayName": before if before else ""},
+                )
+                restored = client.get_record(
+                    "inventoryItem", rid).get("storeDisplayName")
+                print(f"  restored: {restored!r}")
         print()
 
     print("=" * 70)

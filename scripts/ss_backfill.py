@@ -24,7 +24,12 @@ import os
 import time
 from pathlib import Path
 
-from native_pricing import add_native_diffs, read_base_prices, weight_display
+from native_pricing import (
+    add_native_diffs,
+    base_price,
+    read_base_prices,
+    weight_display,
+)
 from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -210,7 +215,9 @@ def natives_for(p: dict) -> tuple:
         regular = num("piece_price")
     cost, on_sale = effective_cost(regular, num("sale_price"))
     disp_weight, weight_unit = weight_display(num("weight"))
-    return (num("msrp"), cost, disp_weight, weight_unit, on_sale)
+    # Base Price = the higher of MAP and MSRP.
+    return (base_price(num("msrp"), num("map_price")),
+            cost, disp_weight, weight_unit, on_sale)
 
 
 def fetch_warehouses(skus: list[str]) -> dict[str, list[dict]]:

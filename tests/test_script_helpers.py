@@ -13,7 +13,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from description_update import _copy, _polish_name  # noqa: E402
-from native_pricing import add_native_diffs, base_price_body, weight_display  # noqa: E402
+from native_pricing import (  # noqa: E402
+    add_native_diffs,
+    base_price,
+    base_price_body,
+    weight_display,
+)
 from parent_sync import _mode  # noqa: E402
 from ss_backfill import _abs_url, natives_for  # noqa: E402
 
@@ -215,3 +220,34 @@ class TestPerWarehouseFields:
         from sanmar_netsuite.sanmar import constants as C
 
         assert set(SANMAR_WHSE_FIELDS) == set(C.WAREHOUSES)
+
+
+class TestBasePrice:
+    """Base Price = the higher of MAP and MSRP (business rule 2026-07-29)."""
+
+    def test_map_wins_when_higher(self):
+        assert base_price(20.0, 25.0) == 25.0
+
+    def test_msrp_wins_when_higher(self):
+        assert base_price(30.0, 25.0) == 30.0
+
+    def test_missing_map_falls_back_to_msrp(self):
+        # Value brands (Gildan et al.) carry no MAP at all.
+        assert base_price(19.99, None) == 19.99
+
+    def test_missing_msrp_falls_back_to_map(self):
+        assert base_price(None, 14.5) == 14.5
+
+    def test_both_missing_returns_none(self):
+        # None means "leave Base Price alone", never write a zero.
+        assert base_price(None, None) is None
+
+    def test_penny_map_placeholder_ignored(self):
+        # S&S publishes 0.01 to mean "no MAP restriction".
+        assert base_price(18.0, 0.01) == 18.0
+
+    def test_zero_msrp_ignored(self):
+        assert base_price(0, 12.0) == 12.0
+
+    def test_strings_are_coerced(self):
+        assert base_price("20", "25") == 25.0
