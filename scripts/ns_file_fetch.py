@@ -33,6 +33,9 @@ DEST = ROOT / "suitescript" / "store"
 SCRIPT_ID = int(os.environ.get("FILE_FETCH_SCRIPT_ID", "2358") or "2358")
 MAX_FILES = 40
 MAX_BYTES = 2_000_000
+# Source files only -- the folder tree also holds sample-art JPEGs and other
+# assets that would bloat the repo without being editable code.
+CODE_EXT = re.compile(r"\.(js|json|css|html?|txt|md|xml)$", re.IGNORECASE)
 
 
 def soap_get_file(cfg, internal_id: str) -> tuple[str, bytes] | None:
@@ -110,6 +113,8 @@ def main() -> int:
             size = int(s.get("filesize") or 0)
             if sid == file_id:
                 continue
+            if not CODE_EXT.search(str(s.get("name") or "")):
+                continue
             if size > MAX_BYTES:
                 print(f"  skip {s.get('name')} ({size:,} bytes > cap)")
                 continue
@@ -127,6 +132,8 @@ def main() -> int:
             print(f"subfolder {sub_name} ({sub_id}): {len(sub_files)} file(s)")
             for s in sub_files:
                 size = int(s.get("filesize") or 0)
+                if not CODE_EXT.search(str(s.get("name") or "")):
+                    continue
                 if size > MAX_BYTES:
                     print(f"  skip {sub_name}/{s.get('name')} ({size:,} bytes > cap)")
                     continue
