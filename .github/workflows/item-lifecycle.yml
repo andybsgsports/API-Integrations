@@ -5,6 +5,8 @@ permissions:
   issues: write
 
 on:
+  schedule:
+    - cron: "0 14 * * *"  # stagger contract: docs/NIGHTLY_SCHEDULE.md
   workflow_dispatch:
     inputs:
       dry_run:
