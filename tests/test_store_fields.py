@@ -121,6 +121,7 @@ def test_build_payloads_shop_image_field_gets_front_url(sdl_n_path, dip_path):
     (custitem_sanmar_front_image_url keeps the back view -- see its put() note),
     and only when the field was detected as present."""
     from sanmar_field_update import build_payloads
+
     from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
 
     styles = parse_styles(sdl_n_path)
