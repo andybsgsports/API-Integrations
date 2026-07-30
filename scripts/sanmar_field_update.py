@@ -95,6 +95,15 @@ CLOSEOUT_FIELD = os.environ.get(
     "SANMAR_CLOSEOUT_FIELD", "custitem_sanmar_is_closeout"
 ).strip()
 
+# The BSG storefront's searchable "best image URL" text field (its catalog and
+# per-color photo swap read images off plain search columns -- the atlas Image
+# field crashes NetSuite as a column). We fill it per SKU with the feed's
+# FRONT-view URL; custitem_sanmar_front_image_url stays the BACK view (see the
+# note at its put() call). Self-enabling: only written if the field exists.
+SHOP_IMAGE_FIELD = os.environ.get(
+    "SANMAR_SHOP_IMAGE_FIELD", "custitem_bsgshop_image_url"
+).strip()
+
 # NOTE: we deliberately do NOT write NetSuite's native Stock Description.
 # It is a legacy field hard-capped at 21 characters -- far too short for the
 # marketing copy Store Description carries, so anything we put there is a
@@ -303,7 +312,8 @@ def store_description(available_sizes: str, description: str) -> str:
 
 
 def build_payloads(
-    styles, inventory, today: date | None = None, on_sale_field: str = ""
+    styles, inventory, today: date | None = None, on_sale_field: str = "",
+    shop_image_field: str = "",
 ) -> tuple[
     dict[str, dict[str, object]], dict[str, tuple], dict[str, tuple], dict[str, bool]
 ]:
@@ -403,6 +413,13 @@ def build_payloads(
             # image lives on custitem_atlas_item_image (the real NetSuite
             # Image-type field) instead.
             put("custitem_sanmar_front_image_url", images.back_url() if images else None)
+            # The storefront's searchable "best image" column: the FRONT view,
+            # per color, straight from the feed. Unlike the atlas Image field
+            # (unusable as a search column) this lets the store's catalog and
+            # per-color swap read this SKU's photo with no record loads. put()
+            # skips blanks, so an existing value is never cleared.
+            if shop_image_field:
+                put(shop_image_field, images.primary_url() if images else None)
             put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry
@@ -462,8 +479,14 @@ def main() -> int:
     # (self-enabling).
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     closeout_field = CLOSEOUT_FIELD if _field_exists(client, CLOSEOUT_FIELD) else ""
+    shop_image_field = (
+        SHOP_IMAGE_FIELD if _field_exists(client, SHOP_IMAGE_FIELD) else ""
+    )
+    if shop_image_field:
+        print(f"shop image field active: {shop_image_field}")
     payloads, natives, _store_by_gtin, closeout_by_gtin = build_payloads(
-        styles, inventory, on_sale_field=on_sale_field
+        styles, inventory, on_sale_field=on_sale_field,
+        shop_image_field=shop_image_field,
     )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
     if closeout_field:
@@ -480,6 +503,7 @@ def main() -> int:
     cols = ", ".join(
         FIELD_ORDER + SEEN_FIELDS + store_cols
         + ([closeout_field] if closeout_field else [])
+        + ([shop_image_field] if shop_image_field else [])
     )
     gtins = sorted(payloads)
     considered = written = unchanged = priced = failures = 0

@@ -59,3 +59,50 @@ def test_natives_sale_between_customer_and_piece_not_flagged():
     p = {"customer_price": "6.50", "piece_price": "7.75", "sale_price": "7.00"}
     _base, cost, _weight, _weight_unit, on_sale = natives_for(p)
     assert (cost, on_sale) == (6.50, False)
+
+
+def test_ss_write_phase_uses_bounded_concurrency():
+    """S&S must PATCH through write_records, not one record at a time.
+
+    It was the last writer still issuing sequential update_record() calls --
+    ~15k round trips of pure latency, which is what made the nightly run for
+    hours regardless of how little had actually changed. Guard the fix so the
+    loop can't quietly regress to sequential writes.
+    """
+    import ast
+
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "ss_backfill.py").read_text()
+    main = next(
+        n for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.FunctionDef) and n.name == "main"
+    )
+    called = {
+        n.func.id for n in ast.walk(main)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "write_records" in called, "write phase must use bounded concurrency"
+
+    attr_calls = {
+        n.func.attr for n in ast.walk(main)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
+    assert "update_record" not in attr_calls, (
+        "per-record update_record() in main() means writes went back to sequential"
+    )
+
+
+def test_ss_read_phases_are_parallel():
+    """The read phases (barcode join, vendorname lookup, /Inventory pull) were
+    fully sequential, making runtime a fixed multi-hour floor independent of
+    how many items changed. They must stay concurrent."""
+    import ast
+
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "ss_backfill.py").read_text()
+    tree = ast.parse(src)
+    pools = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == "ThreadPoolExecutor"
+    ]
+    # barcode join, vendorname batches, warehouse fetch
+    assert len(pools) >= 3, f"expected >=3 parallel read phases, found {len(pools)}"
