@@ -1,0 +1,63 @@
+name: NetSuite File Cabinet Fetch (read-only vs NetSuite)
+
+# Pulls a Suitelet's source (and folder siblings) out of the File Cabinet via
+# SOAP and commits it under suitescript/store/ on the branch it ran on -- the
+# repo gets an editable copy of storefront code that otherwise lives only in
+# NetSuite. Reads NetSuite, writes only to this repository.
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_id:
+        description: "Script record internal id whose file (and folder) to fetch"
+        required: false
+        default: "2358"
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+
+      - name: Fetch files
+        env:
+          FILE_FETCH_SCRIPT_ID: ${{ github.event.inputs.script_id }}
+        run: python scripts/ns_file_fetch.py
+
+      - name: Commit fetched sources to this branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add suitescript/store
+          if git diff --cached --quiet; then
+            echo "nothing new to commit"
+          else
+            git commit -m "Fetch storefront sources from File Cabinet (script ${{ github.event.inputs.script_id }})"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
