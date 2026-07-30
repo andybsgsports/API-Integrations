@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "suitescript" / "store"
 
 SCRIPT_ID = int(os.environ.get("FILE_FETCH_SCRIPT_ID", "2358") or "2358")
-MAX_FILES = 20
+MAX_FILES = 40
 MAX_BYTES = 2_000_000
 
 
@@ -95,7 +95,10 @@ def main() -> int:
         f"SELECT folder FROM file WHERE id = {file_id}"
     )
     folder = str(folder_rows[0].get("folder") or "") if folder_rows else ""
-    targets = [(file_id, None)]
+    # (file_id, subdir) -- subdir "" for the script's own folder, or the
+    # subfolder name for one level down (the Suitelet's ./lib/ modules live in
+    # a child folder, so siblings alone miss its dependencies).
+    targets: list[tuple[str, str]] = [(file_id, "")]
     if folder:
         siblings = client.suiteql(
             "SELECT id, name, filesize FROM file "
@@ -110,21 +113,41 @@ def main() -> int:
             if size > MAX_BYTES:
                 print(f"  skip {s.get('name')} ({size:,} bytes > cap)")
                 continue
-            targets.append((sid, s.get("name")))
+            targets.append((sid, ""))
+        subfolders = client.suiteql(
+            f"SELECT id, name FROM mediaitemfolder WHERE parent = {folder}"
+        )
+        for sub in subfolders:
+            sub_id = str(sub["id"])
+            sub_name = re.sub(r"[^A-Za-z0-9._-]", "_", str(sub.get("name") or sub_id))
+            sub_files = client.suiteql(
+                "SELECT id, name, filesize FROM file "
+                f"WHERE folder = {sub_id} ORDER BY name"
+            )
+            print(f"subfolder {sub_name} ({sub_id}): {len(sub_files)} file(s)")
+            for s in sub_files:
+                size = int(s.get("filesize") or 0)
+                if size > MAX_BYTES:
+                    print(f"  skip {sub_name}/{s.get('name')} ({size:,} bytes > cap)")
+                    continue
+                targets.append((str(s["id"]), sub_name))
     targets = targets[:MAX_FILES]
 
     DEST.mkdir(parents=True, exist_ok=True)
     fetched = 0
-    for fid, _hint in targets:
+    for fid, subdir in targets:
         got = soap_get_file(cfg, fid)
         if not got:
             continue
         name, content = got
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", name)
-        out = DEST / safe
+        out_dir = DEST / subdir if subdir else DEST
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / safe
         out.write_bytes(content)
         fetched += 1
-        print(f"  wrote suitescript/store/{safe} ({len(content):,} bytes)")
+        rel = f"{subdir}/{safe}" if subdir else safe
+        print(f"  wrote suitescript/store/{rel} ({len(content):,} bytes)")
 
     print(f"\nfetched {fetched} of {len(targets)} file(s) into suitescript/store/")
     return 0 if fetched else 1
