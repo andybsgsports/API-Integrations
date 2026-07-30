@@ -14,7 +14,9 @@
  *      loaded record. For a matrix PARENT with none, the first child that has one.
  *
  * Safe + idempotent:
- *   - Only writes when the resolved URL DIFFERS from what's stored (minimal writes).
+ *   - FILL-ONLY: writes only when the stored value is BLANK. The supplier
+ *     pipeline owns already-populated values (it writes the per-SKU FRONT-view
+ *     URL); re-resolving those here would fight it nightly.
  *   - Never clears an existing value when it resolves nothing (leaves it alone).
  *   - Every item is isolated in try/catch; one bad item never fails the run.
  *   - Purely additive: if this never runs, the storefront still resolves images
@@ -111,9 +113,35 @@ define([
     }
 
     // For a matrix parent with no image of its own: first child that has one
-    // (attached file first, then the child's Item Image record field).
+    // (the child's vendor/precomputed URL fields first -- SanMar/S&S sync photo
+    // URLs onto children only -- then attached file, then the child's Item Image
+    // record field).
     function childImageUrl(parentId) {
         var found = '';
+        try {
+            var urlCols = [search.createColumn({ name: C.ITEM_FIELD.SHOP_IMAGE_URL })];
+            for (var ui = 0; ui < C.IMAGE_URL_FIELDS.length; ui++) {
+                urlCols.push(search.createColumn({ name: C.ITEM_FIELD[C.IMAGE_URL_FIELDS[ui]] }));
+            }
+            search.create({
+                type: 'item',
+                filters: [[C.ITEM_FIELD.PARENT, 'anyof', parentId], 'AND', ['isinactive', 'is', 'F']],
+                columns: urlCols
+            }).run().each(function (r) {
+                var vals = {};
+                vals[C.ITEM_FIELD.SHOP_IMAGE_URL] = r.getValue(C.ITEM_FIELD.SHOP_IMAGE_URL);
+                for (var vi = 0; vi < C.IMAGE_URL_FIELDS.length; vi++) {
+                    var fid = C.ITEM_FIELD[C.IMAGE_URL_FIELDS[vi]];
+                    vals[fid] = r.getValue(fid);
+                }
+                var pre = String(vals[C.ITEM_FIELD.SHOP_IMAGE_URL] || '').trim();
+                if (pre) { found = absoluteUrl(pre); return false; }
+                var u = vendorUrl(vals);
+                if (u) { found = u; return false; }
+                return true;
+            });
+            if (found) { return found; }
+        } catch (e) { /* fall through to attached-file passes */ }
         try {
             search.create({
                 type: 'item',
@@ -188,13 +216,20 @@ define([
             var rtype = ITEM_RECORD_TYPE_BY_CODE[typeCode];
             if (!rtype) { context.write({ key: 'skipped', value: row.id }); return; }
 
+            // FILL-ONLY: an already-populated value is left alone. The supplier
+            // pipeline writes the FRONT-view URL into this field per SKU, while
+            // this script's vendor-field tier would resolve the (back-view)
+            // custitem_sanmar_front_image_url -- re-resolving here would flip
+            // such items back and forth every night. Blank is the only state
+            // this script fills.
+            if (current) { context.write({ key: 'unchanged', value: row.id }); return; }
+
             var resolved = vendorUrl(values);
             if (!resolved) { resolved = attachedImageUrl(row.id); }
             if (!resolved) { resolved = recordImageUrl(row.id, typeCode); }
             if (!resolved && isMatrix) { resolved = childImageUrl(row.id); }
 
             if (!resolved) { context.write({ key: 'noimage', value: row.id }); return; }
-            if (resolved === current) { context.write({ key: 'unchanged', value: row.id }); return; }
 
             var v = {};
             v[C.ITEM_FIELD.SHOP_IMAGE_URL] = resolved;

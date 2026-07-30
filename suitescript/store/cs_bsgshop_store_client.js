@@ -1020,13 +1020,55 @@
     function shopAside() {
         if (!state.filterDefs.length) { return ''; }
         var anyActive = Object.keys(state.filters).some(function (k) { return state.filters[k]; });
-        var groups = state.filterDefs.map(function (f) {
+        // Sport and Categories combine into ONE facet: pick a sport and its
+        // categories unfold directly beneath it as a nested sub-list (the server
+        // already scopes the class values to the selected department). Any other
+        // configured facets (Brand, ...) keep their own sections.
+        var deptDef = null, classDef = null;
+        var rest = state.filterDefs.filter(function (f) {
+            if (!deptDef && f.key === 'department') { deptDef = f; return false; }
+            if (!classDef && f.key === 'class') { classDef = f; return false; }
+            return true;
+        });
+        var groups = '';
+        if (deptDef) {
+            groups += facetSection(deptDef.label, sportCategoryFacet(deptDef, classDef));
+        } else if (classDef) {
+            // No sport dimension in this account -- fall back to a plain
+            // Categories section rather than losing the filter.
+            groups += facetSection(classDef.label, classDef.hierarchical ? categoryTree(classDef) : flatFacet(classDef));
+        }
+        groups += rest.map(function (f) {
             return facetSection(f.label, f.hierarchical ? categoryTree(f) : flatFacet(f));
         }).join('');
         return '<aside class="bsg-shop-aside" aria-label="Product filters">' +
             '<div class="aside-top"><span class="aside-kicker">Filter</span>' +
             (anyActive ? '<button class="bsg-clearfilters" data-act="clear-filters">Clear all</button>' : '') +
             '</div>' + groups + '</aside>';
+    }
+
+    // The unified Sport facet body: one option per sport, with the ACTIVE sport's
+    // categories nested beneath it. Sport buttons carry data-facetclear so picking
+    // a different sport also drops the category selection -- a category chosen
+    // under Softball would otherwise silently dead-end the Baseball page.
+    function sportCategoryFacet(deptDef, classDef) {
+        var cur = String(state.filters[deptDef.key] || '');
+        var clearAttr = classDef ? ' data-facetclear="' + esc(classDef.key) + '"' : '';
+        var allBtn = '<button class="facet-opt' + (cur ? '' : ' on') + '" data-facet="' + esc(deptDef.key) +
+            '" data-facetval=""' + clearAttr + '><span>All ' + esc(deptDef.label) + '</span></button>';
+        var opts = deptDef.options.map(function (o) {
+            var on = String(o.id) === cur;
+            var btn = '<button class="facet-opt' + (on ? ' on' : '') + '" data-facet="' + esc(deptDef.key) +
+                '" data-facetval="' + esc(o.id) + '"' + clearAttr + (on ? ' aria-current="true"' : '') +
+                '><span>' + esc(o.name) + '</span>' + facetCount(o.count) + '</button>';
+            if (on && classDef && classDef.options.length) {
+                btn += '<div class="cat-sub">' +
+                    (classDef.hierarchical ? categoryTree(classDef) : flatFacet(classDef)) +
+                    '</div>';
+            }
+            return btn;
+        }).join('');
+        return '<div class="facet-list">' + allBtn + opts + '</div>';
     }
 
     // A collapsible rail section: clicking the heading folds/unfolds its body.
@@ -1646,6 +1688,19 @@
     function buildGallery(p) {
         var base = (p.images && p.images.length) ? p.images.slice() : (p.image ? [p.image] : []);
         var colors = (p.gallery && p.gallery.length) ? p.gallery.slice() : null;
+        if (!colors) {
+            // No prebuilt gallery (only Momentec-feed styles have one) -- build
+            // per-color entries from the variants' own photo URLs (SanMar/S&S
+            // children carry a per-color image field), so the color strip and
+            // click-to-swap work for matrix items from any vendor.
+            colors = galleryFromVariants(p);
+            // Keep the item's primary (front) photo reachable: if it isn't one of
+            // the per-color shots, lead with it as its own entry.
+            if (colors && base.length) {
+                var present = colors.some(function (c) { return c.imgs.indexOf(base[0]) !== -1; });
+                if (!present) { colors = [{ c: '', imgs: base }].concat(colors); }
+            }
+        }
         if (!colors) { return base.length ? { colors: [{ c: '', imgs: base }], ci: 0, ii: 0 } : null; }
         // Start on the color whose front shot is the item's primary image.
         var ci = 0;
@@ -1653,6 +1708,26 @@
             if (p.image && colors[i].imgs[0] === p.image) { ci = i; break; }
         }
         return { colors: colors, ci: ci, ii: 0 };
+    }
+
+    // Per-color gallery entries derived from the variants themselves: one entry
+    // per distinct color that has a photo, extra shots of the same color appended.
+    // Returns null when no variant carries an image (single-photo items).
+    function galleryFromVariants(p) {
+        if (!p.variants || !p.variants.length) { return null; }
+        var byColor = {}, out = [];
+        p.variants.forEach(function (v) {
+            if (!v.image) { return; }
+            var cs = splitVariant(v.label);
+            var c = (cs && cs.color) || String(v.label || '');
+            if (!byColor[c]) {
+                byColor[c] = { c: c, imgs: [v.image] };
+                out.push(byColor[c]);
+            } else if (byColor[c].imgs.indexOf(v.image) === -1) {
+                byColor[c].imgs.push(v.image);
+            }
+        });
+        return out.length ? out : null;
     }
 
     // Swap the displayed gallery image IN PLACE -- no re-render, so nothing
@@ -1979,6 +2054,10 @@
                 if (String(state.filters[key] || '') === String(val)) { return; } // already active
                 keepScrollY = window.pageYOffset || 0;
                 state.filters[key] = val;
+                // Switching sport also clears its nested category selection --
+                // a category picked under one sport rarely exists in another.
+                var clearKey = b.getAttribute('data-facetclear');
+                if (clearKey && state.filters[clearKey]) { state.filters[clearKey] = ''; }
                 state.page = 1;
                 loadProducts();
                 loadFilters();   // options are scoped to the selection -- re-scope them

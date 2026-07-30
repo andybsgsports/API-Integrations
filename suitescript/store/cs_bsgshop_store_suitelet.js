@@ -311,6 +311,37 @@ define([
         return map;
     }
 
+    // For matrix PARENTS still imageless after the attached-file passes: the first
+    // CHILD carrying a precomputed/vendor image-URL field. SanMar and S&S sync
+    // their per-color photo URLs onto the child items only (the parent has no UPC
+    // to match on), so without this pass a matrix product whose photos exist ONLY
+    // as child URL fields renders "No image" on the card. Keyed by parent id; one
+    // batched search, no record loads.
+    function childVendorUrlMap(parentIds) {
+        var map = {};
+        if (!parentIds.length) { return map; }
+        try {
+            search.create({
+                type: 'item',
+                filters: [
+                    [C.ITEM_FIELD.PARENT, 'anyof', parentIds], 'AND',
+                    ['isinactive', 'is', 'F']
+                ],
+                columns: [search.createColumn({ name: C.ITEM_FIELD.PARENT, sort: search.Sort.ASC })]
+                    .concat(IMAGE_URL_COLUMNS)
+            }).run().each(function (r) {
+                var pid = r.getValue(C.ITEM_FIELD.PARENT);
+                if (!pid || map[pid]) { return true; }
+                var u = rowImageUrl(r);
+                if (u) { map[pid] = u; }
+                return true;
+            });
+        } catch (e) {
+            log.debug({ title: 'bsgshop: child vendor-url image lookup unavailable', details: safeErr(e) });
+        }
+        return map;
+    }
+
     // ---- server-side response cache (page speed) ----
     // Account-wide N/cache of API JSON responses: the grouped catalog runs the
     // FULL item search per request, so without this every shopper paid seconds
@@ -392,6 +423,24 @@ define([
     var VENDOR_SPEC_FIELDS = C.GTIN_FIELDS.map(function (key) { return C.ITEM_FIELD[key]; })
         .concat([C.ITEM_FIELD.SS_BRAND, C.ITEM_FIELD.SS_WEIGHT]);
     var VENDOR_QTY_FIELDS = C.QTY_FIELDS.map(function (key) { return C.ITEM_FIELD[key]; });
+
+    // Just the searchable image-URL columns (precomputed + per-vendor feed URLs),
+    // for places that read a row's best image straight off plain columns: the
+    // matrix-variant loader and the imageless-parent child fallback. SanMar/S&S
+    // photo URLs are synced onto the CHILD items (per size/color), never the
+    // parent, so both call sites read them off child rows.
+    var IMAGE_URL_COLUMNS = [C.ITEM_FIELD.SHOP_IMAGE_URL].concat(
+        C.IMAGE_URL_FIELDS.map(function (key) { return C.ITEM_FIELD[key]; }));
+
+    // Best image URL readable off a search ROW (no record loads): the precomputed
+    // URL first, then the per-vendor feed URLs -- same order as resolveImage.
+    function rowImageUrl(r) {
+        for (var i = 0; i < IMAGE_URL_COLUMNS.length; i++) {
+            var s = String(rowVal(r, IMAGE_URL_COLUMNS[i]) || '').trim();
+            if (s) { return /^https?:\/\//i.test(s) ? s : absoluteUrl(s); }
+        }
+        return '';
+    }
 
     // Not every item field is a legal SEARCH column in every account (an invalid one
     // makes the entire search throw, which previously surfaced as a silently empty
@@ -890,46 +939,70 @@ define([
     // color x size grid.
     function loadVariants(parentId, parentItemNumber, parentPrice) {
         var variants = [];
-        try {
-            search.create({
-                type: 'item',
-                filters: [
-                    [C.ITEM_FIELD.PARENT, 'anyof', parentId], 'AND',
-                    ['isinactive', 'is', 'F']
-                ],
-                columns: [
-                    search.createColumn({ name: C.ITEM_FIELD.ITEM_ID, sort: search.Sort.ASC }),
-                    C.ITEM_FIELD.QTY_AVAILABLE,
-                    C.CONFIG.PRICE_SEARCH_FIELD
-                ].concat(VENDOR_QTY_FIELDS)
-            }).run().each(function (r) {
-                var childNumber = r.getValue(C.ITEM_FIELD.ITEM_ID) || '';
-                var label = childNumber;
-                // Child ids repeat the parent number ("1370379 : 1370379-Navy-Small");
-                // strip every leading occurrence plus separators to get "Navy-Small".
-                if (parentItemNumber) {
-                    while (label.indexOf(parentItemNumber) === 0 ||
-                        /^[\s:>-]/.test(label)) {
-                        label = label.indexOf(parentItemNumber) === 0
-                            ? label.slice(parentItemNumber.length)
-                            : label.slice(1);
+        // Image-URL columns first, plain columns as the fallback -- same defense
+        // as the catalog: one invalid column throws the whole search, and losing
+        // every variant to an image column would be far worse than losing the
+        // per-color photos.
+        var columnAttempts = [
+            [
+                search.createColumn({ name: C.ITEM_FIELD.ITEM_ID, sort: search.Sort.ASC }),
+                C.ITEM_FIELD.QTY_AVAILABLE,
+                C.CONFIG.PRICE_SEARCH_FIELD
+            ].concat(VENDOR_QTY_FIELDS, IMAGE_URL_COLUMNS),
+            [
+                search.createColumn({ name: C.ITEM_FIELD.ITEM_ID, sort: search.Sort.ASC }),
+                C.ITEM_FIELD.QTY_AVAILABLE,
+                C.CONFIG.PRICE_SEARCH_FIELD
+            ].concat(VENDOR_QTY_FIELDS)
+        ];
+        for (var a = 0; a < columnAttempts.length && !variants.length; a++) {
+            try {
+                search.create({
+                    type: 'item',
+                    filters: [
+                        [C.ITEM_FIELD.PARENT, 'anyof', parentId], 'AND',
+                        ['isinactive', 'is', 'F']
+                    ],
+                    columns: columnAttempts[a]
+                }).run().each(function (r) {
+                    var childNumber = r.getValue(C.ITEM_FIELD.ITEM_ID) || '';
+                    var label = childNumber;
+                    // Child ids repeat the parent number ("1370379 : 1370379-Navy-Small");
+                    // strip every leading occurrence plus separators to get "Navy-Small".
+                    if (parentItemNumber) {
+                        while (label.indexOf(parentItemNumber) === 0 ||
+                            /^[\s:>-]/.test(label)) {
+                            label = label.indexOf(parentItemNumber) === 0
+                                ? label.slice(parentItemNumber.length)
+                                : label.slice(1);
+                        }
                     }
-                }
-                label = label || childNumber;
-                var vQty = resolveQty(rowGetVal(r));
-                var vPrice = num(r.getValue(C.CONFIG.PRICE_SEARCH_FIELD)) || parentPrice || 0;
-                variants.push({
-                    id: r.id,
-                    label: label,
-                    qty: vQty,
-                    price: vPrice,
-                    priceFormatted: formatMoney(vPrice),
-                    stock: stockStatus(vQty)
+                    label = label || childNumber;
+                    var vQty = resolveQty(rowGetVal(r));
+                    var vPrice = num(r.getValue(C.CONFIG.PRICE_SEARCH_FIELD)) || parentPrice || 0;
+                    var v = {
+                        id: r.id,
+                        label: label,
+                        qty: vQty,
+                        price: vPrice,
+                        priceFormatted: formatMoney(vPrice),
+                        stock: stockStatus(vQty)
+                    };
+                    // Per-color photo (click the color in the grid -> see it). The
+                    // child's own URL fields; blank on the fallback column set.
+                    var vImg = rowImageUrl(r);
+                    if (vImg) { v.image = vImg; }
+                    variants.push(v);
+                    return variants.length < 200;
                 });
-                return variants.length < 200;
-            });
-        } catch (e) {
-            log.error({ title: 'bsgshop variant load failed for parent ' + parentId, details: safeErr(e) });
+            } catch (e) {
+                variants.length = 0;
+                log.error({
+                    title: 'bsgshop variant load failed for parent ' + parentId +
+                        ' (attempt ' + (a + 1) + ' of ' + columnAttempts.length + ')',
+                    details: safeErr(e)
+                });
+            }
         }
         return variants;
     }
@@ -1278,6 +1351,11 @@ define([
         // 3. Matrix parents: image lives on a child.
         miss = missingRawIds();
         if (miss.length) { applyMap(childAttachedImageMap(miss)); }
+
+        // 3.5. Matrix parents whose photos exist only as CHILD image-URL fields
+        // (SanMar/S&S sync per-color URLs onto children, never the parent).
+        miss = missingRawIds();
+        if (miss.length) { applyMap(childVendorUrlMap(miss)); }
 
         // 4. Last resort: curated Item Image + Base Price off the record.
         var needRecord = cards.some(function (c) { return !c.image || !(c.price > 0); });
@@ -2506,6 +2584,9 @@ define([
         '.cat-parent.open{color:var(--accent)}' +
         '.cat-leaf.on{color:var(--accent);font-weight:800;border-left-color:var(--accent);background:var(--surface)}' +
         '.cat-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+        /* categories nested under the active sport (unified Sport facet) */
+        '.cat-sub{margin:2px 0 6px 12px;padding-left:6px;border-left:2px solid var(--line)}' +
+        '.cat-sub .cat-node,.cat-sub .facet-opt{font-size:12.5px;padding:6px 8px}' +
         '.itemno{font-size:11.5px;color:var(--muted)}' +
         '.bsg-toolbar{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap}' +
         '.bsg-toolbar input{flex:1;min-width:220px;padding:13px 14px;border:2px solid var(--line);font-size:15px;font-family:inherit;color:var(--ink);border-radius:0;background:#fff}' +
@@ -2655,7 +2736,7 @@ define([
         '.bsg-empty-more{margin:14px auto 4px;max-width:520px;padding:14px 16px;background:var(--surface);border:1px solid var(--line);color:var(--ink);font-size:14px;line-height:1.5}' +
         '.bsg-empty-more .bsg-btn-ghost{margin-left:10px}' +
 
-        '@media(max-width:820px){.bsg-shop{grid-template-columns:1fr;gap:18px}.bsg-shop-aside{position:static;top:auto;max-height:none;overflow:visible}.facet-list{flex-direction:row;flex-wrap:wrap;gap:6px;max-height:none}.facet-opt{width:auto;border:2px solid var(--line);border-left-width:2px;padding:7px 11px}.facet-opt span{white-space:normal}.facet-opt.on{border-color:var(--accent)}}' +
+        '@media(max-width:820px){.bsg-shop{grid-template-columns:1fr;gap:18px}.bsg-shop-aside{position:static;top:auto;max-height:none;overflow:visible}.facet-list{flex-direction:row;flex-wrap:wrap;gap:6px;max-height:none}.facet-opt{width:auto;border:2px solid var(--line);border-left-width:2px;padding:7px 11px}.facet-opt span{white-space:normal}.facet-opt.on{border-color:var(--accent)}.cat-sub{flex-basis:100%;margin-left:0}}' +
         // Sublimation rail carries an extra max-height cap (higher specificity than
         // the generic aside rule), so it must be released explicitly on mobile --
         // otherwise the capped box keeps overflow:visible and the categories spill

@@ -114,3 +114,24 @@ def test_same_compares_checkbox_bool_to_netsuite_tf():
     assert _same("", False)
     assert not _same("F", True)
     assert not _same("T", False)
+
+
+def test_build_payloads_shop_image_field_gets_front_url(sdl_n_path, dip_path):
+    """The storefront's searchable image column gets the FRONT view per color
+    (custitem_sanmar_front_image_url keeps the back view -- see its put() note),
+    and only when the field was detected as present."""
+    from sanmar_field_update import build_payloads
+    from sanmar_netsuite.sanmar.parsers import parse_inventory, parse_styles
+
+    styles = parse_styles(sdl_n_path)
+    inventory = parse_inventory(dip_path)
+
+    with_field, _, _, _ = build_payloads(
+        styles, inventory, shop_image_field="custitem_bsgshop_image_url"
+    )
+    navy = with_field["00882849000035"]  # K420 Classic Navy S
+    assert navy["custitem_bsgshop_image_url"].endswith("navy_model_front.jpg")
+    assert navy["custitem_sanmar_front_image_url"].endswith("navy_model_back.jpg")
+
+    without_field, _, _, _ = build_payloads(styles, inventory)
+    assert "custitem_bsgshop_image_url" not in without_field["00882849000035"]
