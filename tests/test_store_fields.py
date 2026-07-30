@@ -103,3 +103,14 @@ def test_store_display_name_matches_description_update_polish():
     ]
     for title, style in cases:
         assert store_display_name(title, style) == _polish_name(title, style)
+
+
+def test_same_compares_checkbox_bool_to_netsuite_tf():
+    """Same T/F-vs-bool rule as the other writers -- this being absent from
+    the SanMar _same is what kept every run at "unchanged: 0"."""
+    from sanmar_field_update import _same
+    assert _same("T", True)
+    assert _same("F", False)
+    assert _same("", False)
+    assert not _same("F", True)
+    assert not _same("T", False)

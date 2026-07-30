@@ -17,9 +17,13 @@ import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Default kept modest so a single job stays inside a standard account's
-# concurrency limit even if a nightly overlaps; override per run if needed.
-DEFAULT_WORKERS = int(os.environ.get("NETSUITE_WRITE_CONCURRENCY", "5") or "5")
+# Since the netsuite-writes concurrency group serialises the writers (only one
+# workflow ever writes at a time), a single job can use most of the account's
+# concurrent-request budget itself. Raised 5 -> 8 on 2026-07-30 to speed the
+# multi-hour full passes; the client's 429/5xx backoff absorbs overshoot. NOT
+# yet validated under load -- if the next runs' logs show sustained 429s,
+# dial back via NETSUITE_WRITE_CONCURRENCY.
+DEFAULT_WORKERS = int(os.environ.get("NETSUITE_WRITE_CONCURRENCY", "8") or "8")
 
 # NetSuite validates a PATCH as a unit: one unacceptable field rejects the whole
 # record, taking every other field on it down too. That turned a single bad

@@ -64,3 +64,15 @@ def test_closeout_from_ribbon():
     assert not is_closeout("")
     assert not is_closeout("New")
     assert not is_closeout(None)  # type: ignore[arg-type]
+
+
+def test_same_compares_checkbox_bool_to_netsuite_tf():
+    """A Python bool payload vs SuiteQL's "T"/"F" must not always differ --
+    that mismatch made every run rewrite every matched item just to re-send
+    an identical checkbox."""
+    from momentec_backfill import _same
+    assert _same("T", True)
+    assert _same("F", False)
+    assert _same("", False)      # never-set checkbox == unchecked
+    assert not _same("F", True)
+    assert not _same("T", False)
