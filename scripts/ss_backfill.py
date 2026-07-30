@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from concurrent_writes import write_records
 from native_pricing import (
     add_native_diffs,
     base_price,
@@ -41,6 +44,35 @@ from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 from ss_activewear_netsuite.config import get_config as ss_config
 from ss_activewear_netsuite.ss_activewear.client import SsClient
+
+# Concurrency for the READ phases (SuiteQL lookups + the S&S /Inventory pull).
+# These were fully sequential, which made the job's runtime a ~fixed multi-hour
+# floor no matter how few items actually changed -- the diff-convergence fix
+# only ever sped up the WRITE phase. Reads are far cheaper than writes for both
+# APIs, but they still count against NetSuite's concurrency governance, so this
+# stays conservative and tunable.
+READ_WORKERS = int(os.environ.get("SS_READ_CONCURRENCY", "6") or "6")
+
+# Styles per batched vendorname lookup (pass 2). NetSuite tolerates large IN
+# lists; 250 matches the chunk size the other writers use.
+STYLE_CHUNK = 250
+
+
+class _Phase:
+    """Print how long each phase took, so a slow nightly names its own culprit.
+
+    Without this the log's print() output is block-buffered through `tee` and
+    every line lands with the same end-of-run timestamp -- which is exactly why
+    a 4-hour run couldn't be attributed to a phase. Each line is flushed.
+    """
+
+    def __init__(self) -> None:
+        self.t0 = time.monotonic()
+
+    def mark(self, label: str) -> None:
+        now = time.monotonic()
+        print(f"  [phase] {label}: {now - self.t0:,.1f}s", flush=True)
+        self.t0 = now
 
 FIELDS = [
     "custitem_ss_sku", "custitem_ss_style_id", "custitem_ss_style",
@@ -223,23 +255,32 @@ def natives_for(p: dict) -> tuple:
 def fetch_warehouses(skus: list[str]) -> dict[str, list[dict]]:
     """sku -> raw per-warehouse rows via batched ``/Inventory`` calls.
 
-    Paced between batches to stay under S&S's throttle (the client already
-    retries 429/5xx); a failed batch falls back to per-SKU fetches so one bad
-    identifier can't drop 39 good ones.
+    Batches run CONCURRENTLY: this is a pure read of ~15k SKUs in blocks of 40
+    (~370 round trips), and run sequentially it was a fixed multi-minute floor
+    on every nightly regardless of how little actually changed. The client
+    already retries 429/5xx with exponential backoff, so overshoot self-
+    corrects; tune with SS_READ_CONCURRENCY if S&S starts pushing back.
+
+    A failed batch falls back to per-SKU fetches so one bad identifier can't
+    drop 39 good ones.
     """
     ss = SsClient(ss_config().ss_api)
     out: dict[str, list[dict]] = {}
+    lock = threading.Lock()
 
     def keep(inv) -> None:
         if inv is not None and inv.sku:
-            out[inv.sku] = [
-                {"warehouseAbbr": w.warehouse_abbr, "qty": w.qty}
-                for w in inv.warehouses
-            ]
+            with lock:
+                out[inv.sku] = [
+                    {"warehouseAbbr": w.warehouse_abbr, "qty": w.qty}
+                    for w in inv.warehouses
+                ]
 
     step = SsClient.INVENTORY_BATCH_SIZE
-    for i in range(0, len(skus), step):
-        batch = skus[i : i + step]
+    batches = [skus[i : i + step] for i in range(0, len(skus), step)]
+    done = [0]
+
+    def run(batch: list[str]) -> None:
         try:
             for inv in ss.iter_inventory(batch):
                 keep(inv)
@@ -249,11 +290,15 @@ def fetch_warehouses(skus: list[str]) -> dict[str, list[dict]]:
                     keep(ss.get_inventory(sku))
                 except Exception as exc:  # noqa: BLE001
                     print(f"  inventory fetch failed for {sku}: {str(exc)[:100]}")
-        done = min(i + step, len(skus))
-        if done % 400 < step or done == len(skus):
-            print(f"  warehouse breakdown fetched for {done}/{len(skus)} SKUs "
-                  f"({len(out)} returned)")
-        time.sleep(0.2)
+        with lock:
+            done[0] += len(batch)
+            n = done[0]
+        if n % 400 < step or n >= len(skus):
+            print(f"  warehouse breakdown fetched for {n}/{len(skus)} SKUs "
+                  f"({len(out)} returned)", flush=True)
+
+    with ThreadPoolExecutor(max_workers=READ_WORKERS) as ex:
+        list(ex.map(run, batches))
     return out
 
 
@@ -262,7 +307,9 @@ def main() -> int:
     max_items = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
     products_file = Path(ss_config().download_dir) / "products.json"
     products = json.loads(products_file.read_text(encoding="utf-8"))
-    print(f"S&S products: {len(products):,}")
+    print(f"S&S products: {len(products):,}", flush=True)
+    print(f"read concurrency: {READ_WORKERS}", flush=True)
+    phase = _Phase()
 
     client = NetSuiteClient(ns_config().netsuite)
 
@@ -274,17 +321,27 @@ def main() -> int:
             by_gtin.setdefault(g, p)
     gtins = sorted(by_gtin)
     item_for_gtin: dict[str, str] = {}
-    for i in range(0, len(gtins), 300):
-        chunk = gtins[i : i + 300]
+    gtin_lock = threading.Lock()
+    gtin_chunks = [gtins[i : i + 300] for i in range(0, len(gtins), 300)]
+
+    def match_gtins(chunk: list[str]) -> None:
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
-        for row in client.suiteql(
+        rows = client.suiteql(
             f"SELECT id, upccode FROM item WHERE upccode IN ({in_list})"
-        ):
-            item_for_gtin[str(row["upccode"])] = str(row["id"])
+        )
+        with gtin_lock:
+            for row in rows:
+                item_for_gtin[str(row["upccode"])] = str(row["id"])
+
+    # ~650 chunks for a 195k-SKU feed -- sequentially that alone was a large
+    # slice of the nightly, and it's a pure read.
+    with ThreadPoolExecutor(max_workers=READ_WORKERS) as ex:
+        list(ex.map(match_gtins, gtin_chunks))
     matched: dict[str, dict] = {}  # ns item id -> product
     for g, rid in item_for_gtin.items():
         matched.setdefault(rid, by_gtin[g])
-    print(f"barcode matches: {len(matched):,} items")
+    print(f"barcode matches: {len(matched):,} items", flush=True)
+    phase.mark("pass 1 barcode join")
 
     # -- pass 2: vendorname + options for products not matched by barcode
     matched_skus = {p.get("sku") for p in matched.values()}
@@ -298,15 +355,52 @@ def main() -> int:
     options = OptionMaps(client)
     opt_matches = 0
     if options.available:
-        for style, plist in remaining.items():
-            safe = _sql_escape(style)
+        # One SuiteQL query PER STYLE used to run here, sequentially -- tens of
+        # thousands of unmatched products group into thousands of styles, and
+        # the whole pass yields a handful of matches (13 on 2026-07-29). That
+        # made it the single largest cost in the job. Same query, batched by
+        # vendorname IN (...) and run concurrently: thousands of round trips
+        # collapse to dozens. A failed chunk falls back to per-style so one bad
+        # style name can't drop the rest.
+        rows_by_style: dict[str, list[dict]] = {}
+        style_lock = threading.Lock()
+        style_names = sorted(remaining)
+        style_chunks = [
+            style_names[i : i + STYLE_CHUNK]
+            for i in range(0, len(style_names), STYLE_CHUNK)
+        ]
+
+        def _index(rows) -> None:
+            with style_lock:
+                for r in rows:
+                    vn = str(r.get("vendorname") or "")
+                    if vn:
+                        rows_by_style.setdefault(vn, []).append(r)
+
+        def load_styles(chunk: list[str]) -> None:
+            in_list = ", ".join(f"'{_sql_escape(s)}'" for s in chunk)
             try:
-                rows = client.suiteql(
-                    f"SELECT id, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
-                    f"FROM item WHERE vendorname = '{safe}'"
-                )
-            except Exception:  # noqa: BLE001
-                continue
+                _index(client.suiteql(
+                    f"SELECT id, vendorname, {COLOR_FIELD} AS color, "
+                    f"{SIZE_FIELD} AS size FROM item "
+                    f"WHERE vendorname IN ({in_list})"
+                ))
+            except Exception:  # noqa: BLE001 - chunk failed; retry per style
+                for style in chunk:
+                    try:
+                        _index(client.suiteql(
+                            f"SELECT id, vendorname, {COLOR_FIELD} AS color, "
+                            f"{SIZE_FIELD} AS size FROM item "
+                            f"WHERE vendorname = '{_sql_escape(style)}'"
+                        ))
+                    except Exception:  # noqa: BLE001
+                        continue
+
+        with ThreadPoolExecutor(max_workers=READ_WORKERS) as ex:
+            list(ex.map(load_styles, style_chunks))
+
+        for style, plist in remaining.items():
+            rows = rows_by_style.get(style, [])
             opt_index = {
                 (str(r.get("color") or ""), str(r.get("size") or "")): str(r["id"])
                 for r in rows
@@ -331,13 +425,15 @@ def main() -> int:
                         matched[hit] = p
                         opt_matches += 1
                         break
-    print(f"vendorname+option matches: {opt_matches:,} items")
-    print(f"total matched items: {len(matched):,}")
+    print(f"vendorname+option matches: {opt_matches:,} items", flush=True)
+    print(f"total matched items: {len(matched):,}", flush=True)
+    phase.mark("pass 2 vendorname+option")
 
     # -- per-warehouse availability (only /Inventory carries the breakdown)
     whse_by_sku = fetch_warehouses(
         sorted({str(p.get("sku")) for p in matched.values() if p.get("sku")})
     )
+    phase.mark("S&S /Inventory warehouse fetch")
 
     # -- write phase (diff-aware)
     ids = sorted(matched)
@@ -346,10 +442,22 @@ def main() -> int:
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     considered = written = unchanged = upc_filled = priced = failures = 0
     on_sale_count = 0
+    _fail_shown = [0]
+
+    def _on_err(rid: str, exc: Exception) -> None:
+        _fail_shown[0] += 1
+        if _fail_shown[0] <= 10:
+            detail = getattr(exc, "payload", "")
+            print(f"  FAILED item {rid}: {str(exc)[:120]} :: {str(detail)[:400]}")
+
+    # Fields NetSuite rejected and we retried without -- reported below, since a
+    # silently dropped field is exactly the kind of gap that hides for days.
+    dropped: dict[str, int] = {}
     for i in range(0, len(ids), 200):
         chunk = ids[i : i + 200]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         base_by_rid = read_base_prices(client, in_list)
+        write_jobs: list[tuple[str, dict]] = []
         for row in client.suiteql(
             f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
             f"FROM item WHERE id IN ({in_list})"
@@ -394,14 +502,19 @@ def main() -> int:
             if not allow_write:
                 written += 1
                 continue
-            try:
-                client.update_record("inventoryItem", rid, body)
-                written += 1
-            except Exception as exc:  # noqa: BLE001
-                failures += 1
-                if failures <= 10:
-                    detail = getattr(exc, "payload", "") or getattr(exc, "args", "")
-                    print(f"  FAILED item {rid}: {str(exc)[:120]} :: {str(detail)[:400]}")
+            write_jobs.append((rid, body))
+
+        # Write the chunk with bounded concurrency. This loop used to PATCH one
+        # record at a time: ~15k sequential round trips is hours of pure
+        # latency, and it was the single largest cost in the nightly. SanMar and
+        # Momentec were switched to write_records; S&S was the one writer left
+        # behind. Same drop-and-retry protection, so one bad field costs that
+        # field rather than the whole record.
+        w, f = write_records(
+            client, "inventoryItem", write_jobs, on_error=_on_err, dropped=dropped
+        )
+        written += w
+        failures += f
 
     if UNKNOWN_WHSE:
         print(f"WARNING: feed warehouse code(s) with no dedicated field "
@@ -418,10 +531,13 @@ def main() -> int:
     flag = f" (flagged via {on_sale_field})" if on_sale_field else " (On Sale field not created)"
     print(f"S&S on sale today: {on_sale_count}/{len(matched)} matched items "
           f"-> Purchase Price = sale price{flag}")
+    phase.mark("write phase")
+    if dropped:
+        print(f"NOTE: field(s) dropped after NetSuite rejected them: {dropped}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
-          f"price/cost/weight updated: {priced}; failures: {failures}")
+          f"price/cost/weight updated: {priced}; failures: {failures}", flush=True)
     return 1 if failures else 0
 
 
