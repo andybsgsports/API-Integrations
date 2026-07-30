@@ -437,6 +437,13 @@ def _same(current: object, new: object) -> bool:
     cs, ns_ = _s(current).strip(), str(new).strip()
     if cs == ns_:
         return True
+    # Checkboxes: SuiteQL returns "T"/"F", the payload carries a Python bool.
+    # Without this branch _same("F", False) compares "F" to "False" and calls
+    # every checkbox changed -- which made EVERY run rewrite all ~45k matched
+    # items ("unchanged: 0") just to re-send an identical On Sale flag.
+    if isinstance(new, bool):
+        cl = cs.lower()
+        return cl in (("t", "true", "1") if new else ("f", "false", "0", ""))
     try:
         return float(cs) == float(ns_)
     except ValueError:

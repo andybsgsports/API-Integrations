@@ -201,6 +201,13 @@ def _same(current, new) -> bool:
     cs, ns_ = ("" if current is None else str(current)).strip(), str(new).strip()
     if cs == ns_:
         return True
+    # Checkboxes: SuiteQL returns "T"/"F", the payload carries a Python bool
+    # (custitem_mtec_instock_guaranteed). Without this branch every matched
+    # item rewrote that flag every run -- see the same fix in
+    # sanmar_field_update / ss_backfill.
+    if isinstance(new, bool):
+        cl = cs.lower()
+        return cl in (("t", "true", "1") if new else ("f", "false", "0", ""))
     try:
         return float(cs) == float(ns_)
     except ValueError:
