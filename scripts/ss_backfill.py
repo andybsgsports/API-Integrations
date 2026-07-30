@@ -324,7 +324,7 @@ def main() -> int:
     gtin_lock = threading.Lock()
     gtin_chunks = [gtins[i : i + 300] for i in range(0, len(gtins), 300)]
 
-    def match_gtins(chunk: list[str]) -> None:
+    def _query_gtins(chunk: list[str]) -> None:
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         rows = client.suiteql(
             f"SELECT id, upccode FROM item WHERE upccode IN ({in_list})"
@@ -332,6 +332,26 @@ def main() -> int:
         with gtin_lock:
             for row in rows:
                 item_for_gtin[str(row["upccode"])] = str(row["id"])
+
+    def match_gtins(chunk: list[str]) -> None:
+        # A 429 that outlasts the client's own retry budget must not take the
+        # whole run down with it (it did: one bad chunk among ~650 concurrent
+        # ones crashed the process 3 minutes in, on the very first live run of
+        # this parallel pass -- 2026-07-30, run 30582440348). Falling back to
+        # smaller chunks costs that chunk's matches, not the run; the missed
+        # items just pick up on the next diff-aware run.
+        try:
+            _query_gtins(chunk)
+            return
+        except Exception:  # noqa: BLE001 - chunk failed; retry smaller
+            pass
+        for i in range(0, len(chunk), 50):
+            sub = chunk[i : i + 50]
+            try:
+                _query_gtins(sub)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  gtin match failed for a batch of {len(sub)}: "
+                      f"{str(exc)[:100]}")
 
     # ~650 chunks for a 195k-SKU feed -- sequentially that alone was a large
     # slice of the nightly, and it's a pure read.

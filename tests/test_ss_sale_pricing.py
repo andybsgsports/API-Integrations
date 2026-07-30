@@ -106,3 +106,40 @@ def test_ss_read_phases_are_parallel():
     ]
     # barcode join, vendorname batches, warehouse fetch
     assert len(pools) >= 3, f"expected >=3 parallel read phases, found {len(pools)}"
+
+
+def test_ss_gtin_matching_survives_a_bad_chunk():
+    """One 429 that outlasts the client's retry budget crashed the whole
+    run 3 minutes into the first live parallel-read run (2026-07-30, run
+    30582440348) because match_gtins had no exception handling, unlike
+    the other two parallel read phases. Every ThreadPoolExecutor-mapped
+    read function in main() must be exception-safe -- a chunk failure
+    should cost that chunk's matches, never the run.
+    """
+    import ast
+
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "ss_backfill.py").read_text()
+    tree = ast.parse(src)
+    main = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "main"
+    )
+    mapped_fn_names = {
+        n.args[0].id
+        for n in ast.walk(main)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute) and n.func.attr == "map"
+        and n.args and isinstance(n.args[0], ast.Name)
+    }
+    assert mapped_fn_names, "expected at least one ThreadPoolExecutor.map call"
+
+    defs_by_name = {
+        n.name: n for n in ast.walk(main) if isinstance(n, ast.FunctionDef)
+    }
+    for name in mapped_fn_names:
+        fn = defs_by_name[name]
+        has_try = any(isinstance(n, ast.Try) for n in ast.walk(fn))
+        assert has_try, (
+            f"{name}() is passed to ThreadPoolExecutor.map but has no "
+            f"try/except -- one chunk's exception will crash the whole run"
+        )
