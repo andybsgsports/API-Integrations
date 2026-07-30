@@ -1,5 +1,5 @@
 cost = list price x 40.0%
-UA sellable styles: 7,448
+UA sellable styles: 7,449
 styles present by vendorname: 130
   ...50/130 styles processed; matched so far 264
   ...100/130 styles processed; matched so far 363
