@@ -442,6 +442,7 @@ def main() -> int:
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     considered = written = unchanged = upc_filled = priced = failures = 0
     on_sale_count = 0
+    diag_shown = [0]
     _fail_shown = [0]
 
     def _on_err(rid: str, exc: Exception) -> None:
@@ -499,6 +500,26 @@ def main() -> int:
                 upc_filled += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
+                # Convergence diagnostics: the night after a full successful
+                # write, ~everything should be unchanged -- yet 2026-07-29 and
+                # -30 both re-priced ~14.3k items. Show WHICH native field
+                # keeps differing (current -> wanted) for the first few, so the
+                # culprit names itself instead of costing another blind night.
+                if diag_shown[0] < 8:
+                    diag_shown[0] += 1
+                    print(f"  DIAG item {rid} diff keys: {sorted(body)}", flush=True)
+                    if "price" in body:
+                        print(f"    price: current={base_by_rid.get(rid)!r} "
+                              f"want={price!r}", flush=True)
+                    if "cost" in body:
+                        print(f"    cost: current={row.get('cost')!r} "
+                              f"want={cost!r}", flush=True)
+                    if "weight" in body:
+                        print(f"    weight: current={row.get('weight')!r} "
+                              f"want={weight!r}", flush=True)
+                    if "weightUnit" in body:
+                        print(f"    weightUnit: current={row.get('weightunit')!r} "
+                              f"want={weight_unit!r}", flush=True)
             if not allow_write:
                 written += 1
                 continue
