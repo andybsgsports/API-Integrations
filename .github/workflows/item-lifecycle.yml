@@ -5,8 +5,10 @@ permissions:
   issues: write
 
 on:
-  schedule:
-    - cron: "0 14 * * *"  # stagger contract: docs/NIGHTLY_SCHEDULE.md
+  # PAUSED 2026-07-31 (Andy): nightly cycle disabled pending redesign.
+  # Re-enable by restoring the schedule block (slots: docs/NIGHTLY_SCHEDULE.md).
+  # schedule:
+  #   - cron: "0 14 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
