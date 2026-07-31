@@ -1,5 +1,10 @@
 # Nightly schedule — the stagger contract
 
+**PAUSED 2026-07-31 (Andy)**: all seven schedule triggers are commented out in
+the workflow files pending a redesign of the sync/pricing behaviour. The slots
+below are the contract to restore when re-enabling. Manual `workflow_dispatch`
+still works.
+
 Re-enabled 2026-07-30 (previously paused while the syncs were broken). Scope
 per Andy: **inventory and item status only** — the enrichment jobs
 (description-update, atlas-image-backfill, parent-sync, sanmar-autocreate)
