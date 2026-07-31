@@ -22,11 +22,13 @@ import re
 import xml.etree.ElementTree as ET
 
 import requests
+from pricing_ownership import VENDOR_UA, owns_pricing, read_preferred
 
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS, stamp
+from sanmar_netsuite.netsuite.feed_seen import FIELDS as SEEN_FIELDS
+from sanmar_netsuite.netsuite.feed_seen import stamp
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
 
@@ -281,8 +283,14 @@ def main() -> int:
 
     print(f"items with a feed price: {len(price_by_rid):,}")
     ids = sorted(matched)
-    cols = ", ".join(FIELDS + SEEN_FIELDS)
+    # The three higher-ranked feeds' key fields feed the pricing-ownership
+    # ranking fallback (UA is the lowest-ranked pricing writer).
+    cols = ", ".join(
+        FIELDS + SEEN_FIELDS
+        + ["custitem_sanmar_style", "custitem_mtec_item_sku", "custitem_ss_sku"]
+    )
     considered = written = unchanged = upc_filled = priced = failures = 0
+    deferred = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
@@ -297,6 +305,7 @@ def main() -> int:
                 base_by_rid[str(r["item"])] = str(r.get("unitprice") or "")
         except Exception as exc:  # noqa: BLE001
             print(f"  (base-price read failed, writing unconditionally: {str(exc)[:80]})")
+        pref_by_rid = read_preferred(client, in_list)
         for row in client.suiteql(
             f"SELECT id, upccode, cost, manufacturer, custitem_ss_brand, {cols} "
             f"FROM item WHERE id IN ({in_list})"
@@ -312,8 +321,13 @@ def main() -> int:
             gtin = matched.get(rid, {}).get("custitem_ua_gtin", "")
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
+            # Native price/cost belong to the item's Preferred Vendor -- see
+            # pricing_ownership.py. UA is the lowest-ranked pricing writer.
+            owner = owns_pricing(VENDOR_UA, pref_by_rid.get(rid), row)
             list_price = price_by_rid.get(rid)
-            if list_price is not None:
+            if list_price is not None and not owner:
+                deferred += 1
+            elif list_price is not None:
                 if not _same(base_by_rid.get(rid), list_price):
                     body["price"] = {
                         "items": [
@@ -329,7 +343,7 @@ def main() -> int:
                     cost = round(list_price * cost_pct / 100.0, 2)
                     if not _same(row.get("cost"), cost):
                         body["cost"] = cost
-            stamp(body, row, "ua")
+            stamp(body, row, "ua", claim_source=owner)
             if not body:
                 unchanged += 1
                 continue
@@ -355,7 +369,8 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nua backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
-          f"price/cost updated: {priced}; failures: {failures}")
+          f"price/cost updated: {priced}; "
+          f"deferred to Preferred Vendor: {deferred}; failures: {failures}")
     return 1 if failures else 0
 
 

@@ -8,8 +8,10 @@ Match priority per SKU:
    matrix color/size (same machinery as the SanMar/Momentec matchers).
 
 Writes the ``custitem_ss_*`` set and fills ``upcCode`` only where empty,
-plus the NATIVE money/shipping fields: Base Price = S&S MSRP, Purchase
-Price (``cost``) = S&S customer/program price, and ``weight`` = S&S weight.
+plus — ONLY on items whose Preferred Vendor is S&S (see
+``pricing_ownership.py``) — the NATIVE money/shipping fields: Base Price =
+S&S MSRP, Purchase Price (``cost``) = S&S customer/program price, and
+``weight`` = S&S weight.
 When S&S is running a sale (``salePrice`` below our regular cost), the
 Purchase Price tracks that sale price and the On Sale checkbox
 (``custitem_bsg_on_sale``) is ticked -- both revert automatically once the
@@ -33,6 +35,7 @@ from native_pricing import (
     read_base_prices,
     weight_display,
 )
+from pricing_ownership import VENDOR_SS, owns_pricing, read_preferred
 from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -457,10 +460,15 @@ def main() -> int:
 
     # -- write phase (diff-aware)
     ids = sorted(matched)
-    cols = ", ".join(FIELDS + SEEN_FIELDS)
+    # custitem_sanmar_style / custitem_mtec_item_sku are read for the
+    # pricing-ownership ranking fallback (higher-ranked feeds than S&S).
+    cols = ", ".join(
+        FIELDS + SEEN_FIELDS + ["custitem_sanmar_style", "custitem_mtec_item_sku"]
+    )
     # Tick the On Sale checkbox only once the field exists in NetSuite.
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     considered = written = unchanged = upc_filled = priced = failures = 0
+    deferred = 0
     on_sale_count = 0
     diag_shown = [0]
     _fail_shown = [0]
@@ -478,6 +486,7 @@ def main() -> int:
         chunk = ids[i : i + 200]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         base_by_rid = read_base_prices(client, in_list)
+        pref_by_rid = read_preferred(client, in_list)
         write_jobs: list[tuple[str, dict]] = []
         for row in client.suiteql(
             f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
@@ -487,11 +496,16 @@ def main() -> int:
             p = matched.get(rid)
             if p is None:
                 continue
+            # Native price/cost/weight (and the shared On Sale flag) belong to
+            # the item's Preferred Vendor -- on the ~13.5k items SanMar also
+            # carries, that is SanMar, and writing S&S numbers over theirs was
+            # most of this job's write volume. See pricing_ownership.py.
+            owner = owns_pricing(VENDOR_SS, pref_by_rid.get(rid), row)
             want = payload_for(p, whse_by_sku.get(str(p.get("sku") or "")))
             price, cost, weight, weight_unit, on_sale = natives_for(p)
-            if on_sale:
+            if on_sale and owner:
                 on_sale_count += 1
-            if on_sale_field:
+            if on_sale_field and owner:
                 want[on_sale_field] = on_sale
             body = {f: v for f, v in want.items() if not _same(row.get(f), v)}
             # Clear stale 0.01 placeholder MAPs written before the no-MAP rule
@@ -505,11 +519,15 @@ def main() -> int:
             gtin = (p.get("gtin") or "").strip()
             if not str(row.get("upccode") or "").strip() and gtin:
                 body["upcCode"] = gtin
-            add_native_diffs(
-                body, row, base_by_rid, rid,
-                price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
-            )
-            stamp(body, row, "ss")
+            if owner:
+                add_native_diffs(
+                    body, row, base_by_rid, rid,
+                    price=price, cost=cost, weight=weight,
+                    weight_unit=weight_unit, same=_same,
+                )
+            else:
+                deferred += 1
+            stamp(body, row, "ss", claim_source=owner)
             if not body:
                 unchanged += 1
                 continue
@@ -578,7 +596,9 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
-          f"price/cost/weight updated: {priced}; failures: {failures}", flush=True)
+          f"price/cost/weight updated: {priced}; "
+          f"deferred to Preferred Vendor: {deferred}; "
+          f"failures: {failures}", flush=True)
     return 1 if failures else 0
 
 

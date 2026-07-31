@@ -43,13 +43,25 @@ def parse_ns_date(raw: Any) -> date | None:
     return None
 
 
-def stamp(want: dict[str, Any], row: dict[str, Any], source: str) -> None:
+def stamp(
+    want: dict[str, Any], row: dict[str, Any], source: str,
+    *, claim_source: bool = True,
+) -> None:
     """Add heartbeat fields to ``want`` when they need (re)writing.
 
     ``row`` is the item's current-values row from the writer's bulk SuiteQL
     read (must include the two heartbeat columns, lowercase keys).
+
+    ``claim_source=False`` is for a writer that matches the item but does NOT
+    own it (see ``scripts/pricing_ownership.py``): it still refreshes the
+    last-seen date -- the item must not go lifecycle-stale just because the
+    owning feed drops it -- but only fills ``custitem_feed_source`` when it is
+    blank. Before this flag, SanMar and S&S each re-stamped their own source
+    string onto ~13.5k shared items every night, one more field ping-ponging
+    between the two runs.
     """
-    if str(row.get(SOURCE_FIELD.lower()) or "").strip() != source:
+    current = str(row.get(SOURCE_FIELD.lower()) or "").strip()
+    if current != source and (claim_source or not current):
         want[SOURCE_FIELD] = source
     seen = parse_ns_date(row.get(LAST_SEEN_FIELD.lower()))
     today = date.today()

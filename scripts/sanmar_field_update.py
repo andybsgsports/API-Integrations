@@ -25,6 +25,7 @@ from native_pricing import (
     read_base_prices,
     weight_display,
 )
+from pricing_ownership import VENDOR_SANMAR, owns_pricing, read_preferred
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -506,7 +507,7 @@ def main() -> int:
         + ([shop_image_field] if shop_image_field else [])
     )
     gtins = sorted(payloads)
-    considered = written = unchanged = priced = failures = 0
+    considered = written = unchanged = priced = failures = deferred = 0
     _fail_shown = [0]
 
     def _on_err(rid: str, exc: Exception) -> None:
@@ -536,6 +537,7 @@ def main() -> int:
             continue
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
         base_by_rid = read_base_prices(client, id_list)
+        pref_by_rid = read_preferred(client, id_list)
         write_jobs: list[tuple[str, dict]] = []
         for row in rows:
             gtin = str(row.get("upccode") or "")
@@ -548,11 +550,24 @@ def main() -> int:
             # S&S brand wins the Manufacturer field on multi-vendor items.
             if "manufacturer" in body and str(row.get("custitem_ss_brand") or "").strip():
                 del body["manufacturer"]
-            price, cost, weight, weight_unit = natives.get(gtin, (None, None, None, None))
-            add_native_diffs(
-                body, row, base_by_rid, str(row["id"]),
-                price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
+            # Native price/cost/weight (and the shared On Sale flag) belong to
+            # the item's Preferred Vendor -- see pricing_ownership.py.
+            owner = owns_pricing(
+                VENDOR_SANMAR, pref_by_rid.get(str(row["id"])), row
             )
+            if owner:
+                price, cost, weight, weight_unit = natives.get(
+                    gtin, (None, None, None, None)
+                )
+                add_native_diffs(
+                    body, row, base_by_rid, str(row["id"]),
+                    price=price, cost=cost, weight=weight,
+                    weight_unit=weight_unit, same=_same,
+                )
+            else:
+                deferred += 1
+                if on_sale_field:
+                    body.pop(on_sale_field, None)
             # Store Display Name / Description are NOT written here: NetSuite
             # accepts them on a matrix child and silently discards the value.
             # sync_store_fields_to_parents() writes them on the parents, where
@@ -566,7 +581,7 @@ def main() -> int:
                 want_co = closeout_by_gtin.get(gtin, False)
                 if cur_co != want_co:
                     body[closeout_field] = want_co
-            stamp(body, row, "sanmar")
+            stamp(body, row, "sanmar", claim_source=owner)
             if not body:
                 unchanged += 1
                 continue
@@ -620,6 +635,7 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
+          f"deferred to Preferred Vendor: {deferred}; "
           f"failures: {failures}; chunks skipped: {chunks_skipped}")
     return 1 if (failures or chunks_skipped) else 0
 

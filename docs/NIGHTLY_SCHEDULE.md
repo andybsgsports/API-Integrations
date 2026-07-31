@@ -31,7 +31,13 @@ vendor slots — dcos-backfill carries the last three.
 
 Full passes only recur every ~3 days (the heartbeat refresh in
 `feed_seen.STALE_AFTER_DAYS`); other nights are diff-only and small since the
-checkbox-compare fix (PR #80).
+checkbox-compare fix (PR #80) and the Preferred-Vendor pricing ownership rule
+(`scripts/pricing_ownership.py`, 2026-07-31) — before that rule, SanMar and
+S&S re-priced the same ~13.5k shared items against each other every night,
+which was most of both jobs' write volume and 429 pressure.
+
+See `docs/NIGHTLY_FLOW.md` for the full per-run detail (feeds, matching,
+fields written, ownership).
 
 If a run overruns its slot chronically, move the following slots later rather
 than tightening `NETSUITE_WRITE_CONCURRENCY` blindly — and check the log for
