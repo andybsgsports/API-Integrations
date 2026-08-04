@@ -1,0 +1,170 @@
+name: Nightly Vendor Pipeline (chained)
+
+# One vendor at a time, all four phases, next vendor starts only when this one
+# finishes (Andy, 2026-07-31). Chaining replaces the old guessed clock slots:
+# GitHub's cron routinely fired 1-3 h late, which bunched jobs together and
+# caused the 429 storms. Here only the FIRST vendor is scheduled; each run
+# dispatches the next vendor itself, so the order is guaranteed no matter how
+# late the scheduler starts.
+#
+# Phases per vendor: discover -> options -> create -> update
+#   (see scripts/vendor_pipeline.py and docs/NIGHTLY_FLOW.md)
+
+permissions:
+  contents: read
+  issues: write
+  actions: write # needed to dispatch the next vendor in the chain
+
+on:
+  # PAUSED 2026-07-31 pending first live validation of the new pipeline.
+  # Re-enable once a dry run and a capped live run look right.
+  # schedule:
+  #   - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      vendor:
+        description: "Vendor to run (sanmar, momentec, ua, ss, dcos, champro-csv)"
+        required: true
+        default: "sanmar"
+      phases:
+        description: "Comma-separated: discover,options,create,update"
+        required: false
+        default: "discover,options,create,update"
+      dry_run:
+        description: "Dry run (true = report only, creates nothing)"
+        required: true
+        default: "true"
+      create_max_styles:
+        description: "Cap on NET-NEW styles created this run (0 = no cap)"
+        required: false
+        default: "300"
+      max_items:
+        description: "Cap on item writes (0 = no cap)"
+        required: false
+        default: "0"
+      chain:
+        description: "Dispatch the next vendor when this one finishes"
+        required: false
+        default: "false"
+
+# Every NetSuite writer shares one concurrency group so they QUEUE instead of
+# overlapping -- the sandbox throttles hard (429s) when writers collide.
+concurrency:
+  group: netsuite-writes
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Resolve run parameters
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            VENDOR="sanmar"; PHASES="discover,options,create,update"
+            DRY_RUN="false"; CREATE_MAX="300"; MAX_ITEMS="0"; CHAIN="true"
+          else
+            VENDOR="${{ github.event.inputs.vendor }}"
+            PHASES="${{ github.event.inputs.phases }}"
+            DRY_RUN="${{ github.event.inputs.dry_run }}"
+            CREATE_MAX="${{ github.event.inputs.create_max_styles }}"
+            MAX_ITEMS="${{ github.event.inputs.max_items }}"
+            CHAIN="${{ github.event.inputs.chain }}"
+          fi
+          [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          {
+            echo "VENDOR=$VENDOR"
+            echo "PHASES=$PHASES"
+            echo "DRY_RUN=$DRY_RUN"
+            echo "CREATE_MAX_STYLES=${CREATE_MAX:-300}"
+            echo "MAX_ITEMS=${MAX_ITEMS:-0}"
+            echo "CHAIN=${CHAIN:-false}"
+          } >> "$GITHUB_ENV"
+          echo "Resolved: vendor=$VENDOR phases=$PHASES dry_run=$DRY_RUN "\
+               "create_max=${CREATE_MAX:-300} chain=${CHAIN:-false}"
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          SS_API_ACCOUNT_NUMBER=${{ secrets.SS_API_ACCOUNT_NUMBER }}
+          SS_API_KEY=${{ secrets.SS_API_KEY }}
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          NETSUITE_MATRIX_SCRIPT_ID=${{ secrets.NETSUITE_MATRIX_SCRIPT_ID }}
+          NETSUITE_MATRIX_DEPLOY_ID=${{ secrets.NETSUITE_MATRIX_DEPLOY_ID }}
+          NETSUITE_CSVIMPORT_SCRIPT_ID=${{ secrets.NETSUITE_CSVIMPORT_SCRIPT_ID }}
+          NETSUITE_CSVIMPORT_DEPLOY_ID=${{ secrets.NETSUITE_CSVIMPORT_DEPLOY_ID }}
+          NETSUITE_CSVIMPORT_FOLDER_ID=${{ secrets.NETSUITE_CSVIMPORT_FOLDER_ID }}
+          NETSUITE_CSVIMPORT_CHILD_MAP=${{ secrets.NETSUITE_CSVIMPORT_CHILD_MAP }}
+          SYNC_DRY_RUN=${DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+
+      - name: Download S&S catalog
+        if: env.VENDOR == 'ss'
+        run: ss-sync download
+
+      - name: Run vendor pipeline
+        env:
+          UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          CREATE_MAX_STYLES: ${{ env.CREATE_MAX_STYLES }}
+          DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
+          DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+        run: |
+          python scripts/vendor_pipeline.py \
+            --vendor "$VENDOR" --phases "$PHASES"
+
+      - name: Dispatch the next vendor in the chain
+        # Runs even if this vendor had failures: every phase is diff-aware, so
+        # stopping the whole chain over one vendor's partial failure would cost
+        # the remaining vendors a night for no benefit.
+        if: always() && env.CHAIN == 'true'
+        run: |
+          case "$VENDOR" in
+            sanmar)      NEXT="momentec" ;;
+            momentec)    NEXT="ua" ;;
+            ua)          NEXT="ss" ;;
+            ss)          NEXT="dcos" ;;
+            dcos)        NEXT="champro-csv" ;;
+            champro-csv) NEXT="" ;;
+            *)           NEXT="" ;;
+          esac
+          if [ -z "$NEXT" ]; then
+            echo "chain complete after $VENDOR"
+            exit 0
+          fi
+          echo "dispatching next vendor: $NEXT"
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/nightly-pipeline.yml/dispatches" \
+            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"vendor\":\"$NEXT\",\"phases\":\"$PHASES\",\"dry_run\":\"$DRY_RUN\",\"create_max_styles\":\"$CREATE_MAX_STYLES\",\"max_items\":\"$MAX_ITEMS\",\"chain\":\"true\"}}"
+
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Nightly pipeline failed: ${{ env.VENDOR }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

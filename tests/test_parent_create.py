@@ -25,12 +25,17 @@ def _style():
     )
 
 
-def _sku():
-    return SimpleNamespace(
+def _sku(**over):
+    """A feed SKU carrying every field the payload reads (mirrors SkuRecord)."""
+    base = dict(
         unique_key="ABC123", color_name="Jet Black", size="XL",
-        gtin="00845235100010", piece_price=Decimal("9.42"), msrp=Decimal("21.99"),
+        gtin="00845235100010", piece_price=Decimal("9.42"),
+        case_price=Decimal("8.51"), msrp=Decimal("21.99"),
+        map_price=Decimal("23.99"), piece_weight=Decimal("1.4"),
         description="",
     )
+    base.update(over)
+    return SimpleNamespace(**base)
 
 
 def test_child_payload_carries_matrix_keys_and_upc():
@@ -41,10 +46,41 @@ def test_child_payload_carries_matrix_keys_and_upc():
     assert p["color"] == "Jet Black"
     assert p["size"] == "X-Large"
     assert p["upc"] == "00845235100010"              # so Field Update can match it
-    assert p["cost"] == 9.42
-    assert p["basePrice"] == 21.99
     assert p["vendorName"] == "PC90"
     assert p["class"] == "Tops : Sweatshirts"        # mapped from category
+
+
+# --- native pricing at birth must match the nightly update's rules, or every
+# created item is wrong until a later pass corrects it.
+
+def test_cost_at_birth_is_the_case_price():
+    # NOT the single-piece price -- that runs ~$1 higher and is exactly what
+    # made Purchase Price read too high.
+    assert _child_payload(_style(), _sku())["cost"] == 8.51
+
+
+def test_cost_falls_back_to_piece_price_without_case_data():
+    p = _child_payload(_style(), _sku(case_price=None))
+    assert p["cost"] == 9.42
+
+
+def test_base_price_at_birth_is_the_higher_of_map_and_msrp():
+    # MAP 23.99 > MSRP 21.99 -> MAP wins (the old code wrote MSRP blindly).
+    assert _child_payload(_style(), _sku())["basePrice"] == 23.99
+
+
+def test_base_price_uses_msrp_when_no_map():
+    # Value brands like Gildan carry no MAP at all.
+    p = _child_payload(_style(), _sku(map_price=None))
+    assert p["basePrice"] == 21.99
+
+
+def test_weight_is_written_at_birth():
+    assert _child_payload(_style(), _sku())["weight"] == 1.4
+
+
+def test_missing_weight_is_left_unset_not_zeroed():
+    assert _child_payload(_style(), _sku(piece_weight=None))["weight"] is None
 
 
 def test_child_payload_falls_back_to_style_description():

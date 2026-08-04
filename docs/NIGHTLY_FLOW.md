@@ -1,5 +1,14 @@
 # The nightly cycle — exact flow and what each run does
 
+> **SUPERSEDED 2026-07-31.** The seven-workflow, clock-staggered cycle
+> described below is being replaced by the per-vendor pipeline in
+> `docs/VENDOR_PIPELINE.md` (create colours → create items → update data, one
+> vendor fully finished before the next). This document is still accurate for
+> what each individual *update* script does — those became phase 4 of each
+> vendor's pipeline — but the scheduling and the missing creation step are
+> obsolete. All seven schedules are currently paused.
+
+
 Written 2026-07-31. Times are the *scheduled* UTC slots from
 `docs/NIGHTLY_SCHEDULE.md`; GitHub's cron routinely fires 1–3 h late, but the
 relative order holds because every writer shares the `netsuite-writes`

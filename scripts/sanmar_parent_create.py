@@ -25,6 +25,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from native_pricing import base_price, weight_display
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.matrix_options import COLOR_LIST, SIZE_LIST, MatrixOptionResolver
@@ -99,6 +101,22 @@ def _resolve_feed(config) -> Path:
 def _child_payload(style, sku) -> dict:
     color = sku.color_name
     size = normalize_size(sku.size)
+    # Native pricing at BIRTH must match the rules the nightly update phase
+    # applies, or every created item is immediately wrong and waits for a
+    # correction pass. Two rules were out of step here:
+    #   * Base Price is the higher of MAP and MSRP -- not MSRP alone, which
+    #     under-priced every no-MSRP / MAP-only SKU.
+    #   * Cost is the CASE price (SanMar's by-the-case unit price), falling
+    #     back to the single-piece price -- piece price runs ~$1 higher and is
+    #     exactly what made Purchase Price read too high (see the note in
+    #     sanmar_field_update.build_payloads).
+    # Sale-aware cost and the On Sale flag need the dip feed's sale windows,
+    # which this phase doesn't load; the update phase runs minutes later in the
+    # same vendor pipeline and applies them.
+    regular_cost = sku.case_price if sku.case_price is not None else sku.piece_price
+    weight_lb, _weight_unit = weight_display(
+        None if sku.piece_weight is None else float(sku.piece_weight)
+    )
     return {
         "externalId": child_external_id(sku.unique_key),
         "itemId": f"{style.style}-{color}-{size}",
@@ -107,8 +125,12 @@ def _child_payload(style, sku) -> dict:
         "size": size,
         "vendorName": style.style,
         "upc": sku.gtin,
-        "cost": None if sku.piece_price is None else float(sku.piece_price),
-        "basePrice": None if sku.msrp is None else float(sku.msrp),
+        "cost": None if regular_cost is None else float(regular_cost),
+        "basePrice": base_price(
+            None if sku.msrp is None else float(sku.msrp),
+            None if sku.map_price is None else float(sku.map_price),
+        ),
+        "weight": weight_lb,
         "displayName": style.title[:60],
         "description": sku.description or style.description,
         "incomeAccount": DEFAULT_INCOME_ACCOUNT,
@@ -195,7 +217,12 @@ def main() -> int:
                 parent_refs = resolve_parent_refs(client)
             body = {
                 "itemId": style_name, "vendorName": style_name, "matrixType": "PARENT",
-                "isInactive": False, "displayName": style.title[:60], **parent_refs,
+                # Active in NetSuite immediately, but NOT on the storefront
+                # (Andy, 2026-07-31): nothing reaches the web store unreviewed.
+                # item_web_display_fix.py turns isOnline on once an item has a
+                # real image.
+                "isInactive": False, "isOnline": False,
+                "displayName": style.title[:60], **parent_refs,
             }
             try:
                 pid = client.create_record("inventoryItem", body)
