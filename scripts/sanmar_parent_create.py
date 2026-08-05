@@ -333,6 +333,35 @@ def main() -> int:
         named_title = display_name_with_style(style.title, style.style)
         if existing_parent_id:
             print(f"  parent already exists: id {existing_parent_id} (reusing)")
+            if refresh_existing:
+                # Bring an already-created parent up to the current field spec
+                # too -- children go through the RESTlet update path, but the
+                # parent body only applies at creation, which left the pilot
+                # parents behind on names/store fields/class/units.
+                patch: dict[str, object] = {
+                    "displayName": named_title[:60],
+                    "salesDescription": clean_title,
+                    "purchaseDescription": clean_title,
+                    "storeDisplayName": named_title,
+                    "storeDescription": store_description(
+                        style.available_sizes, style.description
+                    ),
+                }
+                for rest_field, uom_key in (
+                    ("unitsType", "unitsTypeId"), ("stockUnit", "stockUnitId"),
+                    ("purchaseUnit", "purchaseUnitId"), ("saleUnit", "saleUnitId"),
+                ):
+                    if (uom or {}).get(uom_key):
+                        patch[rest_field] = {"id": uom[uom_key]}
+                cid = _class_id(client, class_for_category(style.category))
+                if cid:
+                    patch["class"] = {"id": cid}
+                try:
+                    client.update_record("inventoryItem", existing_parent_id, patch)
+                    print(f"  parent {existing_parent_id} refreshed to current spec")
+                except Exception as exc:  # noqa: BLE001
+                    failures += 1
+                    print(f"  PARENT REFRESH FAILED {style_name}: {str(exc)[:150]}")
         else:
             if parent_refs is None:
                 parent_refs = resolve_parent_refs(client)
