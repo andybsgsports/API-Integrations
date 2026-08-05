@@ -70,10 +70,15 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         # Creates genuinely-new colours/sizes; remaps punctuation variants.
         "options": ["scripts/sanmar_ensure_matrix_values.py"],
         # New children under EXISTING parents go via the CSV import map;
-        # net-new styles get parent-then-children via REST + the matrix RESTlet.
+        # net-new styles get parent-then-children via REST + the matrix
+        # RESTlet; child_finalize then copies Department/Class down from each
+        # parent (children deliberately aren't sent a class -- the RESTlet's
+        # class-path search crashes on this account, the childless-parent bug
+        # from the live pilot).
         "create": [
             "scripts/sanmar_csv_import.py",
             "scripts/sanmar_parent_create.py",
+            "scripts/sanmar_child_finalize.py",
         ],
         "update": ["scripts/sanmar_field_update.py"],
     },

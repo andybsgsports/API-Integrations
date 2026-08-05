@@ -47,7 +47,30 @@ def test_child_payload_carries_matrix_keys_and_upc():
     assert p["size"] == "X-Large"
     assert p["upc"] == "00845235100010"              # so Field Update can match it
     assert p["vendorName"] == "PC90"
-    assert p["class"] == "Tops : Sweatshirts"        # mapped from category
+
+
+def test_child_payload_sends_no_class():
+    # The RESTlet's "Parent : Child" class search crashes on this account
+    # ("invalid search criteria: parent"), killing the whole child create --
+    # the childless-parent bug from the live pilot (runs 30954100322 /
+    # 31036109523). Class goes on the PARENT; child_finalize copies it down.
+    assert "class" not in _child_payload(_style(), _sku())
+
+
+class _CanonResolver:
+    """Resolver stub: knows the list spells it 'Jet.Black' / 'X-Large'."""
+
+    def canonical_name(self, list_type, name):
+        return {"Jet Black": "Jet.Black"}.get(name, name)
+
+
+def test_child_payload_uses_the_lists_spelling_of_options():
+    # The RESTlet resolves colour/size by exact name, so a punctuation variant
+    # must be sent as the list's spelling ('Khaki/ Coffee' was rejected while
+    # 'Khaki/Coffee' sat on the list -- run 31036109523).
+    p = _child_payload(_style(), _sku(), _CanonResolver())
+    assert p["color"] == "Jet.Black"
+    assert p["itemId"] == "PC90-Jet.Black-X-Large"   # name built from canonical
 
 
 # --- native pricing at birth must match the nightly update's rules, or every

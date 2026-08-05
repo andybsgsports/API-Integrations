@@ -70,6 +70,7 @@ def test_run_vendor_runs_phases_in_order(monkeypatch):
         "scripts/sanmar_ensure_matrix_values.py",
         "scripts/sanmar_csv_import.py",
         "scripts/sanmar_parent_create.py",
+        "scripts/sanmar_child_finalize.py",
         "scripts/sanmar_field_update.py",
     ]
 

@@ -80,7 +80,7 @@ class MatrixOptionResolver:
     client: NetSuiteClient
     allow_create: bool = True
     _cache: dict[tuple[str, str], str] = field(default_factory=dict, init=False, repr=False)
-    _norm_cache: dict[str, dict[str, str]] = field(
+    _norm_cache: dict[str, dict[str, tuple[str, str]]] = field(
         default_factory=dict, init=False, repr=False
     )
 
@@ -131,10 +131,28 @@ class MatrixOptionResolver:
         key = normalize_option_name(name)
         if not key:
             return None
-        return self._norm_index(list_type).get(key)
+        hit = self._norm_index(list_type).get(key)
+        return hit[0] if hit else None
 
-    def _norm_index(self, list_type: str) -> dict[str, str]:
-        """normalized name -> internal id for a whole list (loaded once).
+    def canonical_name(self, list_type: str, name: str) -> str:
+        """The LIST's spelling of ``name`` -- what a name-matching consumer
+        (the BSG matrix RESTlet resolves options by exact name) must be sent.
+
+        A punctuation variant comes back as the existing value's name
+        (``'Khaki/ Coffee'`` -> ``'Khaki/Coffee'``); an exact or genuinely-new
+        name comes back unchanged. Without this, the pre-pass correctly
+        declined to create the variant and the RESTlet then rejected the child
+        with "color 'Khaki/ Coffee' not in customlist_bsg_matrix_color"
+        (live pilot retry, run 31036109523).
+        """
+        name = (name or "").strip()
+        if not name or self._find(list_type, name) is not None:
+            return name
+        hit = self._norm_index(list_type).get(normalize_option_name(name))
+        return hit[1] if hit else name
+
+    def _norm_index(self, list_type: str) -> dict[str, tuple[str, str]]:
+        """normalized name -> (internal id, list name) for a whole list.
 
         One query per list rather than one per miss: a create run resolves tens
         of thousands of SKUs, and the misses are exactly the rows that would
@@ -149,18 +167,19 @@ class MatrixOptionResolver:
         # Active values win, and among equals the lowest id -- the same rule
         # _find uses, so both paths land on the same canonical value. Rows
         # arrive id-ascending, so the first active hit per key is the winner.
-        index: dict[str, str] = {}
+        index: dict[str, tuple[str, str]] = {}
         have_active: set[str] = set()
         for row in rows:
-            norm = normalize_option_name(str(row.get("name") or ""))
+            list_name = str(row.get("name") or "")
+            norm = normalize_option_name(list_name)
             if not norm:
                 continue
-            rid = str(row["id"])
+            entry = (str(row["id"]), list_name)
             active = str(row.get("isinactive") or "F") != "T"
             if norm not in index:
-                index[norm] = rid
+                index[norm] = entry
             elif active and norm not in have_active:
-                index[norm] = rid  # promote over an earlier retired duplicate
+                index[norm] = entry  # promote over an earlier retired duplicate
             if active:
                 have_active.add(norm)
         self._norm_cache[list_type] = index

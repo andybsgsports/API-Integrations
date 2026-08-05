@@ -98,9 +98,40 @@ def _resolve_feed(config) -> Path:
     return local if local.exists() else SanMarSftp(config.sftp).download(C.FILE_SDL_N)
 
 
-def _child_payload(style, sku) -> dict:
+_CLASS_IDS: dict[str, str | None] = {}
+
+
+def _class_id(client: NetSuiteClient, path: str) -> str | None:
+    """Internal id for a NetSuite Class path like 'Tops : Sweatshirts'.
+
+    SuiteQL's classification.fullname carries the whole path, so no
+    parent-filtered search is needed (same approach as
+    sanmar_department_class_fix.resolve_class_ids). Unmapped/unknown paths
+    resolve to None and the parent is simply created without a class.
+    """
+    if not path:
+        return None
+    if path not in _CLASS_IDS:
+        rows = client.suiteql(
+            f"SELECT id FROM classification WHERE fullname = '{_sql_escape(path)}'"
+        )
+        _CLASS_IDS[path] = str(rows[0]["id"]) if rows else None
+        if not rows:
+            print(f"  (class path {path!r} not found in NetSuite -- parent gets no class)")
+    return _CLASS_IDS[path]
+
+
+def _child_payload(style, sku, resolver=None) -> dict:
+    # Colour/size go to the RESTlet as NAMES it resolves by exact match, so a
+    # punctuation variant of an existing list value must be sent as the LIST's
+    # spelling -- 'Khaki/ Coffee' was rejected with "not in
+    # customlist_bsg_matrix_color" while 'Khaki/Coffee' sat on the list
+    # (live pilot retry, run 31036109523).
     color = sku.color_name
     size = normalize_size(sku.size)
+    if resolver is not None:
+        color = resolver.canonical_name(COLOR_LIST, color)
+        size = resolver.canonical_name(SIZE_LIST, size)
     # Native pricing at BIRTH must match the rules the nightly update phase
     # applies, or every created item is immediately wrong and waits for a
     # correction pass. Two rules were out of step here:
@@ -139,7 +170,18 @@ def _child_payload(style, sku) -> dict:
         "taxSchedule": DEFAULT_TAX_SCHEDULE,
         "subsidiary": DEFAULT_SUBSIDIARY,
         "department": DEFAULT_DEPARTMENT,
-        "class": class_for_category(style.category),
+        # NO "class" here, deliberately. The RESTlet resolves a "Parent :
+        # Child" class path with a classification search filtered on
+        # ["parent", "anyof", ...], which this account rejects ("An
+        # nlobjSearchFilter contains invalid search criteria: parent."), and
+        # one bad field kills the whole child create -- that is exactly how
+        # 112FPC/112PFP ended up as childless parents in the live pilot (runs
+        # 30954100322 / 31036109523; the three styles that DID create children
+        # all had unmapped categories, so class was "" and the search never
+        # ran). Class is set on the PARENT instead (resolved to an internal id
+        # by SuiteQL fullname -- no RESTlet search involved), and
+        # sanmar_child_finalize.py copies it down to children afterwards,
+        # which is that script's whole job.
         "location": DEFAULT_LOCATION,
         "preferredLocation": DEFAULT_LOCATION,
         "costingMethod": "AVG",
@@ -224,6 +266,13 @@ def main() -> int:
                 "isInactive": False, "isOnline": False,
                 "displayName": style.title[:60], **parent_refs,
             }
+            # Class lives on the PARENT (children copy it via
+            # sanmar_child_finalize) -- resolved here by SuiteQL fullname, the
+            # one class-path lookup this account provably supports. See the
+            # note in _child_payload for why the RESTlet must not do it.
+            class_id = _class_id(client, class_for_category(style.category))
+            if class_id:
+                body["class"] = {"id": class_id}
             try:
                 pid = client.create_record("inventoryItem", body)
                 created_parents += 1
@@ -234,7 +283,7 @@ def main() -> int:
                       f":: {str(getattr(exc, 'payload', ''))[:300]}")
                 continue
 
-        payloads = [_child_payload(style, sku) for sku in style.skus]
+        payloads = [_child_payload(style, sku, resolver) for sku in style.skus]
         if max_children:
             payloads = payloads[: max(0, max_children - created_children)]
         for i in range(0, len(payloads), RESTLET_BATCH):
