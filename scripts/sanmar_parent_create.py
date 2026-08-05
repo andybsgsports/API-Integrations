@@ -25,7 +25,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from native_pricing import base_price, weight_display
+from native_pricing import WEIGHT_UNIT_LB_ID, base_price, weight_display
+from pricing_ownership import VENDOR_SANMAR
+from sanmar_field_update import (
+    display_name_with_style,
+    store_description,
+    store_display_name,
+)
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
@@ -121,7 +127,42 @@ def _class_id(client: NetSuiteClient, path: str) -> str | None:
     return _CLASS_IDS[path]
 
 
-def _child_payload(style, sku, resolver=None) -> dict:
+def _uom_ids(client: NetSuiteClient) -> dict[str, str]:
+    """Units-of-measure internal ids for new items, copied from a live
+    reference item (item_uom_fix.py's proven approach -- never guessed).
+
+    Returns restlet payload keys -> ids: unitsTypeId / stockUnitId /
+    purchaseUnitId / saleUnitId. Empty when no reference resolves; creation
+    proceeds without units and item_uom_fix backfills.
+    """
+    ref_id = os.environ.get("UOM_REFERENCE_ID", "").strip()
+    try:
+        if not ref_id:
+            rows = client.suiteql(
+                "SELECT id FROM item WHERE matrixtype IN ('PARENT', 'CHILD') "
+                "AND unitstype IS NOT NULL AND rownum <= 1"
+            )
+            if not rows:
+                print("  (no UOM reference item found -- units left for item_uom_fix)")
+                return {}
+            ref_id = str(rows[0]["id"])
+        ref = client.get_record("inventoryItem", ref_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (UOM reference lookup failed: {str(exc)[:80]} -- units left blank)")
+        return {}
+    out: dict[str, str] = {}
+    for payload_key, field in (
+        ("unitsTypeId", "unitsType"), ("stockUnitId", "stockUnit"),
+        ("purchaseUnitId", "purchaseUnit"), ("saleUnitId", "saleUnit"),
+    ):
+        v = ref.get(field)
+        if isinstance(v, dict) and v.get("id") is not None:
+            out[payload_key] = str(v["id"])
+    print(f"  UOM ids from reference item {ref_id}: {out}")
+    return out
+
+
+def _child_payload(style, sku, resolver=None, uom=None) -> dict:
     # Colour/size go to the RESTlet as NAMES it resolves by exact match, so a
     # punctuation variant of an existing list value must be sent as the LIST's
     # spelling -- 'Khaki/ Coffee' was rejected with "not in
@@ -148,6 +189,13 @@ def _child_payload(style, sku, resolver=None) -> dict:
     weight_lb, _weight_unit = weight_display(
         None if sku.piece_weight is None else float(sku.piece_weight)
     )
+    # Andy's spec (2026-08-05 pilot review): Display Name keeps the style code
+    # ("Richardson Printed Five-Panel Trucker 112PFP"); Sales/Purchase
+    # Description carry the same title WITHOUT the code. The long marketing
+    # copy goes to the PARENT's Store Description only (children silently
+    # discard store fields, proven live 2026-07-29).
+    clean_title = store_display_name(style.title, style.style)
+    named_title = display_name_with_style(style.title, style.style)
     return {
         "externalId": child_external_id(sku.unique_key),
         "itemId": f"{style.style}-{color}-{size}",
@@ -162,8 +210,16 @@ def _child_payload(style, sku, resolver=None) -> dict:
             None if sku.map_price is None else float(sku.map_price),
         ),
         "weight": weight_lb,
-        "displayName": style.title[:60],
-        "description": sku.description or style.description,
+        # Weight unit rides with the number and is always pounds -- one
+        # consistent unit across the catalogue (see native_pricing).
+        "weightUnitId": None if weight_lb is None else WEIGHT_UNIT_LB_ID,
+        # Seed the Vendors sublist with SanMar as Preferred -- pricing
+        # ownership reads this flag, and an item born without it has no
+        # pricing owner until vendor_sublist.py runs.
+        "preferredVendorId": str(VENDOR_SANMAR),
+        **(uom or {}),
+        "displayName": named_title[:60],
+        "description": clean_title,
         "incomeAccount": DEFAULT_INCOME_ACCOUNT,
         "cogsAccount": DEFAULT_COGS_ACCOUNT,
         "assetAccount": DEFAULT_ASSET_ACCOUNT,
@@ -193,6 +249,13 @@ def main() -> int:
     allow_write = not cfg.sync.dry_run
     max_styles = int(os.environ.get("CREATE_MAX_STYLES", "0") or "0")
     max_children = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
+    refresh_existing = (
+        os.environ.get("CREATE_REFRESH_STYLES", "").strip().lower()
+        in ("1", "true", "yes")
+    )
+    if refresh_existing:
+        print("CREATE_REFRESH_STYLES on: existing children will be re-posted "
+              "(RESTlet update path), not skipped")
 
     candidates_file = ROOT / "data" / "sanmar_new_parents.txt"
     if not candidates_file.exists():
@@ -208,6 +271,7 @@ def main() -> int:
     # Create-capable option resolver: any colour/size the pilot needs but the
     # matrix lists don't carry is created inline (live) or reported (dry).
     resolver = MatrixOptionResolver(client=client, allow_create=allow_write)
+    uom = _uom_ids(client)
 
     created_parents = created_children = skipped = failures = done = 0
     parent_refs: dict[str, dict] | None = None
@@ -220,13 +284,18 @@ def main() -> int:
             skipped += 1
             continue
         # Defensive: skip if it already has children; reuse a childless parent.
+        # CREATE_REFRESH_STYLES=true re-posts existing children instead of
+        # skipping -- the RESTlet's externalId update path re-applies the
+        # payload, which is how a payload-schema fix (like the 2026-08-05
+        # field spec) reaches items created before it.
         safe = _sql_escape(style_name)
         existing = client.suiteql(
             f"SELECT id, itemid FROM item WHERE vendorname = '{safe}' OR itemid = '{safe}'"
         )
         if any(str(r.get("itemid") or "").strip() != style_name for r in existing):
-            skipped += 1
-            continue
+            if not refresh_existing:
+                skipped += 1
+                continue
         existing_parent_id = next(
             (str(r["id"]) for r in existing
              if str(r.get("itemid") or "").strip() == style_name), None,
@@ -252,6 +321,8 @@ def main() -> int:
             created_children += len(style.skus)
             continue
 
+        clean_title = store_display_name(style.title, style.style)
+        named_title = display_name_with_style(style.title, style.style)
         if existing_parent_id:
             print(f"  parent already exists: id {existing_parent_id} (reusing)")
         else:
@@ -264,7 +335,25 @@ def main() -> int:
                 # item_web_display_fix.py turns isOnline on once an item has a
                 # real image.
                 "isInactive": False, "isOnline": False,
-                "displayName": style.title[:60], **parent_refs,
+                # Andy's spec (2026-08-05): name fields keep the style code,
+                # description fields drop it, and the marketing copy goes ONLY
+                # to Store Description. Store fields live on the PARENT -- the
+                # web-store product page -- because NetSuite silently discards
+                # them on matrix children.
+                "displayName": named_title[:60],
+                "salesDescription": clean_title,
+                "purchaseDescription": clean_title,
+                "storeDisplayName": named_title,
+                "storeDescription": store_description(
+                    style.available_sizes, style.description
+                ),
+                **{k: {"id": v} for k, v in {
+                    "unitsType": (uom or {}).get("unitsTypeId", ""),
+                    "stockUnit": (uom or {}).get("stockUnitId", ""),
+                    "purchaseUnit": (uom or {}).get("purchaseUnitId", ""),
+                    "saleUnit": (uom or {}).get("saleUnitId", ""),
+                }.items() if v},
+                **parent_refs,
             }
             # Class lives on the PARENT (children copy it via
             # sanmar_child_finalize) -- resolved here by SuiteQL fullname, the
@@ -283,7 +372,7 @@ def main() -> int:
                       f":: {str(getattr(exc, 'payload', ''))[:300]}")
                 continue
 
-        payloads = [_child_payload(style, sku, resolver) for sku in style.skus]
+        payloads = [_child_payload(style, sku, resolver, uom) for sku in style.skus]
         if max_children:
             payloads = payloads[: max(0, max_children - created_children)]
         for i in range(0, len(payloads), RESTLET_BATCH):

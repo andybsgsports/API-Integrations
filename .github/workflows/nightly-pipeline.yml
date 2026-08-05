@@ -46,6 +46,10 @@ on:
         description: "Dispatch the next vendor when this one finishes"
         required: false
         default: "false"
+      refresh_existing:
+        description: "Re-post existing children through the RESTlet update path (payload-schema fixes)"
+        required: false
+        default: "false"
 
 # Every NetSuite writer shares one concurrency group so they QUEUE instead of
 # overlapping -- the sandbox throttles hard (429s) when writers collide.
@@ -128,6 +132,7 @@ jobs:
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
           CREATE_MAX_STYLES: ${{ env.CREATE_MAX_STYLES }}
+          CREATE_REFRESH_STYLES: ${{ github.event.inputs.refresh_existing || 'false' }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
         run: |

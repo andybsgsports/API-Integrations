@@ -198,9 +198,9 @@ def store_display_name(title: str, style: str) -> str:
     """Clean product name = the feed title with any status prefix and trailing
     style number stripped, Title-cased if it arrived ALL CAPS.
 
-    This deliberately mirrors ``description_update._polish_name`` so the web
-    Store Display Name matches the item's Display Name / Description exactly
-    (those are set from the same feed title by the description-update job)."""
+    This is the DESCRIPTION-field form (Sales/Purchase Description carry the
+    name without the style code -- Andy, 2026-08-05); the name fields that
+    show the code use :func:`display_name_with_style`."""
     name = _STATUS_PREFIX.sub("", _clean(title))
     if style:
         name = re.sub(rf"[\s.,-]*{re.escape(style)}[\s.]*$", "", name, flags=re.I)
@@ -208,6 +208,17 @@ def store_display_name(title: str, style: str) -> str:
     if name.isupper():
         name = name.title()
     return name
+
+
+def display_name_with_style(title: str, style: str) -> str:
+    """Display Name / Store Display Name form: clean title WITH the style code
+    ("Richardson Printed Five-Panel Trucker 112PFP") -- Andy, 2026-08-05.
+
+    Built from the cleaned name rather than the raw title so status prefixes
+    and ALL-CAPS still get polished, and the code lands exactly once at the
+    end regardless of how the feed spelled the title."""
+    name = store_display_name(title, style)
+    return f"{name} {style}".strip() if style else name
 
 
 def sync_store_fields_to_parents(
@@ -232,7 +243,9 @@ def sync_store_fields_to_parents(
     """
     want_by_style = {
         s.style: (
-            store_display_name(s.title, s.style),
+            # Store Display Name keeps the style code (Andy, 2026-08-05) --
+            # same form creation uses, so the nightly never rewrites it.
+            display_name_with_style(s.title, s.style),
             store_description(s.available_sizes, s.description),
         )
         for s in styles if s.style

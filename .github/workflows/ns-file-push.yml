@@ -13,12 +13,16 @@ on:
   workflow_dispatch:
     inputs:
       files:
-        description: "Comma-separated paths relative to suitescript/store/ to push"
+        description: "Comma-separated paths relative to the src_dir to push"
         required: true
       script_id:
         description: "Script record internal id anchoring the target folder"
         required: false
         default: "2358"
+      src_dir:
+        description: "Repo dir the paths are relative to (suitescript/store or suitescript)"
+        required: false
+        default: "suitescript/store"
 
 permissions:
   contents: read
@@ -54,6 +58,9 @@ jobs:
 
       - name: Push files to File Cabinet
         env:
-          FILE_PUSH_SCRIPT_ID: ${{ github.event.inputs.script_id }}
+          # "matrix" resolves to the BSG matrix RESTlet's script id from
+          # secrets, so its source can be pushed without exposing the id.
+          FILE_PUSH_SCRIPT_ID: ${{ github.event.inputs.script_id == 'matrix' && secrets.NETSUITE_MATRIX_SCRIPT_ID || github.event.inputs.script_id }}
           FILE_PUSH_FILES: ${{ github.event.inputs.files }}
+          FILE_PUSH_SRC: ${{ github.event.inputs.src_dir }}
         run: python scripts/ns_file_push.py

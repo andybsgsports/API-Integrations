@@ -106,6 +106,31 @@ def test_missing_weight_is_left_unset_not_zeroed():
     assert _child_payload(_style(), _sku(piece_weight=None))["weight"] is None
 
 
-def test_child_payload_falls_back_to_style_description():
+def test_display_name_keeps_the_style_code_descriptions_drop_it():
+    # Andy's spec (2026-08-05 pilot review): Display Name keeps the style code
+    # ("... Crewneck PC90"); Sales/Purchase Description carry the same title
+    # WITHOUT it -- the marketing copy belongs to the PARENT's Store
+    # Description instead.
     p = _child_payload(_style(), _sku())
-    assert p["description"] == "A sturdy fleece."      # sku desc empty -> style desc
+    assert p["displayName"] == "Port & Company Essential Fleece Crewneck PC90"
+    assert p["description"] == "Port & Company Essential Fleece Crewneck"
+
+
+def test_child_payload_carries_weight_unit_with_weight():
+    p = _child_payload(_style(), _sku())
+    assert p["weight"] == 1.4
+    assert p["weightUnitId"] == "1"                    # pounds, account-verified
+    q = _child_payload(_style(), _sku(piece_weight=None))
+    assert q["weight"] is None and q["weightUnitId"] is None
+
+
+def test_child_payload_seeds_sanmar_as_preferred_vendor():
+    assert _child_payload(_style(), _sku())["preferredVendorId"] == "512"
+
+
+def test_child_payload_carries_uom_ids_when_resolved():
+    uom = {"unitsTypeId": "3", "stockUnitId": "7", "purchaseUnitId": "7",
+           "saleUnitId": "7"}
+    p = _child_payload(_style(), _sku(), None, uom)
+    for k, v in uom.items():
+        assert p[k] == v

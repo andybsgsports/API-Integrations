@@ -99,6 +99,36 @@ define(["N/record", "N/search"], (record, search) => {
       it.preferredLocation && resolveByName("location", it.preferredLocation));
     setIf(rec, "costingmethod", it.costingMethod);
     setIf(rec, "cost", it.cost);
+    // Shipping weight + its unit arrive TOGETHER (unit is the internal id --
+    // "1" = lb in this account, verified by ns_weightunit_probe.py); the pair
+    // must always agree, so the caller computes both from one source value.
+    setIf(rec, "weight", it.weight);
+    setIf(rec, "weightunit", it.weightUnitId);
+    // Units of measure, as internal ids copied from a live reference item
+    // (scripts/item_uom_fix.py's proven approach -- never guessed):
+    // Primary Units Type + Stock/Purchase/Sale units.
+    setIf(rec, "unitstype", it.unitsTypeId);
+    setIf(rec, "stockunit", it.stockUnitId);
+    setIf(rec, "purchaseunit", it.purchaseUnitId);
+    setIf(rec, "saleunit", it.saleUnitId);
+    // Preferred Vendor: seed the Vendors sublist with the supplying vendor,
+    // marked preferred, only when the sublist is EMPTY -- on updates,
+    // vendor_sublist.py owns re-ranking and this must not fight it. Pricing
+    // ownership (pricing_ownership.py) reads this flag, so an item created
+    // without it has no pricing owner until the sublist job runs.
+    if (it.preferredVendorId) {
+      try {
+        if (rec.getLineCount({ sublistId: "itemvendor" }) <= 0) {
+          rec.setSublistValue({ sublistId: "itemvendor", fieldId: "vendor", line: 0, value: it.preferredVendorId });
+          rec.setSublistValue({ sublistId: "itemvendor", fieldId: "preferredvendor", line: 0, value: true });
+          if (it.vendorName) {
+            rec.setSublistValue({ sublistId: "itemvendor", fieldId: "vendorcode", line: 0, value: it.vendorName });
+          }
+        }
+      } catch (e) {
+        /* vendors sublist shape varies by config; vendor_sublist.py backfills */
+      }
+    }
     if (it.basePrice !== undefined && it.basePrice !== null) {
       try {
         rec.setSublistValue({ sublistId: "price1", fieldId: "price_1_", line: 0, value: it.basePrice });
