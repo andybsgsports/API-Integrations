@@ -80,7 +80,16 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
             "scripts/sanmar_parent_create.py",
             "scripts/sanmar_child_finalize.py",
         ],
-        "update": ["scripts/sanmar_field_update.py"],
+        # atlas_image_backfill runs AFTER the field update because it joins
+        # items by custitem_sanmar_unique_key, which the field update stamps
+        # (matched by UPC) -- a child created minutes earlier has no key yet.
+        # It uploads each colour's image to the File Cabinet once and links
+        # the real Image field; diff-aware, so it only touches imageless
+        # items (Andy, 2026-08-05: images are part of creation).
+        "update": [
+            "scripts/sanmar_field_update.py",
+            "scripts/atlas_image_backfill.py",
+        ],
     },
     "momentec": {
         # No creation path built yet -- see PIPELINE_GAPS below.

@@ -34,6 +34,13 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("custitem_sanmar_is_closeout", "SanMar Is Closeout", "CHECKBOX", ""),
     ("custitem_sanmar_qty_available", "SanMar Qty Available", "INTEGER", ""),
     ("custitem_sanmar_front_image_url", "SanMar Front Image URL", "URL", ""),
+    # Additional per-colour views from the SDL feed (Andy, 2026-08-05:
+    # multiple images per item). The feed carries front/back model,
+    # front/back flat and the colour swatch; a true side view only exists in
+    # SanMar's web service, not the file feed.
+    ("custitem_sanmar_front_flat_url", "SanMar Front Flat Image URL", "URL", ""),
+    ("custitem_sanmar_back_flat_url", "SanMar Back Flat Image URL", "URL", ""),
+    ("custitem_sanmar_swatch_url", "SanMar Color Swatch URL", "URL", ""),
     # S&S Activewear
     ("custitem_ss_sku", "S&S SKU", "TEXT", ""),
     ("custitem_ss_style_id", "S&S Style ID", "TEXT", ""),

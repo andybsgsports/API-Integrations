@@ -223,8 +223,15 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
         # ownership reads this flag, and an item born without it has no
         # pricing owner until vendor_sublist.py runs.
         "preferredVendorId": str(VENDOR_SANMAR),
+        # Every view the feed carries (Andy, 2026-08-05: multiple images) --
+        # front to the storefront column, back plus the flats and swatch to
+        # their own URL fields. A side view only exists in SanMar's web
+        # service, not the file feed.
         "shopImageUrl": images.primary_url() if images else None,
         "backImageUrl": images.back_url() if images else None,
+        "frontFlatUrl": images.front_flat_url if images else None,
+        "backFlatUrl": images.back_flat_url if images else None,
+        "swatchUrl": images.color_swatch_url if images else None,
         **(uom or {}),
         "displayName": named_title[:60],
         "description": clean_title,

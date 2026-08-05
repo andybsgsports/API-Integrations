@@ -105,6 +105,16 @@ SHOP_IMAGE_FIELD = os.environ.get(
     "SANMAR_SHOP_IMAGE_FIELD", "custitem_bsgshop_image_url"
 ).strip()
 
+# The remaining per-colour views from the feed (Andy, 2026-08-05: multiple
+# images per item) -- field scriptid -> ColorImages attribute. Self-enabling
+# like the shop-image field: each is written only once it exists in NetSuite
+# (created by ns_field_setup.py).
+VIEW_IMAGE_FIELDS = {
+    "custitem_sanmar_front_flat_url": "front_flat_url",
+    "custitem_sanmar_back_flat_url": "back_flat_url",
+    "custitem_sanmar_swatch_url": "color_swatch_url",
+}
+
 # NOTE: we deliberately do NOT write NetSuite's native Stock Description.
 # It is a legacy field hard-capped at 21 characters -- far too short for the
 # marketing copy Store Description carries, so anything we put there is a
@@ -327,7 +337,7 @@ def store_description(available_sizes: str, description: str) -> str:
 
 def build_payloads(
     styles, inventory, today: date | None = None, on_sale_field: str = "",
-    shop_image_field: str = "",
+    shop_image_field: str = "", view_image_fields: dict[str, str] | None = None,
 ) -> tuple[
     dict[str, dict[str, object]], dict[str, tuple], dict[str, tuple], dict[str, bool]
 ]:
@@ -434,6 +444,10 @@ def build_payloads(
             # skips blanks, so an existing value is never cleared.
             if shop_image_field:
                 put(shop_image_field, images.primary_url() if images else None)
+            # The remaining feed views (front/back flat, swatch) -- multiple
+            # images per item (Andy, 2026-08-05).
+            for field, attr in (view_image_fields or {}).items():
+                put(field, getattr(images, attr, "") if images else None)
             put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry
@@ -498,9 +512,14 @@ def main() -> int:
     )
     if shop_image_field:
         print(f"shop image field active: {shop_image_field}")
+    view_image_fields = {
+        f: attr for f, attr in VIEW_IMAGE_FIELDS.items() if _field_exists(client, f)
+    }
+    if view_image_fields:
+        print(f"view image fields active: {sorted(view_image_fields)}")
     payloads, natives, _store_by_gtin, closeout_by_gtin = build_payloads(
         styles, inventory, on_sale_field=on_sale_field,
-        shop_image_field=shop_image_field,
+        shop_image_field=shop_image_field, view_image_fields=view_image_fields,
     )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
     if closeout_field:
@@ -518,6 +537,7 @@ def main() -> int:
         FIELD_ORDER + SEEN_FIELDS + store_cols
         + ([closeout_field] if closeout_field else [])
         + ([shop_image_field] if shop_image_field else [])
+        + sorted(view_image_fields)
     )
     gtins = sorted(payloads)
     considered = written = unchanged = priced = failures = deferred = 0

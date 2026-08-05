@@ -133,12 +133,19 @@ def test_child_payload_seeds_sanmar_as_preferred_vendor():
 
 def test_child_payload_carries_per_colour_images():
     imgs = SimpleNamespace(primary_url=lambda: "https://cdn/front.jpg",
-                           back_url=lambda: "https://cdn/back.jpg")
+                           back_url=lambda: "https://cdn/back.jpg",
+                           front_flat_url="https://cdn/front_flat.jpg",
+                           back_flat_url="https://cdn/back_flat.jpg",
+                           color_swatch_url="https://cdn/swatch.jpg")
     p = _child_payload(_style(images_by_color={"Jet Black": imgs}), _sku())
     assert p["shopImageUrl"] == "https://cdn/front.jpg"   # storefront column
     assert p["backImageUrl"] == "https://cdn/back.jpg"    # custitem_sanmar_front_image_url
+    assert p["frontFlatUrl"] == "https://cdn/front_flat.jpg"
+    assert p["backFlatUrl"] == "https://cdn/back_flat.jpg"
+    assert p["swatchUrl"] == "https://cdn/swatch.jpg"
     q = _child_payload(_style(), _sku())                  # colour has no images
     assert q["shopImageUrl"] is None and q["backImageUrl"] is None
+    assert q["frontFlatUrl"] is None and q["swatchUrl"] is None
 
 
 def test_child_payload_carries_uom_ids_when_resolved():

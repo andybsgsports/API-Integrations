@@ -122,6 +122,16 @@ define(["N/record", "N/search"], (record, search) => {
     try {
       setIf(rec, "custitem_sanmar_front_image_url", it.backImageUrl);
     } catch (e) { /* field not deployed */ }
+    // The remaining feed views -- multiple images per item (2026-08-05).
+    try {
+      setIf(rec, "custitem_sanmar_front_flat_url", it.frontFlatUrl);
+    } catch (e) { /* field not deployed */ }
+    try {
+      setIf(rec, "custitem_sanmar_back_flat_url", it.backFlatUrl);
+    } catch (e) { /* field not deployed */ }
+    try {
+      setIf(rec, "custitem_sanmar_swatch_url", it.swatchUrl);
+    } catch (e) { /* field not deployed */ }
     // Preferred Vendor: seed the Vendors sublist with the supplying vendor,
     // marked preferred, only when the sublist is EMPTY -- on updates,
     // vendor_sublist.py owns re-ranking and this must not fight it. Pricing
