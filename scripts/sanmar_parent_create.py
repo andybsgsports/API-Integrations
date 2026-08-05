@@ -196,6 +196,12 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
     # discard store fields, proven live 2026-07-29).
     clean_title = store_display_name(style.title, style.style)
     named_title = display_name_with_style(style.title, style.style)
+    # Per-colour feed images (Andy, 2026-08-05: included at creation).
+    # primary_url() is the FRONT view -> the storefront's searchable image
+    # column; back_url() -> custitem_sanmar_front_image_url, which despite its
+    # name holds the BACK view (the true front lives on the atlas Image field,
+    # populated by the atlas back-fill from the File Cabinet).
+    images = style.images_by_color.get(sku.color_name)
     return {
         "externalId": child_external_id(sku.unique_key),
         "itemId": f"{style.style}-{color}-{size}",
@@ -217,6 +223,8 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
         # ownership reads this flag, and an item born without it has no
         # pricing owner until vendor_sublist.py runs.
         "preferredVendorId": str(VENDOR_SANMAR),
+        "shopImageUrl": images.primary_url() if images else None,
+        "backImageUrl": images.back_url() if images else None,
         **(uom or {}),
         "displayName": named_title[:60],
         "description": clean_title,

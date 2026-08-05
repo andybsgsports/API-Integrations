@@ -18,11 +18,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from sanmar_parent_create import _child_payload  # noqa: E402
 
 
-def _style():
-    return SimpleNamespace(
+def _style(**over):
+    base = dict(
         style="PC90", title="Port & Company Essential Fleece Crewneck. PC90",
         description="A sturdy fleece.", category="Sweatshirts/Fleece",
+        images_by_color={},
     )
+    base.update(over)
+    return SimpleNamespace(**base)
 
 
 def _sku(**over):
@@ -126,6 +129,16 @@ def test_child_payload_carries_weight_unit_with_weight():
 
 def test_child_payload_seeds_sanmar_as_preferred_vendor():
     assert _child_payload(_style(), _sku())["preferredVendorId"] == "512"
+
+
+def test_child_payload_carries_per_colour_images():
+    imgs = SimpleNamespace(primary_url=lambda: "https://cdn/front.jpg",
+                           back_url=lambda: "https://cdn/back.jpg")
+    p = _child_payload(_style(images_by_color={"Jet Black": imgs}), _sku())
+    assert p["shopImageUrl"] == "https://cdn/front.jpg"   # storefront column
+    assert p["backImageUrl"] == "https://cdn/back.jpg"    # custitem_sanmar_front_image_url
+    q = _child_payload(_style(), _sku())                  # colour has no images
+    assert q["shopImageUrl"] is None and q["backImageUrl"] is None
 
 
 def test_child_payload_carries_uom_ids_when_resolved():

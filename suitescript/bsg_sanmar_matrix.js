@@ -111,6 +111,17 @@ define(["N/record", "N/search"], (record, search) => {
     setIf(rec, "stockunit", it.stockUnitId);
     setIf(rec, "purchaseunit", it.purchaseUnitId);
     setIf(rec, "saleunit", it.saleUnitId);
+    // Image URL fields, guarded like the price sublist: a custom field that
+    // isn't deployed must cost that field, not the whole child. The
+    // confusingly-named custitem_sanmar_front_image_url holds the BACK view
+    // (the front lives on the atlas Image field); custitem_bsgshop_image_url
+    // is the storefront's searchable FRONT-view column.
+    try {
+      setIf(rec, "custitem_bsgshop_image_url", it.shopImageUrl);
+    } catch (e) { /* field not deployed */ }
+    try {
+      setIf(rec, "custitem_sanmar_front_image_url", it.backImageUrl);
+    } catch (e) { /* field not deployed */ }
     // Preferred Vendor: seed the Vendors sublist with the supplying vendor,
     // marked preferred, only when the sublist is EMPTY -- on updates,
     // vendor_sublist.py owns re-ranking and this must not fight it. Pricing
