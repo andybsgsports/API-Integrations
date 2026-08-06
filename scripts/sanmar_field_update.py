@@ -115,6 +115,29 @@ VIEW_IMAGE_FIELDS = {
     "custitem_sanmar_swatch_url": "color_swatch_url",
 }
 
+SANMAR_CDN_BASE = "https://cdnm.sanmar.com/"
+
+
+def sanmar_image_url(value: str | None) -> str | None:
+    """A value NetSuite's URL-type fields will accept, or None to skip.
+
+    The feed's model-view URLs are absolute, but the flat/swatch columns can
+    carry CDN-relative paths -- and a URL field rejects those with "Invalid
+    url. Url must start with http://...", an error that names NO field, so the
+    drop-and-retry salvage can't identify the offender and the WHOLE record
+    PATCH dies. That failed all 45,239 matched items on 2026-08-05 (run
+    31046102022, "wrote 0"). Relative paths get the SanMar CDN base; a bare
+    token with no path separator is feed junk we skip rather than guess at.
+    """
+    v = (value or "").strip()
+    if not v:
+        return None
+    if v.startswith(("http://", "https://")):
+        return v
+    if "/" in v:
+        return SANMAR_CDN_BASE + v.lstrip("/")
+    return None
+
 # NOTE: we deliberately do NOT write NetSuite's native Stock Description.
 # It is a legacy field hard-capped at 21 characters -- far too short for the
 # marketing copy Store Description carries, so anything we put there is a
@@ -436,18 +459,23 @@ def build_payloads(
             # Despite its name, this field holds the BACK-view URL: the front
             # image lives on custitem_atlas_item_image (the real NetSuite
             # Image-type field) instead.
-            put("custitem_sanmar_front_image_url", images.back_url() if images else None)
+            put("custitem_sanmar_front_image_url",
+                sanmar_image_url(images.back_url()) if images else None)
             # The storefront's searchable "best image" column: the FRONT view,
             # per color, straight from the feed. Unlike the atlas Image field
             # (unusable as a search column) this lets the store's catalog and
             # per-color swap read this SKU's photo with no record loads. put()
             # skips blanks, so an existing value is never cleared.
             if shop_image_field:
-                put(shop_image_field, images.primary_url() if images else None)
+                put(shop_image_field,
+                    sanmar_image_url(images.primary_url()) if images else None)
             # The remaining feed views (front/back flat, swatch) -- multiple
-            # images per item (Andy, 2026-08-05).
+            # images per item (Andy, 2026-08-05). ALWAYS through
+            # sanmar_image_url: these are URL-type fields and a relative path
+            # kills the whole record PATCH (the 2026-08-05 zero-write night).
             for field, attr in (view_image_fields or {}).items():
-                put(field, getattr(images, attr, "") if images else None)
+                put(field,
+                    sanmar_image_url(getattr(images, attr, "")) if images else None)
             put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry

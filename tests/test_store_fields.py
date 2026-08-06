@@ -136,3 +136,31 @@ def test_build_payloads_shop_image_field_gets_front_url(sdl_n_path, dip_path):
 
     without_field, _, _, _ = build_payloads(styles, inventory)
     assert "custitem_bsgshop_image_url" not in without_field["00882849000035"]
+
+
+# --- sanmar_image_url: what NetSuite URL-type fields will accept
+
+def test_absolute_urls_pass_through():
+    from sanmar_field_update import sanmar_image_url
+    u = "https://cdnm.sanmar.com/imglib/mresjpg/2025/f30/x_detail.jpg"
+    assert sanmar_image_url(u) == u
+    assert sanmar_image_url("http://x.test/a.jpg") == "http://x.test/a.jpg"
+
+
+def test_relative_paths_get_the_cdn_base():
+    # A relative flat/swatch path in a URL-type field killed the WHOLE record
+    # PATCH ("Invalid url", names no field) -- all 45,239 items failed on
+    # 2026-08-05 (run 31046102022).
+    from sanmar_field_update import sanmar_image_url
+    assert (sanmar_image_url("imglib/mresjpg/2025/f30/x_flat.jpg")
+            == "https://cdnm.sanmar.com/imglib/mresjpg/2025/f30/x_flat.jpg")
+    assert (sanmar_image_url("/imglib/x.gif")
+            == "https://cdnm.sanmar.com/imglib/x.gif")
+
+
+def test_bare_tokens_and_blanks_are_skipped():
+    from sanmar_field_update import sanmar_image_url
+    assert sanmar_image_url("Charcoal.gif") is None   # no path -> feed junk
+    assert sanmar_image_url("") is None
+    assert sanmar_image_url(None) is None
+    assert sanmar_image_url("   ") is None

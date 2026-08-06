@@ -260,17 +260,36 @@ def main() -> int:
     items = client.suiteql(f"SELECT id, {key_cols}, {FIELD} FROM item WHERE {where}")
     print(f"supplier-matched items: {len(items):,}")
 
+    # Every source is OPTIONAL: an unavailable feed (the S&S products.json
+    # snapshot only exists on S&S runs; a DCOS credential can be absent) must
+    # cost that source's images, not the run -- items whose best source was
+    # skipped just stay imageless until a run where it's available. The
+    # unconditional loader() here crashed the first in-pipeline run
+    # (2026-08-05, run 31046102022) on the missing S&S snapshot.
     url_by_field: dict[str, dict[str, str]] = {}
     for field, loader in SOURCES:
-        url_by_field[field] = loader()
-        print(f"{field}: images for {len(url_by_field[field]):,} feed SKUs")
+        try:
+            url_by_field[field] = loader()
+            print(f"{field}: images for {len(url_by_field[field]):,} feed SKUs")
+        except Exception as exc:  # noqa: BLE001
+            url_by_field[field] = {}
+            print(f"{field}: source unavailable, skipping ({str(exc)[:100]})")
     for field, base, style_field in DCOS_IMAGE_SUPPLIERS:
-        url_by_field[field] = dcos_image_map(
-            client, base, style_field, field, key_id, key_pw)
-        print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts")
+        try:
+            url_by_field[field] = dcos_image_map(
+                client, base, style_field, field, key_id, key_pw)
+            print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts")
+        except Exception as exc:  # noqa: BLE001
+            url_by_field[field] = {}
+            print(f"{field}: source unavailable, skipping ({str(exc)[:100]})")
     for field, base in DCOS_PART_IMAGE_SUPPLIERS:
-        url_by_field[field] = dcos_image_map_by_part(client, base, field, key_id, key_pw)
-        print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts (by part)")
+        try:
+            url_by_field[field] = dcos_image_map_by_part(
+                client, base, field, key_id, key_pw)
+            print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts (by part)")
+        except Exception as exc:  # noqa: BLE001
+            url_by_field[field] = {}
+            print(f"{field}: source unavailable, skipping ({str(exc)[:100]})")
 
     folder_id = _resolve_folder_id(client, cfg, allow_write)
     print(f"using File Cabinet folder id {folder_id}")

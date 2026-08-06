@@ -29,6 +29,7 @@ from native_pricing import WEIGHT_UNIT_LB_ID, base_price, weight_display
 from pricing_ownership import VENDOR_SANMAR
 from sanmar_field_update import (
     display_name_with_style,
+    sanmar_image_url,
     store_description,
     store_display_name,
 )
@@ -227,11 +228,14 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
         # front to the storefront column, back plus the flats and swatch to
         # their own URL fields. A side view only exists in SanMar's web
         # service, not the file feed.
-        "shopImageUrl": images.primary_url() if images else None,
-        "backImageUrl": images.back_url() if images else None,
-        "frontFlatUrl": images.front_flat_url if images else None,
-        "backFlatUrl": images.back_flat_url if images else None,
-        "swatchUrl": images.color_swatch_url if images else None,
+        # sanmar_image_url on every view: URL-type fields reject relative
+        # paths and the whole record dies with them (the 2026-08-05
+        # zero-write night).
+        "shopImageUrl": sanmar_image_url(images.primary_url()) if images else None,
+        "backImageUrl": sanmar_image_url(images.back_url()) if images else None,
+        "frontFlatUrl": sanmar_image_url(images.front_flat_url) if images else None,
+        "backFlatUrl": sanmar_image_url(images.back_flat_url) if images else None,
+        "swatchUrl": sanmar_image_url(images.color_swatch_url) if images else None,
         **(uom or {}),
         "displayName": named_title[:60],
         "description": clean_title,
