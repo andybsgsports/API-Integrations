@@ -571,8 +571,12 @@ def main() -> int:
     considered = written = unchanged = priced = failures = deferred = 0
     _fail_shown = [0]
 
+    _fail_other = [0]
+
     def _on_err(rid: str, exc: Exception) -> None:
         _fail_shown[0] += 1
+        if "429" not in str(exc):
+            _fail_other[0] += 1
         if _fail_shown[0] <= 10:
             detail = getattr(exc, "payload", "")
             print(f"  FAILED item {rid}: {str(exc)[:150]} :: {str(detail)[:300]}")
@@ -698,7 +702,21 @@ def main() -> int:
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
           f"deferred to Preferred Vendor: {deferred}; "
           f"failures: {failures}; chunks skipped: {chunks_skipped}")
-    return 1 if (failures or chunks_skipped) else 0
+    if not failures and not chunks_skipped:
+        return 0
+    # A tiny all-429 residue is transient by definition -- the client already
+    # retried with backoff, everything here is diff-aware, and the next run
+    # picks these exact items up. Filing a failure issue for 18 throttled
+    # items out of 45k (2026-08-06, run 31073107629) trains people to ignore
+    # the issues that matter. Anything NON-429 stays fatal no matter how
+    # small: one bad field value silently rejected 45k records twice before.
+    small = failures <= max(50, (written + failures) // 100)
+    if _fail_other[0] == 0 and small and chunks_skipped <= 2:
+        print(f"NOTE: all {failures} failure(s) were 429 throttling "
+              f"({chunks_skipped} chunk(s) skipped) -- transient, the next "
+              f"diff-aware run heals them; treating the run as a success.")
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
