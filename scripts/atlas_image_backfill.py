@@ -30,6 +30,7 @@ from urllib.request import Request, urlopen
 from concurrent_writes import write_records
 from dcos_backfill import SUPPLIERS as DCOS_SUPPLIERS
 from dcos_backfill import get_sellable_styles, get_style_images
+from run_status import exit_code
 
 from momentec_netsuite.config import get_config as mtec_config
 from momentec_netsuite.feeds import parse_product_data
@@ -346,9 +347,12 @@ def main() -> int:
     # PATCHes are independent per item -- issue them with bounded concurrency
     # instead of one-at-a-time, which is throttle-bound and can run for hours.
     _fail_shown = [0]
+    _fail_other = [0]
 
     def _on_err(rid: str, exc: Exception) -> None:
         _fail_shown[0] += 1
+        if "429" not in str(exc):
+            _fail_other[0] += 1
         if _fail_shown[0] <= 10:
             detail = getattr(exc, "payload", "")
             print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
@@ -364,7 +368,12 @@ def main() -> int:
         f"no feed image: {nourl}; upload failures: {upload_failures}; "
         f"write failures: {failures}"
     )
-    return 1 if (failures or upload_failures) else 0
+    # An upload failure is never transient throttling (the File Cabinet SOAP
+    # path has its own error modes), so it stays fatal on its own.
+    if upload_failures:
+        return 1
+    return exit_code("atlas image backfill", failures, _fail_other[0],
+                     written + failures)
 
 
 if __name__ == "__main__":
