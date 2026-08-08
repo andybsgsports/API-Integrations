@@ -503,6 +503,31 @@ def main() -> int:
         if img_stats["none"]:
             print(f"  {img_stats['none']:,} child(ren) had NO feed image for "
                   f"their colour, e.g. {no_image_sample}")
+        # A view at exactly 0% is never a per-colour gap -- the other views
+        # vary (100/97/94/93%), so a flat zero means the feed column is absent
+        # or empty, not that our write dropped it. Show the raw values so the
+        # difference is provable rather than argued (swatch read 0% on
+        # 2026-08-08, run 31240077499).
+        for view, attr in (("swatch", "color_swatch_url"),
+                           ("front-flat", "front_flat_url"),
+                           ("back-flat", "back_flat_url")):
+            key = {"swatch": "swatchUrl", "front-flat": "frontFlatUrl",
+                   "back-flat": "backFlatUrl"}[view]
+            if img_stats[key]:
+                continue
+            raw = [
+                getattr(i, attr, "")
+                for s in by_style.values()
+                for i in s.images_by_color.values()
+            ]
+            non_empty = [r for r in raw if str(r).strip()]
+            print(f"  NOTE: {view} landed on 0 children. Feed carried "
+                  f"{len(non_empty):,} non-empty {attr} value(s) across "
+                  f"{len(raw):,} colour rows"
+                  + (f"; sample: {non_empty[:3]}" if non_empty
+                     else " -- the feed column is absent or empty, so there is "
+                          "nothing to write (SanMar publishes swatches in the "
+                          "EPDD feed, not SDL)."))
     verb = "created" if allow_write else "WOULD create (dry run)"
     print(f"\nsanmar parent create: {verb} {created_parents} parent(s), "
           f"{created_children} child(ren); skipped: {skipped}; failures: {failures}")

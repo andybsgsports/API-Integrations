@@ -146,8 +146,12 @@ class MatrixOptionResolver:
         (live pilot retry, run 31036109523).
         """
         name = (name or "").strip()
-        if not name or self._find(list_type, name) is not None:
+        if not name:
             return name
+        # Always answer from the normalized index, which prefers ACTIVE values.
+        # Consulting the exact-match path first was wrong: when a name matches
+        # a RETIRED value exactly, it came back unchanged and the RESTlet then
+        # resolved it to that retired id, which NetSuite rejects outright.
         hit = self._norm_index(list_type).get(normalize_option_name(name))
         return hit[1] if hit else name
 

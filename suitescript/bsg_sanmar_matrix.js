@@ -48,8 +48,16 @@ define(["N/record", "N/search"], (record, search) => {
   const resolveParent = (style) =>
     memo("parent:" + style, () => firstId("item", [["name", "is", style]]));
 
+  // ACTIVE list values only. An unfiltered search happily returns a RETIRED
+  // duplicate (the colour-consolidation pass inactivates them), and NetSuite
+  // then rejects the child with "Invalid Field Value <id> for the following
+  // field: matrixoptioncustitem_bsg_color" -- 322 children died that way on
+  // 2026-08-08 (run 31240077499). If a colour exists ONLY as a retired value
+  // the child now fails with the clear "not in <list>" message instead, which
+  // points at the value to reactivate or remap.
   const resolveOption = (listId, name) =>
-    memo(listId + ":" + name, () => firstId(listId, [["name", "is", name]]));
+    memo(listId + ":" + name, () =>
+      firstId(listId, [["name", "is", name], "AND", ["isinactive", "is", "F"]]));
 
   const resolveAccount = (numberOrName) =>
     memo("acct:" + numberOrName, () =>

@@ -126,3 +126,32 @@ def test_whole_list_is_scanned_once_across_many_lookups():
         r.resolve(COLOR_LIST, name)
     scans = [q for q in client.queries if "LOWER(name) = LOWER(" not in q]
     assert len(scans) == 1, "the list index should be cached, not re-queried"
+
+
+def test_canonical_name_prefers_the_active_value_over_a_retired_exact_match():
+    # A name matching a RETIRED value exactly used to come back unchanged; the
+    # RESTlet then resolved it to that retired id and NetSuite rejected the
+    # child outright ("Invalid Field Value <id> for ...
+    # matrixoptioncustitem_bsg_color") -- 322 children died on 2026-08-08.
+    client = _Client([
+        {"id": 1331, "name": "Forrest", "isinactive": "T"},   # retired
+        {"id": 90, "name": "Forrest", "isinactive": "F"},     # live duplicate
+    ])
+    r = MatrixOptionResolver(client=client, allow_create=True)
+    assert r.canonical_name(COLOR_LIST, "Forrest") == "Forrest"
+    assert r.resolve(COLOR_LIST, "Forrest") == ("90", "existing")
+    assert client.created == []
+
+
+def test_canonical_name_maps_a_variant_onto_the_active_spelling():
+    client = _Client([
+        {"id": 5, "name": "J. Navy", "isinactive": "T"},      # retired spelling
+        {"id": 10, "name": "J.Navy", "isinactive": "F"},      # the live one
+    ])
+    r = MatrixOptionResolver(client=client, allow_create=True)
+    assert r.canonical_name(COLOR_LIST, "J. Navy") == "J.Navy"
+
+
+def test_canonical_name_leaves_a_genuinely_new_colour_alone():
+    r = MatrixOptionResolver(client=_Client(LIST), allow_create=True)
+    assert r.canonical_name(COLOR_LIST, "Signal Red") == "Signal Red"
