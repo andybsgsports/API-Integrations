@@ -469,7 +469,7 @@ def main() -> int:
     # Tick the On Sale checkbox only once the field exists in NetSuite.
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
     considered = written = unchanged = upc_filled = priced = failures = 0
-    deferred = 0
+    deferred = chunks_skipped = 0
     on_sale_count = 0
     diag_shown = [0]
     _fail_shown = [0]
@@ -492,11 +492,23 @@ def main() -> int:
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         base_by_rid = read_base_prices(client, in_list)
         pref_by_rid = read_preferred(client, in_list)
+        # Sustained throttling on THIS read must not kill the whole run and
+        # discard every chunk already written. The parallel read phases each
+        # learned this the hard way (PR #88); the write-phase chunk read was
+        # the last one still unguarded, and a 429 propagating out of it threw
+        # away 48 minutes of S&S work mid-cycle (2026-08-08, run 31261810147).
+        # Skip the chunk -- diff-aware, so the next run picks it up.
+        try:
+            rows = client.suiteql(
+                f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
+                f"FROM item WHERE id IN ({in_list})"
+            )
+        except Exception as exc:  # noqa: BLE001
+            chunks_skipped += 1
+            print(f"  SKIPPED chunk starting at {i}: read failed ({str(exc)[:150]})")
+            continue
         write_jobs: list[tuple[str, dict]] = []
-        for row in client.suiteql(
-            f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
-            f"FROM item WHERE id IN ({in_list})"
-        ):
+        for row in rows:
             rid = str(row["id"])
             p = matched.get(rid)
             if p is None:
@@ -603,8 +615,9 @@ def main() -> int:
           f"upcCode filled (was empty): {upc_filled}; "
           f"price/cost/weight updated: {priced}; "
           f"deferred to Preferred Vendor: {deferred}; "
-          f"failures: {failures}", flush=True)
-    return exit_code("ss backfill", failures, _fail_other[0], written + failures)
+          f"failures: {failures}; chunks skipped: {chunks_skipped}", flush=True)
+    return exit_code("ss backfill", failures, _fail_other[0],
+                     written + failures, chunks_skipped)
 
 
 if __name__ == "__main__":
