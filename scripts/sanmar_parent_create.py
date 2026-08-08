@@ -36,7 +36,12 @@ from sanmar_field_update import (
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.matrix_options import COLOR_LIST, SIZE_LIST, MatrixOptionResolver
+from sanmar_netsuite.netsuite.matrix_options import (
+    COLOR_LIST,
+    SIZE_LIST,
+    MatrixOptionResolver,
+    normalize_option_name,
+)
 from sanmar_netsuite.netsuite.repository import _sql_escape, child_external_id
 from sanmar_netsuite.sanmar import constants as C
 from sanmar_netsuite.sanmar.parsers import parse_styles
@@ -128,6 +133,33 @@ def _class_id(client: NetSuiteClient, path: str) -> str | None:
     return _CLASS_IDS[path]
 
 
+#: style -> {normalized colour name: ColorImages}, built once per style.
+_IMAGE_INDEX: dict[str, dict[str, object]] = {}
+
+
+def _images_for(style, color_name: str):
+    """The colour's images, tolerant of feed colour-name drift.
+
+    The SDL feed keys images by the colour string on the image row, which is
+    not always byte-identical to the SKU row's colour ('Black/ Red' vs
+    'Black/Red', stray padding, casing). An exact-only lookup silently drops
+    that colour's images on every child -- images missing at creation
+    (Andy, 2026-08-07). Exact match first, then the same
+    punctuation/case-insensitive key the matrix options use.
+    """
+    exact = style.images_by_color.get(color_name)
+    if exact is not None:
+        return exact
+    index = _IMAGE_INDEX.get(style.style)
+    if index is None:
+        index = {
+            normalize_option_name(name): imgs
+            for name, imgs in style.images_by_color.items()
+        }
+        _IMAGE_INDEX[style.style] = index
+    return index.get(normalize_option_name(color_name))
+
+
 def _uom_ids(client: NetSuiteClient) -> dict[str, str]:
     """Units-of-measure internal ids for new items, copied from a live
     reference item (item_uom_fix.py's proven approach -- never guessed).
@@ -202,7 +234,7 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
     # column; back_url() -> custitem_sanmar_front_image_url, which despite its
     # name holds the BACK view (the true front lives on the atlas Image field,
     # populated by the atlas back-fill from the File Cabinet).
-    images = style.images_by_color.get(sku.color_name)
+    images = _images_for(style, sku.color_name)
     return {
         "externalId": child_external_id(sku.unique_key),
         "itemId": f"{style.style}-{color}-{size}",
@@ -294,6 +326,11 @@ def main() -> int:
 
     created_parents = created_children = skipped = failures = done = 0
     parent_refs: dict[str, dict] | None = None
+    img_stats: dict[str, int] = {
+        "children": 0, "front": 0, "none": 0,
+        "backImageUrl": 0, "frontFlatUrl": 0, "backFlatUrl": 0, "swatchUrl": 0,
+    }
+    no_image_sample: list[str] = []
 
     for style_name in candidates:
         if max_styles and done >= max_styles:
@@ -421,6 +458,21 @@ def main() -> int:
                 continue
 
         payloads = [_child_payload(style, sku, resolver, uom) for sku in style.skus]
+        # Image coverage, per style and in total. Missing images at creation
+        # are invisible unless counted -- the feed genuinely carries fewer
+        # flats/swatches than model shots, so "not all 5" is often the FEED,
+        # not a bug; this separates the two (Andy, 2026-08-07).
+        for p in payloads:
+            img_stats["children"] += 1
+            if p.get("shopImageUrl"):
+                img_stats["front"] += 1
+            else:
+                img_stats["none"] += 1
+                if len(no_image_sample) < 5:
+                    no_image_sample.append(p["itemId"])
+            for key in ("backImageUrl", "frontFlatUrl", "backFlatUrl", "swatchUrl"):
+                if p.get(key):
+                    img_stats[key] += 1
         if max_children:
             payloads = payloads[: max(0, max_children - created_children)]
         for i in range(0, len(payloads), RESTLET_BATCH):
@@ -441,6 +493,16 @@ def main() -> int:
                 else:
                     created_children += 1
 
+    n = img_stats["children"]
+    if n:
+        pct = lambda k: f"{img_stats[k]:,} ({100.0 * img_stats[k] / n:.0f}%)"  # noqa: E731
+        print(f"\nimage coverage across {n:,} child payload(s): "
+              f"front {pct('front')}; back {pct('backImageUrl')}; "
+              f"front-flat {pct('frontFlatUrl')}; back-flat {pct('backFlatUrl')}; "
+              f"swatch {pct('swatchUrl')}")
+        if img_stats["none"]:
+            print(f"  {img_stats['none']:,} child(ren) had NO feed image for "
+                  f"their colour, e.g. {no_image_sample}")
     verb = "created" if allow_write else "WOULD create (dry run)"
     print(f"\nsanmar parent create: {verb} {created_parents} parent(s), "
           f"{created_children} child(ren); skipped: {skipped}; failures: {failures}")

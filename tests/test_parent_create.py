@@ -154,3 +154,51 @@ def test_child_payload_carries_uom_ids_when_resolved():
     p = _child_payload(_style(), _sku(), None, uom)
     for k, v in uom.items():
         assert p[k] == v
+
+
+# --- image lookup must survive feed colour-name drift (Andy, 2026-08-07:
+# "images not being pulled to each child when created")
+
+def _imgs(tag):
+    return SimpleNamespace(
+        primary_url=lambda: f"https://cdn/{tag}_front.jpg",
+        back_url=lambda: f"https://cdn/{tag}_back.jpg",
+        front_flat_url=f"https://cdn/{tag}_ff.jpg",
+        back_flat_url=f"https://cdn/{tag}_bf.jpg",
+        color_swatch_url=f"https://cdn/{tag}_sw.jpg",
+    )
+
+
+def test_images_found_when_feed_spells_the_colour_differently():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    # image row says 'Jet/Black', SKU row says 'Jet/ Black'
+    style = _style(style="PC91", images_by_color={"Jet/Black": _imgs("jb")})
+    p = _child_payload(style, _sku(color_name="Jet/ Black"))
+    assert p["shopImageUrl"] == "https://cdn/jb_front.jpg"
+    assert p["swatchUrl"] == "https://cdn/jb_sw.jpg"
+
+
+def test_images_found_when_case_differs():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    style = _style(style="PC92", images_by_color={"ASH GREY": _imgs("ag")})
+    p = _child_payload(style, _sku(color_name="Ash Grey"))
+    assert p["backFlatUrl"] == "https://cdn/ag_bf.jpg"
+
+
+def test_exact_match_still_preferred():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    style = _style(style="PC93",
+                   images_by_color={"Red": _imgs("exact"), "R.E.D": _imgs("norm")})
+    p = _child_payload(style, _sku(color_name="Red"))
+    assert p["shopImageUrl"] == "https://cdn/exact_front.jpg"
+
+
+def test_unknown_colour_still_yields_no_images():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    style = _style(style="PC94", images_by_color={"Black": _imgs("bk")})
+    p = _child_payload(style, _sku(color_name="Fuchsia"))
+    assert p["shopImageUrl"] is None and p["swatchUrl"] is None
