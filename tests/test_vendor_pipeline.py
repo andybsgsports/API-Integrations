@@ -113,3 +113,37 @@ def test_unknown_vendor_is_rejected():
 @pytest.mark.parametrize("vendor", ["sanmar", "momentec", "ua", "ss", "dcos"])
 def test_known_vendors_resolve(vendor):
     assert vendor in vp.PIPELINES
+
+
+# --- shared exit-code policy (scripts/run_status.py)
+
+def test_clean_run_is_success():
+    from run_status import exit_code
+    assert exit_code("x", 0, 0, 45000) == 0
+
+
+def test_small_all_429_residue_is_forgiven():
+    # 18 throttled items out of 45k filed a failure issue (run 31073107629);
+    # 2 out of 17k filed another (run 31233431089). Both are self-healing.
+    from run_status import exit_code
+    assert exit_code("x", 18, 0, 45000) == 0
+    assert exit_code("x", 2, 0, 17252) == 0
+
+
+def test_any_non_429_failure_stays_fatal():
+    # One bad field value silently rejected ~45k records twice; never forgive.
+    from run_status import exit_code
+    assert exit_code("x", 1, 1, 45000) == 1
+    assert exit_code("x", 500, 3, 45000) == 1
+
+
+def test_large_429_set_is_still_fatal():
+    from run_status import exit_code
+    assert exit_code("x", 5000, 0, 45000) == 1
+
+
+def test_many_skipped_chunks_stay_fatal():
+    # A skipped chunk is a whole slice never considered, not a lost record.
+    from run_status import exit_code
+    assert exit_code("x", 0, 0, 45000, 5) == 1
+    assert exit_code("x", 10, 0, 45000, 1) == 0

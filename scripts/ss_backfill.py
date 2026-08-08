@@ -36,6 +36,7 @@ from native_pricing import (
     weight_display,
 )
 from pricing_ownership import VENDOR_SS, owns_pricing, read_preferred
+from run_status import exit_code
 from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -473,8 +474,12 @@ def main() -> int:
     diag_shown = [0]
     _fail_shown = [0]
 
+    _fail_other = [0]
+
     def _on_err(rid: str, exc: Exception) -> None:
         _fail_shown[0] += 1
+        if "429" not in str(exc):
+            _fail_other[0] += 1
         if _fail_shown[0] <= 10:
             detail = getattr(exc, "payload", "")
             print(f"  FAILED item {rid}: {str(exc)[:120]} :: {str(detail)[:400]}")
@@ -599,7 +604,7 @@ def main() -> int:
           f"price/cost/weight updated: {priced}; "
           f"deferred to Preferred Vendor: {deferred}; "
           f"failures: {failures}", flush=True)
-    return 1 if failures else 0
+    return exit_code("ss backfill", failures, _fail_other[0], written + failures)
 
 
 if __name__ == "__main__":

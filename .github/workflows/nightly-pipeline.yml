@@ -77,7 +77,10 @@ jobs:
       - name: Resolve run parameters
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            VENDOR="sanmar"; PHASES="discover,options,create,update"
+            # First step of the chain: SanMar's create group. The dispatch
+            # step below walks the rest (sanmar:update -> momentec -> ...),
+            # one job per group so none can hit the runner's 6h cap.
+            VENDOR="sanmar"; PHASES="discover,options,create"
             DRY_RUN="false"; CREATE_MAX="300"; MAX_ITEMS="0"; CHAIN="true"
           else
             VENDOR="${{ github.event.inputs.vendor }}"
@@ -145,25 +148,32 @@ jobs:
         # the remaining vendors a night for no benefit.
         if: always() && env.CHAIN == 'true'
         run: |
-          case "$VENDOR" in
-            sanmar)      NEXT="momentec" ;;
-            momentec)    NEXT="ua" ;;
-            ua)          NEXT="ss" ;;
-            ss)          NEXT="dcos" ;;
-            dcos)        NEXT="champro-csv" ;;
-            champro-csv) NEXT="" ;;
-            *)           NEXT="" ;;
+          # The chain is a list of (vendor, phases) STEPS, not just vendors:
+          # a vendor that both creates and updates gets one job per group, so
+          # each has its own 6h runner budget. SanMar's combined leg hit the
+          # 350-minute cap mid-write and was killed (2026-08-07, run
+          # 31210586420) -- creating 300 styles plus a full 45k-item update
+          # plus the image pass does not fit in one job.
+          case "$VENDOR:$PHASES" in
+            sanmar:*create*)  NEXT="sanmar";      NEXT_PHASES="update" ;;
+            sanmar:*)         NEXT="momentec";    NEXT_PHASES="update" ;;
+            momentec:*)       NEXT="ua";          NEXT_PHASES="update" ;;
+            ua:*)             NEXT="ss";          NEXT_PHASES="update" ;;
+            ss:*)             NEXT="dcos";        NEXT_PHASES="create,update" ;;
+            dcos:*)           NEXT="champro-csv"; NEXT_PHASES="update" ;;
+            champro-csv:*)    NEXT="" ;;
+            *)                NEXT="" ;;
           esac
           if [ -z "$NEXT" ]; then
             echo "chain complete after $VENDOR"
             exit 0
           fi
-          echo "dispatching next vendor: $NEXT"
+          echo "dispatching next step: $NEXT (phases: $NEXT_PHASES)"
           curl -sf -X POST \
             -H "Authorization: token ${{ github.token }}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/nightly-pipeline.yml/dispatches" \
-            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"vendor\":\"$NEXT\",\"phases\":\"$PHASES\",\"dry_run\":\"$DRY_RUN\",\"create_max_styles\":\"$CREATE_MAX_STYLES\",\"max_items\":\"$MAX_ITEMS\",\"chain\":\"true\"}}"
+            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"vendor\":\"$NEXT\",\"phases\":\"$NEXT_PHASES\",\"dry_run\":\"$DRY_RUN\",\"create_max_styles\":\"$CREATE_MAX_STYLES\",\"max_items\":\"$MAX_ITEMS\",\"chain\":\"true\"}}"
 
       - name: Open issue on failure
         if: failure()
