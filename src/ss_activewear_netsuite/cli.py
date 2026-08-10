@@ -104,6 +104,26 @@ def cmd_download(args: argparse.Namespace, config: SsAppConfig) -> int:
         )
     out.write_text(json.dumps(serialised, indent=2), encoding="utf-8")
     log.info("Wrote %d products → %s", len(serialised), out)
+
+    # Styles alongside products: /Products carries no style title or
+    # description, so a created matrix PARENT would have nothing to put in
+    # Display Name / Store Description -- the very fields Andy's spec makes
+    # mandatory at creation. /Styles is a single unpaged response, so this
+    # costs one request.
+    styles_out = out.parent / "styles.json"
+    styles = [
+        {
+            "style_id": s.style_id,
+            "style_name": s.style_name,
+            "brand_name": s.brand_name,
+            "title": s.title,
+            "description": s.description,
+            "category_name": s.category_name,
+        }
+        for s in client.iter_styles()
+    ]
+    styles_out.write_text(json.dumps(styles, indent=2), encoding="utf-8")
+    log.info("Wrote %d styles → %s", len(styles), styles_out)
     return 0
 
 

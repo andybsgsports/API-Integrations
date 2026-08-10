@@ -133,3 +133,42 @@ def test_the_exclusion_can_be_overridden(monkeypatch):
     allowed, excluded = brand_allowlist(Counter({"Badger": 231})), excluded_brands()
     assert excluded == set()
     assert brand_allowed("Badger", allowed, excluded)
+
+
+# --- the download must carry style titles, or created parents have no name
+
+def test_download_writes_styles_alongside_products(tmp_path, monkeypatch):
+    # /Products carries no style title or description, so a created matrix
+    # PARENT would have nothing for Display Name / Store Description -- the
+    # fields Andy's spec makes mandatory at creation.
+    import argparse
+    import json as _json
+
+    from ss_activewear_netsuite import cli
+    from ss_activewear_netsuite.models import SsProduct, SsStyle
+
+    class _Client:
+        def iter_products(self):
+            yield SsProduct(sku="B123", style_id="7", style_name="3001C",
+                            brand_name="BELLA + CANVAS", color_name="Black",
+                            color_code="BLK", color_price_code="",
+                            size_name="S", size_order="2")
+
+        def iter_styles(self):
+            yield SsStyle(style_id="7", style_name="3001C",
+                          brand_name="BELLA + CANVAS",
+                          title="Unisex Jersey Short Sleeve Tee",
+                          description="Retail fit, 100% Airlume cotton.")
+
+    monkeypatch.setattr(cli, "_client", lambda _cfg: _Client())
+    out = tmp_path / "products.json"
+    cli.cmd_download(argparse.Namespace(out=str(out)), object())
+
+    styles = _json.loads((tmp_path / "styles.json").read_text())
+    assert styles == [{
+        "style_id": "7", "style_name": "3001C", "brand_name": "BELLA + CANVAS",
+        "title": "Unisex Jersey Short Sleeve Tee",
+        "description": "Retail fit, 100% Airlume cotton.",
+        "category_name": "",
+    }]
+    assert _json.loads(out.read_text())[0]["sku"] == "B123"
