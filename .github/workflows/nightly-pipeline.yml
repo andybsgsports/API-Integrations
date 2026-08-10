@@ -19,9 +19,9 @@ on:
   # Re-enabled 2026-08-10 (Andy) after live validation: the 300-style ramp
   # nights, preferred-vendor pricing convergence on both sides, and the
   # image-coverage fixes. Each firing starts SanMar's create group; the
-  # chain-dispatch step walks the remaining vendors. item-lifecycle is NOT
-  # part of the chain -- it stays manual-dispatch until Andy signs off on
-  # its dry-run report.
+  # chain-dispatch step walks the remaining vendors and finishes with
+  # item-lifecycle (Andy approved the dry-run report 2026-08-10) -- it runs
+  # LAST so every vendor has restamped its feed heartbeats first.
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
@@ -165,11 +165,23 @@ jobs:
             ua:*)             NEXT="ss";          NEXT_PHASES="update" ;;
             ss:*)             NEXT="dcos";        NEXT_PHASES="create,update" ;;
             dcos:*)           NEXT="champro-csv"; NEXT_PHASES="update" ;;
-            champro-csv:*)    NEXT="" ;;
+            champro-csv:*)    NEXT="lifecycle" ;;
             *)                NEXT="" ;;
           esac
           if [ -z "$NEXT" ]; then
             echo "chain complete after $VENDOR"
+            exit 0
+          fi
+          if [ "$NEXT" = "lifecycle" ]; then
+            # Final leg: inactivate items whose feed heartbeat is stale.
+            # Runs after every vendor so all heartbeats are fresh; its own
+            # circuit breaker skips any source that looks wiped out.
+            echo "dispatching item-lifecycle (final leg)"
+            curl -sf -X POST \
+              -H "Authorization: token ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/item-lifecycle.yml/dispatches" \
+              -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"dry_run\":\"$DRY_RUN\",\"max_items\":\"0\"}}"
             exit 0
           fi
           echo "dispatching next step: $NEXT (phases: $NEXT_PHASES)"

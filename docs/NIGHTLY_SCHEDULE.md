@@ -8,8 +8,10 @@ branch — which runs one vendor at a time in order
 (sanmar → momentec → ua → ss → dcos → champro-csv), each run dispatching
 the next. See `docs/VENDOR_PIPELINE.md` for the full spec.
 
-`item-lifecycle` is **not** in the chain: it stays manual-dispatch until
-Andy approves its dry-run report (what gets inactivated is his call).
+`item-lifecycle` runs as the chain's **final leg** (Andy approved the
+dry-run report 2026-08-10): the champro-csv step dispatches it, so it always
+fires after every vendor has restamped its feed heartbeats. Its circuit
+breaker still skips any source that looks wiped out (>30% stale).
 
 Everything below is kept as the historical record of the stagger contract
 the chain replaced — and of *why* clock slots failed (late cron firings
