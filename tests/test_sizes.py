@@ -65,3 +65,20 @@ def test_empty_and_none_are_safe():
     assert normalize_size("") == ""
     assert normalize_size(None) == ""
     assert normalize_size("   ") == ""
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # Spelled-out variants fold onto the canonical nX- form. Legacy list
+    # values use "XX-Large" where the feeds' 2XL/XXL normalise to "2X-Large";
+    # that near-miss made existing children look "new" to the S&S create
+    # preview (duplicate-create risk).
+    ("XX-Large", "2X-Large"),
+    ("XX Large", "2X-Large"),
+    ("XXX-Large", "3X-Large"),
+    ("XX-Small", "2X-Small"),
+    ("2X-Large", "2X-Large"),   # already canonical: unchanged
+    ("X-Large", "X-Large"),
+    ("XX-Large Tall", "2X-Large Tall"),
+])
+def test_spelled_out_variants_fold_onto_the_canonical_form(raw, expected):
+    assert normalize_size(raw) == expected
