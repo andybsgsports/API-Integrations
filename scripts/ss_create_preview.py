@@ -138,6 +138,45 @@ def _brand_key(name: str) -> str:
 #: ``SS_CREATE_BRANDS=CARRIED`` scopes creation to brands BSG already stocks.
 CARRIED = "CARRIED"
 
+#: Brands BSG buys DIRECT from Momentec, which must not be created from the
+#: S&S catalogue (Andy, 2026-08-10: "Badger is Badger Sportswear, now owned by
+#: Augusta Sportswear, now owned by Momentec").
+#:
+#: These are the trap in the CARRIED rule. Each shows a small carried count --
+#: Badger 231, Augusta 146, Alleson 139, C2 138, Russell 104, Holloway 98 --
+#: because those items came from the MOMENTEC feed, and S&S then offers the
+#: whole catalogue behind them: ~42,700 SKUs across the six. Creating from S&S
+#: would duplicate supply for product we already source direct, and hand the
+#: same items a second vendor to fight over.
+#:
+#: The names are the S&S spellings; ``momentec_backfill.BRAND_NAMES`` is the
+#: source of truth for who Momentec supplies, and a test asserts every brand
+#: there is covered here (S&S writes 'C2 Sport' where Momentec says 'C2').
+MOMENTEC_DIRECT_BRANDS = (
+    "Augusta Sportswear",
+    "High Five",
+    "Holloway",
+    "Pacific Headwear",
+    "Russell Athletic",
+    "Alleson Athletic",
+    "Badger",
+    "Badger Sportswear",
+    "C2",
+    "C2 Sport",
+)
+
+
+def excluded_brands() -> set[str]:
+    """Brands creation must never touch, from ``SS_EXCLUDE_BRANDS``.
+
+    Defaults to the Momentec-direct list; set the env var to override (empty
+    string disables the exclusion entirely).
+    """
+    raw = os.environ.get("SS_EXCLUDE_BRANDS")
+    names = (MOMENTEC_DIRECT_BRANDS if raw is None
+             else [b for b in raw.split(",") if b.strip()])
+    return {_brand_key(b) for b in names}
+
 
 def brand_allowlist(carried: Counter[str] | None = None) -> set[str]:
     """Brands creation may touch, from ``SS_CREATE_BRANDS`` (empty = all).
@@ -165,8 +204,12 @@ def brand_allowlist(carried: Counter[str] | None = None) -> set[str]:
     return {_brand_key(b) for b in out}
 
 
-def brand_allowed(brand: str, allowed: set[str]) -> bool:
-    return not allowed or _brand_key(brand) in allowed
+def brand_allowed(brand: str, allowed: set[str],
+                  excluded: set[str] | None = None) -> bool:
+    key = _brand_key(brand)
+    if key in (excluded or ()):
+        return False          # sourced direct -- never create from S&S
+    return not allowed or key in allowed
 
 
 def main() -> int:
@@ -262,14 +305,18 @@ def main() -> int:
                 carried[brand] += 1
 
     allowed = brand_allowlist(carried)
+    excluded = excluded_brands()
     if allowed:
-        names = sorted(b for b in carried if _brand_key(b) in allowed)
-        extra = len(allowed) - len(names)
-        print(f"\ncreation scoped to {len(allowed)} brand(s): "
-              f"{', '.join(names)}"
-              + (f" (+{extra} not present in this feed)" if extra > 0 else ""))
+        names = sorted(b for b in carried
+                       if _brand_key(b) in allowed
+                       and _brand_key(b) not in excluded)
+        print(f"\ncreation scoped to {len(names)} brand(s): {', '.join(names)}")
     else:
         print("\nno brand filter set -- reporting every brand")
+    if excluded:
+        hit = sorted(b for b in carried if _brand_key(b) in excluded)
+        if hit:
+            print(f"EXCLUDED (bought direct from Momentec): {', '.join(hit)}")
 
     # -- bucket every SKU ----------------------------------------------------
     exists_gtin = exists_combo = new_children = 0
@@ -297,7 +344,7 @@ def main() -> int:
                 if combo_key(color, size) in have:
                     exists_combo += 1
                     continue
-                if not brand_allowed(brand, allowed):
+                if not brand_allowed(brand, allowed, excluded):
                     filtered_rows += 1
                     continue
                 new_children += 1
@@ -311,7 +358,7 @@ def main() -> int:
                 )
             elif style in collisions:
                 blocked_rows += 1
-            elif not brand_allowed(brand, allowed):
+            elif not brand_allowed(brand, allowed, excluded):
                 filtered_rows += 1
                 brand_new_styles.setdefault(brand, set()).add(style)
                 brand_new_skus[brand] += 1

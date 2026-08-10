@@ -15,7 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from collections import Counter
 
-from ss_create_preview import brand_allowed, brand_allowlist, combo_key
+from ss_create_preview import (
+    brand_allowed,
+    brand_allowlist,
+    combo_key,
+    excluded_brands,
+)
 
 
 def test_combo_key_normalises_colour_variants():
@@ -90,3 +95,41 @@ def test_CARRIED_can_be_combined_with_explicitly_named_brands(monkeypatch):
     allowed = brand_allowlist(Counter({"Gildan": 10}))
     assert brand_allowed("Gildan", allowed)
     assert brand_allowed("augusta sportswear", allowed)
+
+
+# --- brands bought direct from Momentec must never be created from S&S
+
+def test_momentec_brands_are_excluded_even_when_carried(monkeypatch):
+    # The trap in the CARRIED rule: Badger/Augusta/etc show a small carried
+    # count because those items came from the MOMENTEC feed, and S&S then
+    # offers the whole catalogue behind them (~42,700 SKUs across six brands).
+    monkeypatch.setenv("SS_CREATE_BRANDS", "CARRIED")
+    monkeypatch.delenv("SS_EXCLUDE_BRANDS", raising=False)
+    carried = Counter({"Badger": 231, "Augusta Sportswear": 146,
+                       "Holloway": 98, "Gildan": 7952})
+    allowed, excluded = brand_allowlist(carried), excluded_brands()
+    assert brand_allowed("Gildan", allowed, excluded)
+    for direct in ("Badger", "Augusta Sportswear", "Holloway",
+                   "Alleson Athletic", "Russell Athletic", "C2 Sport",
+                   "High Five", "Pacific Headwear"):
+        assert not brand_allowed(direct, allowed, excluded), direct
+
+
+def test_every_momentec_supplied_brand_is_covered():
+    # momentec_backfill.BRAND_NAMES is the source of truth for who Momentec
+    # supplies; adding a brand code there must not silently leave that brand
+    # exposed to S&S creation. S&S spells some differently ('C2 Sport').
+    from momentec_backfill import BRAND_NAMES
+    from ss_create_preview import MOMENTEC_DIRECT_BRANDS, _brand_key
+    covered = {_brand_key(b) for b in MOMENTEC_DIRECT_BRANDS}
+    missing = sorted({b for b in BRAND_NAMES.values()
+                      if _brand_key(b) not in covered})
+    assert not missing, f"Momentec-supplied brand(s) not excluded: {missing}"
+
+
+def test_the_exclusion_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("SS_CREATE_BRANDS", "CARRIED")
+    monkeypatch.setenv("SS_EXCLUDE_BRANDS", "")
+    allowed, excluded = brand_allowlist(Counter({"Badger": 231})), excluded_brands()
+    assert excluded == set()
+    assert brand_allowed("Badger", allowed, excluded)
