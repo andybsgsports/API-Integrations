@@ -34,6 +34,7 @@ Emits: ``data/ss_new_parents.txt``, ``data/ss_new_children.csv``,
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -99,10 +100,33 @@ def _norm_names_by_id(client: NetSuiteClient, list_type: str) -> dict[str, str]:
     }
 
 
+#: Spelled-out X-family sizes folded onto the canonical ``nX-`` spelling, for
+#: COMPARISON ONLY. ``normalize_size`` maps the feeds' ``2XL``/``XXL`` to
+#: ``2X-Large`` but leaves a spelled-out ``XX-Large`` alone, so a child stored
+#: under the older spelling would not collide with the feed's -- and this
+#: preview would call an existing child "new", i.e. queue a duplicate create.
+#: Deliberately NOT folded inside ``normalize_size`` itself: that function's
+#: output is matched against live list-value names by exact string
+#: (``OptionMaps.size_candidates``), so changing it would alter matching for
+#: every vendor's update path to fix a problem confined to this diff. The
+#: global question -- whether the size list carries both spellings, like the
+#: colour list carried Forest/Forrest -- wants an audit first.
+_SIZE_FOLD = re.compile(r"^(x+)(large|small)$")
+
+
+def fold_size(spelled: str) -> str:
+    """``xxlarge`` -> ``2xlarge``; anything else unchanged (already normalised)."""
+    m = _SIZE_FOLD.match(spelled)
+    if not m:
+        return spelled
+    n = len(m.group(1))
+    return spelled if n == 1 else f"{n}x{m.group(2)}"
+
+
 def combo_key(color_name: str, size_name: str) -> tuple[str, str]:
     return (
         normalize_option_name(color_name),
-        normalize_option_name(normalize_size(size_name)),
+        fold_size(normalize_option_name(normalize_size(size_name))),
     )
 
 

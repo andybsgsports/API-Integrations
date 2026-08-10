@@ -60,20 +60,6 @@ def _expand_x(key: str) -> str | None:
         n, side = len(m.group(1)), m.group(2)
         word = "Large" if side == "L" else "Small"
         return f"X-{word}" if n == 1 else f"{n}X-{word}"
-    # Spelled-out variants of the same family fold onto the canonical form:
-    # legacy list values use "XX-Large" where the feeds' 2XL/XXL normalise to
-    # "2X-Large", and that near-miss made existing children look "new" to the
-    # S&S create preview (a duplicate-create risk, same family as
-    # Forest/Forrest).
-    m = re.fullmatch(r"(\d+)X-?(LARGE|SMALL)", key)
-    if m:
-        word = "Large" if m.group(2) == "LARGE" else "Small"
-        return f"{m.group(1)}X-{word}"
-    m = re.fullmatch(r"(X+)-?(LARGE|SMALL)", key)
-    if m:
-        n = len(m.group(1))
-        word = "Large" if m.group(2) == "LARGE" else "Small"
-        return f"X-{word}" if n == 1 else f"{n}X-{word}"
     return None
 
 
@@ -91,12 +77,6 @@ def _lookup(key: str) -> str | None:
         inner = _lookup(key[1:])
         if inner:
             return f"Youth {inner}"
-    # Spelled-out Tall ("XX-Large Tall" arrives as key "XX-LARGETALL"):
-    # resolve the base size so the whole thing lands on the canonical form.
-    if key.endswith("TALL") and len(key) > 4:
-        inner = _lookup(key[:-4])
-        if inner:
-            return f"{inner} Tall"
     # Tall suffix: LT, XLT, 2XLT, …
     if key.endswith("T") and len(key) > 1:
         inner = _lookup(key[:-1])
