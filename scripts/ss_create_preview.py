@@ -34,6 +34,7 @@ Emits: ``data/ss_new_parents.txt``, ``data/ss_new_children.csv``,
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import Counter
 from collections.abc import Callable
@@ -130,6 +131,29 @@ def combo_key(color_name: str, size_name: str) -> tuple[str, str]:
     )
 
 
+def _brand_key(name: str) -> str:
+    return normalize_option_name(name)
+
+
+def brand_allowlist() -> set[str]:
+    """Brands creation is scoped to, from ``SS_CREATE_BRANDS`` (empty = all).
+
+    Andy, 2026-08-10: bring in specific brands rather than all 5,027 net-new
+    S&S styles (~3x the current SanMar catalogue). Names are compared with
+    the same punctuation/case-insensitive rule as option values, so
+    'Bella+Canvas' and 'BELLA + CANVAS' are one brand.
+    """
+    raw = os.environ.get("SS_CREATE_BRANDS", "")
+    return {_brand_key(b) for b in raw.split(",") if b.strip()}
+
+
+_ALLOWED = brand_allowlist()
+
+
+def brand_allowed(brand: str) -> bool:
+    return not _ALLOWED or _brand_key(brand) in _ALLOWED
+
+
 def main() -> int:
     products = load_products()
     styles: dict[str, list[dict]] = {}
@@ -206,29 +230,42 @@ def main() -> int:
 
     # -- bucket every SKU ----------------------------------------------------
     exists_gtin = exists_combo = new_children = 0
-    new_parent_rows = blocked_rows = 0
+    new_parent_rows = blocked_rows = filtered_rows = 0
     new_parent_styles: set[str] = set()
     child_styles: Counter[str] = Counter()
     used_colors: set[str] = set()
     used_sizes: set[str] = set()
     child_rows: list[str] = []
+    # Per-brand tallies. `carried` -- SKUs of that brand already in NetSuite --
+    # is the demand signal: a brand we already stock deep is one we sell, and
+    # that is what picks the creation allowlist (Andy, 2026-08-10).
+    carried: Counter[str] = Counter()
+    brand_new_skus: Counter[str] = Counter()
+    brand_new_styles: dict[str, set[str]] = {}
 
     for style, skus in styles.items():
         pid = parent_refs.get(style)
         have = combos.get(pid or "", set())
         for p in skus:
+            brand = str(p.get("brand_name") or "").strip() or "(no brand)"
             gtin = str(p.get("gtin") or "").strip()
             if gtin and gtin in known_gtins:
                 exists_gtin += 1
+                carried[brand] += 1
                 continue
             color = str(p.get("color_name") or "").strip()
             size = str(p.get("size_name") or "").strip()
             if pid is not None:
                 if combo_key(color, size) in have:
                     exists_combo += 1
+                    carried[brand] += 1
+                    continue
+                if not brand_allowed(brand):
+                    filtered_rows += 1
                     continue
                 new_children += 1
                 child_styles[style] += 1
+                brand_new_skus[brand] += 1
                 used_colors.add(color)
                 used_sizes.add(normalize_size(size))
                 child_rows.append(
@@ -237,9 +274,15 @@ def main() -> int:
                 )
             elif style in collisions:
                 blocked_rows += 1
+            elif not brand_allowed(brand):
+                filtered_rows += 1
+                brand_new_styles.setdefault(brand, set()).add(style)
+                brand_new_skus[brand] += 1
             else:
                 new_parent_rows += 1
                 new_parent_styles.add(style)
+                brand_new_styles.setdefault(brand, set()).add(style)
+                brand_new_skus[brand] += 1
                 used_colors.add(color)
                 used_sizes.add(normalize_size(size))
 
@@ -275,9 +318,36 @@ def main() -> int:
           f"across {len(collisions)} style(s)"
           + (f" ({', '.join(sorted(collisions)[:10])}"
              + ("..." if len(collisions) > 10 else "") + ")" if collisions else ""))
+    if _ALLOWED:
+        print(f"FILTERED OUT (brand not on list)    : {filtered_rows:>7}  "
+              f"(SS_CREATE_BRANDS scopes creation)")
     print(f"missing rows reference {len(used_colors)} distinct colour(s), "
           f"{len([s for s in used_sizes if s])} size(s) "
           f"-> ss_new_colors.txt / ss_new_sizes.txt (ensure-values input)")
+
+    # -- brand breakdown -----------------------------------------------------
+    # Sorted by how deep we ALREADY stock the brand: that is the demand
+    # signal, and it is what picks the allowlist. A brand with thousands of
+    # carried SKUs is one BSG sells; a brand with zero carried and thousands
+    # available is catalogue we have never chosen to stock.
+    brands = sorted(
+        set(carried) | set(brand_new_skus),
+        key=lambda b: (-carried[b], -brand_new_skus[b], b),
+    )
+    summary = data / "ss_brand_summary.csv"
+    with summary.open("w", encoding="utf-8", newline="") as fh:
+        fh.write("brand,carried_skus,new_skus,new_styles\n")
+        for b in brands:
+            fh.write(f"\"{b}\",{carried[b]},{brand_new_skus[b]},"
+                     f"{len(brand_new_styles.get(b, ()))}\n")
+    print(f"\nBRAND BREAKDOWN ({len(brands)} brands) -> {summary.relative_to(ROOT)}")
+    print(f"  {'brand':<32} {'carried':>8} {'new SKUs':>9} {'new styles':>11}")
+    for b in brands[:25]:
+        print(f"  {b[:32]:<32} {carried[b]:>8} {brand_new_skus[b]:>9} "
+              f"{len(brand_new_styles.get(b, ())):>11}")
+    stocked = [b for b in brands if carried[b]]
+    print(f"  ({len(stocked)} brand(s) already stocked; "
+          f"{len(brands) - len(stocked)} carried zero SKUs today)")
     print("\nread-only preview: nothing was written to NetSuite")
     return 0
 

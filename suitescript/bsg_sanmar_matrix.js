@@ -140,6 +140,21 @@ define(["N/record", "N/search"], (record, search) => {
     try {
       setIf(rec, "custitem_sanmar_swatch_url", it.swatchUrl);
     } catch (e) { /* field not deployed */ }
+    // Vendor-neutral pass-through: {"custitem_ss_sku": "...", ...}. The five
+    // image fields above are SanMar's by name, so a child from any other
+    // vendor could not be born carrying its own data -- S&S children would
+    // have had to be created bare and back-filled on a later pass. Each field
+    // is set independently and guarded, exactly like the image fields: a
+    // custom field that isn't deployed (or rejects its value) costs that one
+    // field, never the whole child.
+    if (it.fields) {
+      for (var fieldId in it.fields) {
+        if (!Object.prototype.hasOwnProperty.call(it.fields, fieldId)) continue;
+        try {
+          setIf(rec, fieldId, it.fields[fieldId]);
+        } catch (e) { /* field not deployed, or rejected this value */ }
+      }
+    }
     // Preferred Vendor: seed the Vendors sublist with the supplying vendor,
     // marked preferred, only when the sublist is EMPTY -- on updates,
     // vendor_sublist.py owns re-ranking and this must not fight it. Pricing

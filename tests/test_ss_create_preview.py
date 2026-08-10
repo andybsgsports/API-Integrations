@@ -52,3 +52,26 @@ def test_single_x_sizes_are_not_folded_into_a_number():
 def test_combo_key_keeps_genuinely_different_children_apart():
     assert combo_key("Black", "Small") != combo_key("Black", "Medium")
     assert combo_key("Navy", "Small") != combo_key("J.Navy", "Small")
+
+
+# --- brand allowlist: creation is scoped to brands BSG actually sells
+
+def test_brand_matching_ignores_punctuation_and_case(monkeypatch):
+    import importlib
+
+    import ss_create_preview as mod
+    monkeypatch.setenv("SS_CREATE_BRANDS", "Bella+Canvas, Gildan")
+    mod = importlib.reload(mod)
+    assert mod.brand_allowed("BELLA + CANVAS")
+    assert mod.brand_allowed("gildan")
+    assert not mod.brand_allowed("Anvil")
+
+
+def test_an_empty_allowlist_permits_every_brand(monkeypatch):
+    import importlib
+
+    import ss_create_preview as mod
+    monkeypatch.delenv("SS_CREATE_BRANDS", raising=False)
+    mod = importlib.reload(mod)
+    assert mod.brand_allowed("anything at all")
+    assert mod.brand_allowed("")
