@@ -5,10 +5,10 @@ permissions:
   issues: write
 
 on:
-  # PAUSED 2026-07-31 (Andy): nightly cycle disabled pending redesign.
-  # Re-enable by restoring the schedule block (slots: docs/NIGHTLY_SCHEDULE.md).
-  # schedule:
-  #   - cron: "0 14 * * *"
+  # No cron of its own: since 2026-08-10 (Andy approved the dry-run report)
+  # this runs as the FINAL leg of the nightly chain -- nightly-pipeline.yml's
+  # champro-csv step dispatches it, so it always fires after every vendor has
+  # restamped its feed heartbeats. Manual dispatch still works.
   workflow_dispatch:
     inputs:
       dry_run:
