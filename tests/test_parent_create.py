@@ -202,3 +202,27 @@ def test_unknown_colour_still_yields_no_images():
     style = _style(style="PC94", images_by_color={"Black": _imgs("bk")})
     p = _child_payload(style, _sku(color_name="Fuchsia"))
     assert p["shopImageUrl"] is None and p["swatchUrl"] is None
+
+
+# --- "already exists" is idempotency, not a failure
+
+def test_an_existing_child_combo_is_not_counted_as_a_failure():
+    # NetSuite rejects a matrix child whose (colour,size) combo is already
+    # present under the parent -- but that child EXISTS, under a different
+    # external id, so nothing is missing and a re-run cannot fix it. Counting
+    # it fatal failed a whole 300-style leg over 1 child in 4,103 and filed a
+    # nightly-failure issue (2026-08-10, run 31414844522).
+    from sanmar_parent_create import is_already_exists
+    assert is_already_exists(
+        "A child item child with that combination of options already exists")
+    assert is_already_exists("that COMBINATION OF OPTIONS ALREADY EXISTS")
+
+
+def test_every_other_restlet_error_stays_fatal():
+    from sanmar_parent_create import is_already_exists
+    assert not is_already_exists(
+        "Invalid Field Value 1331 for matrixoptioncustitem_bsg_color")
+    assert not is_already_exists("Invalid url. Url must start with http://")
+    assert not is_already_exists("colour 'Khaki/ Coffee' not in list")
+    assert not is_already_exists("")
+    assert not is_already_exists(None)

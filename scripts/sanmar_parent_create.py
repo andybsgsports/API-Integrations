@@ -295,6 +295,24 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
     }
 
 
+def is_already_exists(message: str | None) -> bool:
+    """Is this RESTlet error just "the child is already there"?
+
+    NetSuite rejects a matrix child whose (colour, size) combo already exists
+    under the parent -- but that child is present under a DIFFERENT external
+    id (an earlier import, or a create whose id convention has since changed),
+    so nothing is missing from the catalogue and re-running cannot fix it. It
+    is an idempotency no-op, not a failure, and counting it as one failed the
+    whole 300-style leg over 1 child in 4,103 and auto-filed a nightly-failure
+    issue (2026-08-10, run 31414844522, issue #107). The ramp will keep
+    meeting these as it walks the back catalogue.
+
+    Kept deliberately narrow: only this message. Every other RESTlet error --
+    a bad field, a retired option value, a rejected payload -- stays fatal.
+    """
+    return "combination of options already exists" in (message or "").lower()
+
+
 def main() -> int:
     cfg = get_config()
     allow_write = not cfg.sync.dry_run
@@ -325,6 +343,7 @@ def main() -> int:
     uom = _uom_ids(client)
 
     created_parents = created_children = skipped = failures = done = 0
+    already_exists = 0
     parent_refs: dict[str, dict] | None = None
     img_stats: dict[str, int] = {
         "children": 0, "front": 0, "none": 0,
@@ -488,6 +507,9 @@ def main() -> int:
                 continue
             for r in resp.get("results", []):
                 if r.get("status") == "error":
+                    if is_already_exists(r.get("message")):
+                        already_exists += 1
+                        continue
                     failures += 1
                     print(f"  CHILD FAILED {r.get('externalId')}: {r.get('message')}")
                 else:
@@ -530,7 +552,9 @@ def main() -> int:
                           "EPDD feed, not SDL)."))
     verb = "created" if allow_write else "WOULD create (dry run)"
     print(f"\nsanmar parent create: {verb} {created_parents} parent(s), "
-          f"{created_children} child(ren); skipped: {skipped}; failures: {failures}")
+          f"{created_children} child(ren); skipped: {skipped}; "
+          f"already present under another external id: {already_exists}; "
+          f"failures: {failures}")
     return 1 if failures else 0
 
 
