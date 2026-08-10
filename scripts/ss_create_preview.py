@@ -135,23 +135,38 @@ def _brand_key(name: str) -> str:
     return normalize_option_name(name)
 
 
-def brand_allowlist() -> set[str]:
-    """Brands creation is scoped to, from ``SS_CREATE_BRANDS`` (empty = all).
+#: ``SS_CREATE_BRANDS=CARRIED`` scopes creation to brands BSG already stocks.
+CARRIED = "CARRIED"
 
-    Andy, 2026-08-10: bring in specific brands rather than all 5,027 net-new
-    S&S styles (~3x the current SanMar catalogue). Names are compared with
-    the same punctuation/case-insensitive rule as option values, so
-    'Bella+Canvas' and 'BELLA + CANVAS' are one brand.
+
+def brand_allowlist(carried: Counter[str] | None = None) -> set[str]:
+    """Brands creation may touch, from ``SS_CREATE_BRANDS`` (empty = all).
+
+    Andy, 2026-08-10: specific brands rather than all 5,017 net-new S&S
+    styles (~3x the current SanMar catalogue), and specifically "all 36
+    brands we carry today". That is a RULE, not a list -- so ``CARRIED``
+    resolves it live from the catalogue each run rather than freezing 36
+    names that drift out of date the moment the catalogue moves. The
+    resolved set is printed every run, so a brand entering scope (because
+    some other vendor started stocking it) shows up in the log instead of
+    happening silently.
+
+    Names compare with the option-value rule, so 'Bella+Canvas' and
+    'BELLA + CANVAS' are one brand.
     """
     raw = os.environ.get("SS_CREATE_BRANDS", "")
-    return {_brand_key(b) for b in raw.split(",") if b.strip()}
+    wanted = [b.strip() for b in raw.split(",") if b.strip()]
+    out: set[str] = set()
+    for name in wanted:
+        if name.upper() == CARRIED:
+            out |= {b for b, n in (carried or Counter()).items() if n > 0}
+        else:
+            out.add(_brand_key(name))
+    return {_brand_key(b) for b in out}
 
 
-_ALLOWED = brand_allowlist()
-
-
-def brand_allowed(brand: str) -> bool:
-    return not _ALLOWED or _brand_key(brand) in _ALLOWED
+def brand_allowed(brand: str, allowed: set[str]) -> bool:
+    return not allowed or _brand_key(brand) in allowed
 
 
 def main() -> int:
@@ -228,6 +243,34 @@ def main() -> int:
         if key[0] and key[1]:
             combos.setdefault(str(r["parent"]), set()).add(key)
 
+    # -- who do we already stock? (must precede the filter) ------------------
+    # `carried` -- SKUs of that brand already in NetSuite -- is the demand
+    # signal, and with SS_CREATE_BRANDS=CARRIED it IS the allowlist, so it has
+    # to be counted before any SKU is filtered.
+    carried: Counter[str] = Counter()
+    for style, skus in styles.items():
+        pid = parent_refs.get(style)
+        have = combos.get(pid or "", set())
+        for p in skus:
+            brand = str(p.get("brand_name") or "").strip() or "(no brand)"
+            gtin = str(p.get("gtin") or "").strip()
+            if gtin and gtin in known_gtins:
+                carried[brand] += 1
+            elif pid is not None and combo_key(
+                    str(p.get("color_name") or "").strip(),
+                    str(p.get("size_name") or "").strip()) in have:
+                carried[brand] += 1
+
+    allowed = brand_allowlist(carried)
+    if allowed:
+        names = sorted(b for b in carried if _brand_key(b) in allowed)
+        extra = len(allowed) - len(names)
+        print(f"\ncreation scoped to {len(allowed)} brand(s): "
+              f"{', '.join(names)}"
+              + (f" (+{extra} not present in this feed)" if extra > 0 else ""))
+    else:
+        print("\nno brand filter set -- reporting every brand")
+
     # -- bucket every SKU ----------------------------------------------------
     exists_gtin = exists_combo = new_children = 0
     new_parent_rows = blocked_rows = filtered_rows = 0
@@ -236,10 +279,6 @@ def main() -> int:
     used_colors: set[str] = set()
     used_sizes: set[str] = set()
     child_rows: list[str] = []
-    # Per-brand tallies. `carried` -- SKUs of that brand already in NetSuite --
-    # is the demand signal: a brand we already stock deep is one we sell, and
-    # that is what picks the creation allowlist (Andy, 2026-08-10).
-    carried: Counter[str] = Counter()
     brand_new_skus: Counter[str] = Counter()
     brand_new_styles: dict[str, set[str]] = {}
 
@@ -251,16 +290,14 @@ def main() -> int:
             gtin = str(p.get("gtin") or "").strip()
             if gtin and gtin in known_gtins:
                 exists_gtin += 1
-                carried[brand] += 1
                 continue
             color = str(p.get("color_name") or "").strip()
             size = str(p.get("size_name") or "").strip()
             if pid is not None:
                 if combo_key(color, size) in have:
                     exists_combo += 1
-                    carried[brand] += 1
                     continue
-                if not brand_allowed(brand):
+                if not brand_allowed(brand, allowed):
                     filtered_rows += 1
                     continue
                 new_children += 1
@@ -274,7 +311,7 @@ def main() -> int:
                 )
             elif style in collisions:
                 blocked_rows += 1
-            elif not brand_allowed(brand):
+            elif not brand_allowed(brand, allowed):
                 filtered_rows += 1
                 brand_new_styles.setdefault(brand, set()).add(style)
                 brand_new_skus[brand] += 1
@@ -318,7 +355,7 @@ def main() -> int:
           f"across {len(collisions)} style(s)"
           + (f" ({', '.join(sorted(collisions)[:10])}"
              + ("..." if len(collisions) > 10 else "") + ")" if collisions else ""))
-    if _ALLOWED:
+    if allowed:
         print(f"FILTERED OUT (brand not on list)    : {filtered_rows:>7}  "
               f"(SS_CREATE_BRANDS scopes creation)")
     print(f"missing rows reference {len(used_colors)} distinct colour(s), "

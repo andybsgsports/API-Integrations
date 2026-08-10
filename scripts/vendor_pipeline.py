@@ -130,11 +130,12 @@ PIPELINE_GAPS = {
 }
 
 #: S&S creation is scoped to brands BSG actually sells, not the whole 5,455
-#: style catalogue (Andy, 2026-08-10: "specific brands... the most popular").
-#: Ranked by how deep NetSuite already stocks each brand -- the demand signal
-#: measured by the discover run, not a guess. Empty string = every brand.
+#: style catalogue (Andy, 2026-08-10: "specific brands", then "all 36 brands
+#: you carry today"). CARRIED resolves that live from the catalogue each run
+#: -- 36 frozen names would drift the moment the catalogue moves, and the
+#: discover run prints the resolved set so scope changes are visible.
 #: Override per run with SS_CREATE_BRANDS.
-SS_DEFAULT_BRANDS = ""
+SS_DEFAULT_BRANDS = "CARRIED"
 
 #: Vendor -> env the phase scripts expect (supplier selector, mostly).
 VENDOR_ENV: dict[str, dict[str, str]] = {
