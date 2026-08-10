@@ -33,7 +33,10 @@ from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "suitescript" / "store"
+# Repo directory the pushed paths are relative to. Default is the storefront
+# tree; FILE_PUSH_SRC=suitescript pushes RESTlet sources (e.g.
+# bsg_sanmar_matrix.js) anchored by that script's own id.
+SRC = ROOT / os.environ.get("FILE_PUSH_SRC", "suitescript/store")
 
 SCRIPT_ID = int(os.environ.get("FILE_PUSH_SCRIPT_ID", "2358") or "2358")
 FILES = [

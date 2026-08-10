@@ -27,20 +27,20 @@ from __future__ import annotations
 
 import csv
 import os
-import re
 from pathlib import Path
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.adopt import COLOR_LIST, SIZE_LIST, heuristic_abbrev
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.matrix_options import normalize_option_name as _norm
 from sanmar_netsuite.transform.sizes import normalize_size
 
 ROOT = Path(__file__).resolve().parents[1]
 
-
-def _norm(s: str) -> str:
-    """Collapse to letters+digits only, lowercased -- so 'J. Navy' == 'J.Navy'."""
-    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+# _norm is imported, not redefined: this pre-pass and the create path's
+# MatrixOptionResolver must share ONE definition of "same option value".
+# When they didn't, this script correctly refused to create 'J. Navy' as a
+# duplicate of 'J.Navy' and the resolver then created it anyway.
 
 
 def classify(

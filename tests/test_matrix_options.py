@@ -22,10 +22,18 @@ class FakeNS:
 
     def suiteql(self, query: str, **_kw):
         m = re.search(r"FROM (\w+) WHERE LOWER\(name\) = LOWER\('(.*)'\) ORDER BY", query)
-        assert m, f"unexpected query: {query}"
-        list_type, name = m.group(1), m.group(2)
-        idx = self.lists.get(list_type, {}).get(name.casefold())
-        return [{"id": idx}] if idx is not None else []
+        if m:
+            list_type, name = m.group(1), m.group(2)
+            idx = self.lists.get(list_type, {}).get(name.casefold())
+            return [{"id": idx}] if idx is not None else []
+        # Whole-list scan, used to spot punctuation variants of existing values
+        # before creating a near-duplicate (see normalize_option_name).
+        scan = re.search(r"FROM (\w+) ORDER BY", query)
+        assert scan, f"unexpected query: {query}"
+        return [
+            {"id": idx, "name": name, "isinactive": "F"}
+            for name, idx in self.lists.get(scan.group(1), {}).items()
+        ]
 
     def create_record(self, list_type: str, body: dict) -> str:
         self._next += 1

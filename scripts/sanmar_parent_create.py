@@ -25,9 +25,23 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from native_pricing import WEIGHT_UNIT_LB_ID, base_price, weight_display
+from pricing_ownership import VENDOR_SANMAR
+from sanmar_field_update import (
+    display_name_with_style,
+    sanmar_image_url,
+    store_description,
+    store_display_name,
+)
+
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
-from sanmar_netsuite.netsuite.matrix_options import COLOR_LIST, SIZE_LIST, MatrixOptionResolver
+from sanmar_netsuite.netsuite.matrix_options import (
+    COLOR_LIST,
+    SIZE_LIST,
+    MatrixOptionResolver,
+    normalize_option_name,
+)
 from sanmar_netsuite.netsuite.repository import _sql_escape, child_external_id
 from sanmar_netsuite.sanmar import constants as C
 from sanmar_netsuite.sanmar.parsers import parse_styles
@@ -96,9 +110,131 @@ def _resolve_feed(config) -> Path:
     return local if local.exists() else SanMarSftp(config.sftp).download(C.FILE_SDL_N)
 
 
-def _child_payload(style, sku) -> dict:
+_CLASS_IDS: dict[str, str | None] = {}
+
+
+def _class_id(client: NetSuiteClient, path: str) -> str | None:
+    """Internal id for a NetSuite Class path like 'Tops : Sweatshirts'.
+
+    SuiteQL's classification.fullname carries the whole path, so no
+    parent-filtered search is needed (same approach as
+    sanmar_department_class_fix.resolve_class_ids). Unmapped/unknown paths
+    resolve to None and the parent is simply created without a class.
+    """
+    if not path:
+        return None
+    if path not in _CLASS_IDS:
+        rows = client.suiteql(
+            f"SELECT id FROM classification WHERE fullname = '{_sql_escape(path)}'"
+        )
+        _CLASS_IDS[path] = str(rows[0]["id"]) if rows else None
+        if not rows:
+            print(f"  (class path {path!r} not found in NetSuite -- parent gets no class)")
+    return _CLASS_IDS[path]
+
+
+#: style -> {normalized colour name: ColorImages}, built once per style.
+_IMAGE_INDEX: dict[str, dict[str, object]] = {}
+
+
+def _images_for(style, color_name: str):
+    """The colour's images, tolerant of feed colour-name drift.
+
+    The SDL feed keys images by the colour string on the image row, which is
+    not always byte-identical to the SKU row's colour ('Black/ Red' vs
+    'Black/Red', stray padding, casing). An exact-only lookup silently drops
+    that colour's images on every child -- images missing at creation
+    (Andy, 2026-08-07). Exact match first, then the same
+    punctuation/case-insensitive key the matrix options use.
+    """
+    exact = style.images_by_color.get(color_name)
+    if exact is not None:
+        return exact
+    index = _IMAGE_INDEX.get(style.style)
+    if index is None:
+        index = {
+            normalize_option_name(name): imgs
+            for name, imgs in style.images_by_color.items()
+        }
+        _IMAGE_INDEX[style.style] = index
+    return index.get(normalize_option_name(color_name))
+
+
+def _uom_ids(client: NetSuiteClient) -> dict[str, str]:
+    """Units-of-measure internal ids for new items, copied from a live
+    reference item (item_uom_fix.py's proven approach -- never guessed).
+
+    Returns restlet payload keys -> ids: unitsTypeId / stockUnitId /
+    purchaseUnitId / saleUnitId. Empty when no reference resolves; creation
+    proceeds without units and item_uom_fix backfills.
+    """
+    ref_id = os.environ.get("UOM_REFERENCE_ID", "").strip()
+    try:
+        if not ref_id:
+            rows = client.suiteql(
+                "SELECT id FROM item WHERE matrixtype IN ('PARENT', 'CHILD') "
+                "AND unitstype IS NOT NULL AND rownum <= 1"
+            )
+            if not rows:
+                print("  (no UOM reference item found -- units left for item_uom_fix)")
+                return {}
+            ref_id = str(rows[0]["id"])
+        ref = client.get_record("inventoryItem", ref_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (UOM reference lookup failed: {str(exc)[:80]} -- units left blank)")
+        return {}
+    out: dict[str, str] = {}
+    for payload_key, field in (
+        ("unitsTypeId", "unitsType"), ("stockUnitId", "stockUnit"),
+        ("purchaseUnitId", "purchaseUnit"), ("saleUnitId", "saleUnit"),
+    ):
+        v = ref.get(field)
+        if isinstance(v, dict) and v.get("id") is not None:
+            out[payload_key] = str(v["id"])
+    print(f"  UOM ids from reference item {ref_id}: {out}")
+    return out
+
+
+def _child_payload(style, sku, resolver=None, uom=None) -> dict:
+    # Colour/size go to the RESTlet as NAMES it resolves by exact match, so a
+    # punctuation variant of an existing list value must be sent as the LIST's
+    # spelling -- 'Khaki/ Coffee' was rejected with "not in
+    # customlist_bsg_matrix_color" while 'Khaki/Coffee' sat on the list
+    # (live pilot retry, run 31036109523).
     color = sku.color_name
     size = normalize_size(sku.size)
+    if resolver is not None:
+        color = resolver.canonical_name(COLOR_LIST, color)
+        size = resolver.canonical_name(SIZE_LIST, size)
+    # Native pricing at BIRTH must match the rules the nightly update phase
+    # applies, or every created item is immediately wrong and waits for a
+    # correction pass. Two rules were out of step here:
+    #   * Base Price is the higher of MAP and MSRP -- not MSRP alone, which
+    #     under-priced every no-MSRP / MAP-only SKU.
+    #   * Cost is the CASE price (SanMar's by-the-case unit price), falling
+    #     back to the single-piece price -- piece price runs ~$1 higher and is
+    #     exactly what made Purchase Price read too high (see the note in
+    #     sanmar_field_update.build_payloads).
+    # Sale-aware cost and the On Sale flag need the dip feed's sale windows,
+    # which this phase doesn't load; the update phase runs minutes later in the
+    # same vendor pipeline and applies them.
+    regular_cost = sku.case_price if sku.case_price is not None else sku.piece_price
+    weight_lb, _weight_unit = weight_display(
+        None if sku.piece_weight is None else float(sku.piece_weight)
+    )
+    # Andy's spec (2026-08-05 pilot review): Display Name keeps the style code
+    # ("Richardson Printed Five-Panel Trucker 112PFP"); Sales/Purchase
+    # Description carry the same title WITHOUT the code. The long marketing
+    # copy goes to the PARENT's Store Description only (children silently
+    # discard store fields, proven live 2026-07-29).
+    clean_title = store_display_name(style.title, style.style)
+    named_title = display_name_with_style(style.title, style.style)
+    # Per-colour feed images (Andy, 2026-08-05: included at creation).
+    # primary_url() is the FRONT view -> the storefront's searchable image
+    # column; back_url() -> custitem_sanmar_front_image_url, which despite its
+    # name holds the BACK view (the true front lives on the atlas Image field,
+    # populated by the atlas back-fill from the File Cabinet).
+    images = _images_for(style, sku.color_name)
     return {
         "externalId": child_external_id(sku.unique_key),
         "itemId": f"{style.style}-{color}-{size}",
@@ -107,17 +243,52 @@ def _child_payload(style, sku) -> dict:
         "size": size,
         "vendorName": style.style,
         "upc": sku.gtin,
-        "cost": None if sku.piece_price is None else float(sku.piece_price),
-        "basePrice": None if sku.msrp is None else float(sku.msrp),
-        "displayName": style.title[:60],
-        "description": sku.description or style.description,
+        "cost": None if regular_cost is None else float(regular_cost),
+        "basePrice": base_price(
+            None if sku.msrp is None else float(sku.msrp),
+            None if sku.map_price is None else float(sku.map_price),
+        ),
+        "weight": weight_lb,
+        # Weight unit rides with the number and is always pounds -- one
+        # consistent unit across the catalogue (see native_pricing).
+        "weightUnitId": None if weight_lb is None else WEIGHT_UNIT_LB_ID,
+        # Seed the Vendors sublist with SanMar as Preferred -- pricing
+        # ownership reads this flag, and an item born without it has no
+        # pricing owner until vendor_sublist.py runs.
+        "preferredVendorId": str(VENDOR_SANMAR),
+        # Every view the feed carries (Andy, 2026-08-05: multiple images) --
+        # front to the storefront column, back plus the flats and swatch to
+        # their own URL fields. A side view only exists in SanMar's web
+        # service, not the file feed.
+        # sanmar_image_url on every view: URL-type fields reject relative
+        # paths and the whole record dies with them (the 2026-08-05
+        # zero-write night).
+        "shopImageUrl": sanmar_image_url(images.primary_url()) if images else None,
+        "backImageUrl": sanmar_image_url(images.back_url()) if images else None,
+        "frontFlatUrl": sanmar_image_url(images.front_flat_url) if images else None,
+        "backFlatUrl": sanmar_image_url(images.back_flat_url) if images else None,
+        "swatchUrl": sanmar_image_url(images.color_swatch_url) if images else None,
+        **(uom or {}),
+        "displayName": named_title[:60],
+        "description": clean_title,
         "incomeAccount": DEFAULT_INCOME_ACCOUNT,
         "cogsAccount": DEFAULT_COGS_ACCOUNT,
         "assetAccount": DEFAULT_ASSET_ACCOUNT,
         "taxSchedule": DEFAULT_TAX_SCHEDULE,
         "subsidiary": DEFAULT_SUBSIDIARY,
         "department": DEFAULT_DEPARTMENT,
-        "class": class_for_category(style.category),
+        # NO "class" here, deliberately. The RESTlet resolves a "Parent :
+        # Child" class path with a classification search filtered on
+        # ["parent", "anyof", ...], which this account rejects ("An
+        # nlobjSearchFilter contains invalid search criteria: parent."), and
+        # one bad field kills the whole child create -- that is exactly how
+        # 112FPC/112PFP ended up as childless parents in the live pilot (runs
+        # 30954100322 / 31036109523; the three styles that DID create children
+        # all had unmapped categories, so class was "" and the search never
+        # ran). Class is set on the PARENT instead (resolved to an internal id
+        # by SuiteQL fullname -- no RESTlet search involved), and
+        # sanmar_child_finalize.py copies it down to children afterwards,
+        # which is that script's whole job.
         "location": DEFAULT_LOCATION,
         "preferredLocation": DEFAULT_LOCATION,
         "costingMethod": "AVG",
@@ -129,6 +300,13 @@ def main() -> int:
     allow_write = not cfg.sync.dry_run
     max_styles = int(os.environ.get("CREATE_MAX_STYLES", "0") or "0")
     max_children = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
+    refresh_existing = (
+        os.environ.get("CREATE_REFRESH_STYLES", "").strip().lower()
+        in ("1", "true", "yes")
+    )
+    if refresh_existing:
+        print("CREATE_REFRESH_STYLES on: existing children will be re-posted "
+              "(RESTlet update path), not skipped")
 
     candidates_file = ROOT / "data" / "sanmar_new_parents.txt"
     if not candidates_file.exists():
@@ -144,9 +322,15 @@ def main() -> int:
     # Create-capable option resolver: any colour/size the pilot needs but the
     # matrix lists don't carry is created inline (live) or reported (dry).
     resolver = MatrixOptionResolver(client=client, allow_create=allow_write)
+    uom = _uom_ids(client)
 
     created_parents = created_children = skipped = failures = done = 0
     parent_refs: dict[str, dict] | None = None
+    img_stats: dict[str, int] = {
+        "children": 0, "front": 0, "none": 0,
+        "backImageUrl": 0, "frontFlatUrl": 0, "backFlatUrl": 0, "swatchUrl": 0,
+    }
+    no_image_sample: list[str] = []
 
     for style_name in candidates:
         if max_styles and done >= max_styles:
@@ -156,13 +340,18 @@ def main() -> int:
             skipped += 1
             continue
         # Defensive: skip if it already has children; reuse a childless parent.
+        # CREATE_REFRESH_STYLES=true re-posts existing children instead of
+        # skipping -- the RESTlet's externalId update path re-applies the
+        # payload, which is how a payload-schema fix (like the 2026-08-05
+        # field spec) reaches items created before it.
         safe = _sql_escape(style_name)
         existing = client.suiteql(
             f"SELECT id, itemid FROM item WHERE vendorname = '{safe}' OR itemid = '{safe}'"
         )
         if any(str(r.get("itemid") or "").strip() != style_name for r in existing):
-            skipped += 1
-            continue
+            if not refresh_existing:
+                skipped += 1
+                continue
         existing_parent_id = next(
             (str(r["id"]) for r in existing
              if str(r.get("itemid") or "").strip() == style_name), None,
@@ -188,15 +377,76 @@ def main() -> int:
             created_children += len(style.skus)
             continue
 
+        clean_title = store_display_name(style.title, style.style)
+        named_title = display_name_with_style(style.title, style.style)
         if existing_parent_id:
             print(f"  parent already exists: id {existing_parent_id} (reusing)")
+            if refresh_existing:
+                # Bring an already-created parent up to the current field spec
+                # too -- children go through the RESTlet update path, but the
+                # parent body only applies at creation, which left the pilot
+                # parents behind on names/store fields/class/units.
+                patch: dict[str, object] = {
+                    "displayName": named_title[:60],
+                    "salesDescription": clean_title,
+                    "purchaseDescription": clean_title,
+                    "storeDisplayName": named_title,
+                    "storeDescription": store_description(
+                        style.available_sizes, style.description
+                    ),
+                }
+                for rest_field, uom_key in (
+                    ("unitsType", "unitsTypeId"), ("stockUnit", "stockUnitId"),
+                    ("purchaseUnit", "purchaseUnitId"), ("saleUnit", "saleUnitId"),
+                ):
+                    if (uom or {}).get(uom_key):
+                        patch[rest_field] = {"id": uom[uom_key]}
+                cid = _class_id(client, class_for_category(style.category))
+                if cid:
+                    patch["class"] = {"id": cid}
+                try:
+                    client.update_record("inventoryItem", existing_parent_id, patch)
+                    print(f"  parent {existing_parent_id} refreshed to current spec")
+                except Exception as exc:  # noqa: BLE001
+                    failures += 1
+                    print(f"  PARENT REFRESH FAILED {style_name}: {str(exc)[:150]}")
         else:
             if parent_refs is None:
                 parent_refs = resolve_parent_refs(client)
             body = {
                 "itemId": style_name, "vendorName": style_name, "matrixType": "PARENT",
-                "isInactive": False, "displayName": style.title[:60], **parent_refs,
+                # Active in NetSuite immediately, but NOT on the storefront
+                # (Andy, 2026-07-31): nothing reaches the web store unreviewed.
+                # item_web_display_fix.py turns isOnline on once an item has a
+                # real image.
+                "isInactive": False, "isOnline": False,
+                # Andy's spec (2026-08-05): name fields keep the style code,
+                # description fields drop it, and the marketing copy goes ONLY
+                # to Store Description. Store fields live on the PARENT -- the
+                # web-store product page -- because NetSuite silently discards
+                # them on matrix children.
+                "displayName": named_title[:60],
+                "salesDescription": clean_title,
+                "purchaseDescription": clean_title,
+                "storeDisplayName": named_title,
+                "storeDescription": store_description(
+                    style.available_sizes, style.description
+                ),
+                **{k: {"id": v} for k, v in {
+                    "unitsType": (uom or {}).get("unitsTypeId", ""),
+                    "stockUnit": (uom or {}).get("stockUnitId", ""),
+                    "purchaseUnit": (uom or {}).get("purchaseUnitId", ""),
+                    "saleUnit": (uom or {}).get("saleUnitId", ""),
+                }.items() if v},
+                **parent_refs,
             }
+            # Class lives on the PARENT (children copy it via
+            # sanmar_child_finalize) -- resolved here by SuiteQL fullname, the
+            # one class-path lookup this account provably supports. See the
+            # note in _child_payload for why the RESTlet must not do it.
+            class_id = _class_id(client, class_for_category(style.category))
+            if class_id:
+                body["class"] = {"id": class_id}
             try:
                 pid = client.create_record("inventoryItem", body)
                 created_parents += 1
@@ -207,7 +457,22 @@ def main() -> int:
                       f":: {str(getattr(exc, 'payload', ''))[:300]}")
                 continue
 
-        payloads = [_child_payload(style, sku) for sku in style.skus]
+        payloads = [_child_payload(style, sku, resolver, uom) for sku in style.skus]
+        # Image coverage, per style and in total. Missing images at creation
+        # are invisible unless counted -- the feed genuinely carries fewer
+        # flats/swatches than model shots, so "not all 5" is often the FEED,
+        # not a bug; this separates the two (Andy, 2026-08-07).
+        for p in payloads:
+            img_stats["children"] += 1
+            if p.get("shopImageUrl"):
+                img_stats["front"] += 1
+            else:
+                img_stats["none"] += 1
+                if len(no_image_sample) < 5:
+                    no_image_sample.append(p["itemId"])
+            for key in ("backImageUrl", "frontFlatUrl", "backFlatUrl", "swatchUrl"):
+                if p.get(key):
+                    img_stats[key] += 1
         if max_children:
             payloads = payloads[: max(0, max_children - created_children)]
         for i in range(0, len(payloads), RESTLET_BATCH):
@@ -228,6 +493,41 @@ def main() -> int:
                 else:
                     created_children += 1
 
+    n = img_stats["children"]
+    if n:
+        pct = lambda k: f"{img_stats[k]:,} ({100.0 * img_stats[k] / n:.0f}%)"  # noqa: E731
+        print(f"\nimage coverage across {n:,} child payload(s): "
+              f"front {pct('front')}; back {pct('backImageUrl')}; "
+              f"front-flat {pct('frontFlatUrl')}; back-flat {pct('backFlatUrl')}; "
+              f"swatch {pct('swatchUrl')}")
+        if img_stats["none"]:
+            print(f"  {img_stats['none']:,} child(ren) had NO feed image for "
+                  f"their colour, e.g. {no_image_sample}")
+        # A view at exactly 0% is never a per-colour gap -- the other views
+        # vary (100/97/94/93%), so a flat zero means the feed column is absent
+        # or empty, not that our write dropped it. Show the raw values so the
+        # difference is provable rather than argued (swatch read 0% on
+        # 2026-08-08, run 31240077499).
+        for view, attr in (("swatch", "color_swatch_url"),
+                           ("front-flat", "front_flat_url"),
+                           ("back-flat", "back_flat_url")):
+            key = {"swatch": "swatchUrl", "front-flat": "frontFlatUrl",
+                   "back-flat": "backFlatUrl"}[view]
+            if img_stats[key]:
+                continue
+            raw = [
+                getattr(i, attr, "")
+                for s in by_style.values()
+                for i in s.images_by_color.values()
+            ]
+            non_empty = [r for r in raw if str(r).strip()]
+            print(f"  NOTE: {view} landed on 0 children. Feed carried "
+                  f"{len(non_empty):,} non-empty {attr} value(s) across "
+                  f"{len(raw):,} colour rows"
+                  + (f"; sample: {non_empty[:3]}" if non_empty
+                     else " -- the feed column is absent or empty, so there is "
+                          "nothing to write (SanMar publishes swatches in the "
+                          "EPDD feed, not SDL)."))
     verb = "created" if allow_write else "WOULD create (dry run)"
     print(f"\nsanmar parent create: {verb} {created_parents} parent(s), "
           f"{created_children} child(ren); skipped: {skipped}; failures: {failures}")

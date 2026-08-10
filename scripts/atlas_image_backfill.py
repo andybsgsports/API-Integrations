@@ -30,6 +30,7 @@ from urllib.request import Request, urlopen
 from concurrent_writes import write_records
 from dcos_backfill import SUPPLIERS as DCOS_SUPPLIERS
 from dcos_backfill import get_sellable_styles, get_style_images
+from run_status import exit_code
 
 from momentec_netsuite.config import get_config as mtec_config
 from momentec_netsuite.feeds import parse_product_data
@@ -260,17 +261,36 @@ def main() -> int:
     items = client.suiteql(f"SELECT id, {key_cols}, {FIELD} FROM item WHERE {where}")
     print(f"supplier-matched items: {len(items):,}")
 
+    # Every source is OPTIONAL: an unavailable feed (the S&S products.json
+    # snapshot only exists on S&S runs; a DCOS credential can be absent) must
+    # cost that source's images, not the run -- items whose best source was
+    # skipped just stay imageless until a run where it's available. The
+    # unconditional loader() here crashed the first in-pipeline run
+    # (2026-08-05, run 31046102022) on the missing S&S snapshot.
     url_by_field: dict[str, dict[str, str]] = {}
     for field, loader in SOURCES:
-        url_by_field[field] = loader()
-        print(f"{field}: images for {len(url_by_field[field]):,} feed SKUs")
+        try:
+            url_by_field[field] = loader()
+            print(f"{field}: images for {len(url_by_field[field]):,} feed SKUs")
+        except Exception as exc:  # noqa: BLE001
+            url_by_field[field] = {}
+            print(f"{field}: source unavailable, skipping ({str(exc)[:100]})")
     for field, base, style_field in DCOS_IMAGE_SUPPLIERS:
-        url_by_field[field] = dcos_image_map(
-            client, base, style_field, field, key_id, key_pw)
-        print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts")
+        try:
+            url_by_field[field] = dcos_image_map(
+                client, base, style_field, field, key_id, key_pw)
+            print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts")
+        except Exception as exc:  # noqa: BLE001
+            url_by_field[field] = {}
+            print(f"{field}: source unavailable, skipping ({str(exc)[:100]})")
     for field, base in DCOS_PART_IMAGE_SUPPLIERS:
-        url_by_field[field] = dcos_image_map_by_part(client, base, field, key_id, key_pw)
-        print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts (by part)")
+        try:
+            url_by_field[field] = dcos_image_map_by_part(
+                client, base, field, key_id, key_pw)
+            print(f"{field}: images for {len(url_by_field[field]):,} DCOS parts (by part)")
+        except Exception as exc:  # noqa: BLE001
+            url_by_field[field] = {}
+            print(f"{field}: source unavailable, skipping ({str(exc)[:100]})")
 
     folder_id = _resolve_folder_id(client, cfg, allow_write)
     print(f"using File Cabinet folder id {folder_id}")
@@ -327,9 +347,12 @@ def main() -> int:
     # PATCHes are independent per item -- issue them with bounded concurrency
     # instead of one-at-a-time, which is throttle-bound and can run for hours.
     _fail_shown = [0]
+    _fail_other = [0]
 
     def _on_err(rid: str, exc: Exception) -> None:
         _fail_shown[0] += 1
+        if "429" not in str(exc):
+            _fail_other[0] += 1
         if _fail_shown[0] <= 10:
             detail = getattr(exc, "payload", "")
             print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:200]}")
@@ -345,7 +368,12 @@ def main() -> int:
         f"no feed image: {nourl}; upload failures: {upload_failures}; "
         f"write failures: {failures}"
     )
-    return 1 if (failures or upload_failures) else 0
+    # An upload failure is never transient throttling (the File Cabinet SOAP
+    # path has its own error modes), so it stays fatal on its own.
+    if upload_failures:
+        return 1
+    return exit_code("atlas image backfill", failures, _fail_other[0],
+                     written + failures)
 
 
 if __name__ == "__main__":

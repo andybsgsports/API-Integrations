@@ -24,6 +24,7 @@ from native_pricing import (
     base_price,
     read_base_prices,
 )
+from pricing_ownership import VENDOR_MOMENTEC, owns_pricing, read_preferred
 
 from momentec_netsuite.adopt import match_momentec
 from momentec_netsuite.config import get_config
@@ -270,14 +271,19 @@ def main() -> int:
               f"read+write for these (create them, then re-run): {missing}")
     cols = ", ".join(present + SEEN_FIELDS)
     considered = written = unchanged = upc_filled = priced = failures = 0
+    deferred = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         rows = client.suiteql(
+            # custitem_sanmar_style feeds the pricing-ownership ranking
+            # fallback (SanMar outranks Momentec).
             f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
-            f"custitem_ss_brand, {cols} FROM item WHERE id IN ({in_list})"
+            f"custitem_ss_brand, custitem_sanmar_style, {cols} "
+            f"FROM item WHERE id IN ({in_list})"
         )
         base_by_rid = read_base_prices(client, in_list)
+        pref_by_rid = read_preferred(client, in_list)
         for row in rows:
             rid = str(row["id"])
             match = by_item.get(rid)
@@ -318,15 +324,21 @@ def main() -> int:
                 del body["manufacturer"]
             if not str(row.get("upccode") or "").strip() and sku.gtin:
                 body["upcCode"] = sku.gtin
-            weight_lb, weight_unit = _weight_lb(sku.weight, sku.weight_unit)
-            add_native_diffs(
-                body, row, base_by_rid, rid,
-                # Base Price = higher of MAP and MSRP; the ASG feed
-                # carries no MAP, so MSRP stands alone here.
-                price=base_price(_num(sku.msrp)), cost=net_cost,
-                weight=weight_lb, weight_unit=weight_unit,
-                same=_same,
-            )
+            # Native price/cost/weight belong to the item's Preferred
+            # Vendor -- see pricing_ownership.py.
+            owner = owns_pricing(VENDOR_MOMENTEC, pref_by_rid.get(rid), row)
+            if owner:
+                weight_lb, weight_unit = _weight_lb(sku.weight, sku.weight_unit)
+                add_native_diffs(
+                    body, row, base_by_rid, rid,
+                    # Base Price = higher of MAP and MSRP; the ASG feed
+                    # carries no MAP, so MSRP stands alone here.
+                    price=base_price(_num(sku.msrp)), cost=net_cost,
+                    weight=weight_lb, weight_unit=weight_unit,
+                    same=_same,
+                )
+            else:
+                deferred += 1
             # Closeout checkbox from the feed Ribbon -- explicit boolean diff
             # (NetSuite returns T/F, which _same can't compare to a bool).
             if CLOSEOUT_FIELD in present:
@@ -335,7 +347,7 @@ def main() -> int:
                     "T", "TRUE", "YES", "1")
                 if cur_co != closeout:
                     body[CLOSEOUT_FIELD] = closeout
-            stamp(body, row, "momentec")
+            stamp(body, row, "momentec", claim_source=owner)
             if not body:
                 unchanged += 1
                 continue
@@ -368,7 +380,8 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nmomentec backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
-          f"price/cost/weight updated: {priced}; failures: {failures}")
+          f"price/cost/weight updated: {priced}; "
+          f"deferred to Preferred Vendor: {deferred}; failures: {failures}")
     return 1 if failures else 0
 
 

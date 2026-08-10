@@ -132,8 +132,13 @@ def resolve_parent_refs(client: NetSuiteClient) -> dict[str, dict]:
 def main() -> int:
     key = (os.environ.get("DCOS_SUPPLIER") or "").strip().lower()
     if key not in CREATE_ENABLED:
-        print(f"supplier {key!r} is not create-enabled (pilot: {sorted(CREATE_ENABLED)})")
-        return 1
+        # A no-op, not a failure: the nightly chain runs this phase for every
+        # DCOS supplier, and most are deliberately update-only. Returning 1
+        # here failed the whole dcos leg and filed an issue (#99) on a run
+        # whose update wrote 72 items with zero failures.
+        print(f"supplier {key!r} is not create-enabled "
+              f"(pilot: {sorted(CREATE_ENABLED)}) -- nothing to create")
+        return 0
     sup = SUPPLIERS[key]
     cfg = get_config()
     allow_write = not cfg.sync.dry_run

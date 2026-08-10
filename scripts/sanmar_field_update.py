@@ -25,6 +25,8 @@ from native_pricing import (
     read_base_prices,
     weight_display,
 )
+from pricing_ownership import VENDOR_SANMAR, owns_pricing, read_preferred
+from run_status import exit_code
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -103,6 +105,39 @@ CLOSEOUT_FIELD = os.environ.get(
 SHOP_IMAGE_FIELD = os.environ.get(
     "SANMAR_SHOP_IMAGE_FIELD", "custitem_bsgshop_image_url"
 ).strip()
+
+# The remaining per-colour views from the feed (Andy, 2026-08-05: multiple
+# images per item) -- field scriptid -> ColorImages attribute. Self-enabling
+# like the shop-image field: each is written only once it exists in NetSuite
+# (created by ns_field_setup.py).
+VIEW_IMAGE_FIELDS = {
+    "custitem_sanmar_front_flat_url": "front_flat_url",
+    "custitem_sanmar_back_flat_url": "back_flat_url",
+    "custitem_sanmar_swatch_url": "color_swatch_url",
+}
+
+SANMAR_CDN_BASE = "https://cdnm.sanmar.com/"
+
+
+def sanmar_image_url(value: str | None) -> str | None:
+    """A value NetSuite's URL-type fields will accept, or None to skip.
+
+    The feed's model-view URLs are absolute, but the flat/swatch columns can
+    carry CDN-relative paths -- and a URL field rejects those with "Invalid
+    url. Url must start with http://...", an error that names NO field, so the
+    drop-and-retry salvage can't identify the offender and the WHOLE record
+    PATCH dies. That failed all 45,239 matched items on 2026-08-05 (run
+    31046102022, "wrote 0"). Relative paths get the SanMar CDN base; a bare
+    token with no path separator is feed junk we skip rather than guess at.
+    """
+    v = (value or "").strip()
+    if not v:
+        return None
+    if v.startswith(("http://", "https://")):
+        return v
+    if "/" in v:
+        return SANMAR_CDN_BASE + v.lstrip("/")
+    return None
 
 # NOTE: we deliberately do NOT write NetSuite's native Stock Description.
 # It is a legacy field hard-capped at 21 characters -- far too short for the
@@ -197,9 +232,9 @@ def store_display_name(title: str, style: str) -> str:
     """Clean product name = the feed title with any status prefix and trailing
     style number stripped, Title-cased if it arrived ALL CAPS.
 
-    This deliberately mirrors ``description_update._polish_name`` so the web
-    Store Display Name matches the item's Display Name / Description exactly
-    (those are set from the same feed title by the description-update job)."""
+    This is the DESCRIPTION-field form (Sales/Purchase Description carry the
+    name without the style code -- Andy, 2026-08-05); the name fields that
+    show the code use :func:`display_name_with_style`."""
     name = _STATUS_PREFIX.sub("", _clean(title))
     if style:
         name = re.sub(rf"[\s.,-]*{re.escape(style)}[\s.]*$", "", name, flags=re.I)
@@ -207,6 +242,17 @@ def store_display_name(title: str, style: str) -> str:
     if name.isupper():
         name = name.title()
     return name
+
+
+def display_name_with_style(title: str, style: str) -> str:
+    """Display Name / Store Display Name form: clean title WITH the style code
+    ("Richardson Printed Five-Panel Trucker 112PFP") -- Andy, 2026-08-05.
+
+    Built from the cleaned name rather than the raw title so status prefixes
+    and ALL-CAPS still get polished, and the code lands exactly once at the
+    end regardless of how the feed spelled the title."""
+    name = store_display_name(title, style)
+    return f"{name} {style}".strip() if style else name
 
 
 def sync_store_fields_to_parents(
@@ -231,7 +277,9 @@ def sync_store_fields_to_parents(
     """
     want_by_style = {
         s.style: (
-            store_display_name(s.title, s.style),
+            # Store Display Name keeps the style code (Andy, 2026-08-05) --
+            # same form creation uses, so the nightly never rewrites it.
+            display_name_with_style(s.title, s.style),
             store_description(s.available_sizes, s.description),
         )
         for s in styles if s.style
@@ -313,7 +361,7 @@ def store_description(available_sizes: str, description: str) -> str:
 
 def build_payloads(
     styles, inventory, today: date | None = None, on_sale_field: str = "",
-    shop_image_field: str = "",
+    shop_image_field: str = "", view_image_fields: dict[str, str] | None = None,
 ) -> tuple[
     dict[str, dict[str, object]], dict[str, tuple], dict[str, tuple], dict[str, bool]
 ]:
@@ -412,14 +460,23 @@ def build_payloads(
             # Despite its name, this field holds the BACK-view URL: the front
             # image lives on custitem_atlas_item_image (the real NetSuite
             # Image-type field) instead.
-            put("custitem_sanmar_front_image_url", images.back_url() if images else None)
+            put("custitem_sanmar_front_image_url",
+                sanmar_image_url(images.back_url()) if images else None)
             # The storefront's searchable "best image" column: the FRONT view,
             # per color, straight from the feed. Unlike the atlas Image field
             # (unusable as a search column) this lets the store's catalog and
             # per-color swap read this SKU's photo with no record loads. put()
             # skips blanks, so an existing value is never cleared.
             if shop_image_field:
-                put(shop_image_field, images.primary_url() if images else None)
+                put(shop_image_field,
+                    sanmar_image_url(images.primary_url()) if images else None)
+            # The remaining feed views (front/back flat, swatch) -- multiple
+            # images per item (Andy, 2026-08-05). ALWAYS through
+            # sanmar_image_url: these are URL-type fields and a relative path
+            # kills the whole record PATCH (the 2026-08-05 zero-write night).
+            for field, attr in (view_image_fields or {}).items():
+                put(field,
+                    sanmar_image_url(getattr(images, attr, "")) if images else None)
             put("manufacturer", style.brand)  # native Manufacturer = Brand (MILL)
             if entry:
                 payloads[sku.gtin] = entry
@@ -484,9 +541,14 @@ def main() -> int:
     )
     if shop_image_field:
         print(f"shop image field active: {shop_image_field}")
+    view_image_fields = {
+        f: attr for f, attr in VIEW_IMAGE_FIELDS.items() if _field_exists(client, f)
+    }
+    if view_image_fields:
+        print(f"view image fields active: {sorted(view_image_fields)}")
     payloads, natives, _store_by_gtin, closeout_by_gtin = build_payloads(
         styles, inventory, on_sale_field=on_sale_field,
-        shop_image_field=shop_image_field,
+        shop_image_field=shop_image_field, view_image_fields=view_image_fields,
     )
     print(f"feed SKUs with GTIN: {len(payloads):,}")
     if closeout_field:
@@ -504,13 +566,18 @@ def main() -> int:
         FIELD_ORDER + SEEN_FIELDS + store_cols
         + ([closeout_field] if closeout_field else [])
         + ([shop_image_field] if shop_image_field else [])
+        + sorted(view_image_fields)
     )
     gtins = sorted(payloads)
-    considered = written = unchanged = priced = failures = 0
+    considered = written = unchanged = priced = failures = deferred = 0
     _fail_shown = [0]
+
+    _fail_other = [0]
 
     def _on_err(rid: str, exc: Exception) -> None:
         _fail_shown[0] += 1
+        if "429" not in str(exc):
+            _fail_other[0] += 1
         if _fail_shown[0] <= 10:
             detail = getattr(exc, "payload", "")
             print(f"  FAILED item {rid}: {str(exc)[:150]} :: {str(detail)[:300]}")
@@ -536,6 +603,7 @@ def main() -> int:
             continue
         id_list = ", ".join(str(int(r["id"])) for r in rows) or "0"
         base_by_rid = read_base_prices(client, id_list)
+        pref_by_rid = read_preferred(client, id_list)
         write_jobs: list[tuple[str, dict]] = []
         for row in rows:
             gtin = str(row.get("upccode") or "")
@@ -548,11 +616,24 @@ def main() -> int:
             # S&S brand wins the Manufacturer field on multi-vendor items.
             if "manufacturer" in body and str(row.get("custitem_ss_brand") or "").strip():
                 del body["manufacturer"]
-            price, cost, weight, weight_unit = natives.get(gtin, (None, None, None, None))
-            add_native_diffs(
-                body, row, base_by_rid, str(row["id"]),
-                price=price, cost=cost, weight=weight, weight_unit=weight_unit, same=_same,
+            # Native price/cost/weight (and the shared On Sale flag) belong to
+            # the item's Preferred Vendor -- see pricing_ownership.py.
+            owner = owns_pricing(
+                VENDOR_SANMAR, pref_by_rid.get(str(row["id"])), row
             )
+            if owner:
+                price, cost, weight, weight_unit = natives.get(
+                    gtin, (None, None, None, None)
+                )
+                add_native_diffs(
+                    body, row, base_by_rid, str(row["id"]),
+                    price=price, cost=cost, weight=weight,
+                    weight_unit=weight_unit, same=_same,
+                )
+            else:
+                deferred += 1
+                if on_sale_field:
+                    body.pop(on_sale_field, None)
             # Store Display Name / Description are NOT written here: NetSuite
             # accepts them on a matrix child and silently discards the value.
             # sync_store_fields_to_parents() writes them on the parents, where
@@ -566,7 +647,7 @@ def main() -> int:
                 want_co = closeout_by_gtin.get(gtin, False)
                 if cur_co != want_co:
                     body[closeout_field] = want_co
-            stamp(body, row, "sanmar")
+            stamp(body, row, "sanmar", claim_source=owner)
             if not body:
                 unchanged += 1
                 continue
@@ -620,8 +701,10 @@ def main() -> int:
     verb = "wrote" if allow_write else "WOULD write (dry run)"
     print(f"\nsanmar field update: {verb} {written} item(s); "
           f"unchanged: {unchanged}; price/cost/weight updated: {priced}; "
+          f"deferred to Preferred Vendor: {deferred}; "
           f"failures: {failures}; chunks skipped: {chunks_skipped}")
-    return 1 if (failures or chunks_skipped) else 0
+    return exit_code("sanmar field update", failures, _fail_other[0],
+                     written + failures, chunks_skipped)
 
 
 if __name__ == "__main__":

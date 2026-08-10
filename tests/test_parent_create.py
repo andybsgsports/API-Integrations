@@ -18,19 +18,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from sanmar_parent_create import _child_payload  # noqa: E402
 
 
-def _style():
-    return SimpleNamespace(
+def _style(**over):
+    base = dict(
         style="PC90", title="Port & Company Essential Fleece Crewneck. PC90",
         description="A sturdy fleece.", category="Sweatshirts/Fleece",
+        images_by_color={},
     )
+    base.update(over)
+    return SimpleNamespace(**base)
 
 
-def _sku():
-    return SimpleNamespace(
+def _sku(**over):
+    """A feed SKU carrying every field the payload reads (mirrors SkuRecord)."""
+    base = dict(
         unique_key="ABC123", color_name="Jet Black", size="XL",
-        gtin="00845235100010", piece_price=Decimal("9.42"), msrp=Decimal("21.99"),
+        gtin="00845235100010", piece_price=Decimal("9.42"),
+        case_price=Decimal("8.51"), msrp=Decimal("21.99"),
+        map_price=Decimal("23.99"), piece_weight=Decimal("1.4"),
         description="",
     )
+    base.update(over)
+    return SimpleNamespace(**base)
 
 
 def test_child_payload_carries_matrix_keys_and_upc():
@@ -41,12 +49,156 @@ def test_child_payload_carries_matrix_keys_and_upc():
     assert p["color"] == "Jet Black"
     assert p["size"] == "X-Large"
     assert p["upc"] == "00845235100010"              # so Field Update can match it
-    assert p["cost"] == 9.42
-    assert p["basePrice"] == 21.99
     assert p["vendorName"] == "PC90"
-    assert p["class"] == "Tops : Sweatshirts"        # mapped from category
 
 
-def test_child_payload_falls_back_to_style_description():
+def test_child_payload_sends_no_class():
+    # The RESTlet's "Parent : Child" class search crashes on this account
+    # ("invalid search criteria: parent"), killing the whole child create --
+    # the childless-parent bug from the live pilot (runs 30954100322 /
+    # 31036109523). Class goes on the PARENT; child_finalize copies it down.
+    assert "class" not in _child_payload(_style(), _sku())
+
+
+class _CanonResolver:
+    """Resolver stub: knows the list spells it 'Jet.Black' / 'X-Large'."""
+
+    def canonical_name(self, list_type, name):
+        return {"Jet Black": "Jet.Black"}.get(name, name)
+
+
+def test_child_payload_uses_the_lists_spelling_of_options():
+    # The RESTlet resolves colour/size by exact name, so a punctuation variant
+    # must be sent as the list's spelling ('Khaki/ Coffee' was rejected while
+    # 'Khaki/Coffee' sat on the list -- run 31036109523).
+    p = _child_payload(_style(), _sku(), _CanonResolver())
+    assert p["color"] == "Jet.Black"
+    assert p["itemId"] == "PC90-Jet.Black-X-Large"   # name built from canonical
+
+
+# --- native pricing at birth must match the nightly update's rules, or every
+# created item is wrong until a later pass corrects it.
+
+def test_cost_at_birth_is_the_case_price():
+    # NOT the single-piece price -- that runs ~$1 higher and is exactly what
+    # made Purchase Price read too high.
+    assert _child_payload(_style(), _sku())["cost"] == 8.51
+
+
+def test_cost_falls_back_to_piece_price_without_case_data():
+    p = _child_payload(_style(), _sku(case_price=None))
+    assert p["cost"] == 9.42
+
+
+def test_base_price_at_birth_is_the_higher_of_map_and_msrp():
+    # MAP 23.99 > MSRP 21.99 -> MAP wins (the old code wrote MSRP blindly).
+    assert _child_payload(_style(), _sku())["basePrice"] == 23.99
+
+
+def test_base_price_uses_msrp_when_no_map():
+    # Value brands like Gildan carry no MAP at all.
+    p = _child_payload(_style(), _sku(map_price=None))
+    assert p["basePrice"] == 21.99
+
+
+def test_weight_is_written_at_birth():
+    assert _child_payload(_style(), _sku())["weight"] == 1.4
+
+
+def test_missing_weight_is_left_unset_not_zeroed():
+    assert _child_payload(_style(), _sku(piece_weight=None))["weight"] is None
+
+
+def test_display_name_keeps_the_style_code_descriptions_drop_it():
+    # Andy's spec (2026-08-05 pilot review): Display Name keeps the style code
+    # ("... Crewneck PC90"); Sales/Purchase Description carry the same title
+    # WITHOUT it -- the marketing copy belongs to the PARENT's Store
+    # Description instead.
     p = _child_payload(_style(), _sku())
-    assert p["description"] == "A sturdy fleece."      # sku desc empty -> style desc
+    assert p["displayName"] == "Port & Company Essential Fleece Crewneck PC90"
+    assert p["description"] == "Port & Company Essential Fleece Crewneck"
+
+
+def test_child_payload_carries_weight_unit_with_weight():
+    p = _child_payload(_style(), _sku())
+    assert p["weight"] == 1.4
+    assert p["weightUnitId"] == "1"                    # pounds, account-verified
+    q = _child_payload(_style(), _sku(piece_weight=None))
+    assert q["weight"] is None and q["weightUnitId"] is None
+
+
+def test_child_payload_seeds_sanmar_as_preferred_vendor():
+    assert _child_payload(_style(), _sku())["preferredVendorId"] == "512"
+
+
+def test_child_payload_carries_per_colour_images():
+    imgs = SimpleNamespace(primary_url=lambda: "https://cdn/front.jpg",
+                           back_url=lambda: "https://cdn/back.jpg",
+                           front_flat_url="https://cdn/front_flat.jpg",
+                           back_flat_url="https://cdn/back_flat.jpg",
+                           color_swatch_url="https://cdn/swatch.jpg")
+    p = _child_payload(_style(images_by_color={"Jet Black": imgs}), _sku())
+    assert p["shopImageUrl"] == "https://cdn/front.jpg"   # storefront column
+    assert p["backImageUrl"] == "https://cdn/back.jpg"    # custitem_sanmar_front_image_url
+    assert p["frontFlatUrl"] == "https://cdn/front_flat.jpg"
+    assert p["backFlatUrl"] == "https://cdn/back_flat.jpg"
+    assert p["swatchUrl"] == "https://cdn/swatch.jpg"
+    q = _child_payload(_style(), _sku())                  # colour has no images
+    assert q["shopImageUrl"] is None and q["backImageUrl"] is None
+    assert q["frontFlatUrl"] is None and q["swatchUrl"] is None
+
+
+def test_child_payload_carries_uom_ids_when_resolved():
+    uom = {"unitsTypeId": "3", "stockUnitId": "7", "purchaseUnitId": "7",
+           "saleUnitId": "7"}
+    p = _child_payload(_style(), _sku(), None, uom)
+    for k, v in uom.items():
+        assert p[k] == v
+
+
+# --- image lookup must survive feed colour-name drift (Andy, 2026-08-07:
+# "images not being pulled to each child when created")
+
+def _imgs(tag):
+    return SimpleNamespace(
+        primary_url=lambda: f"https://cdn/{tag}_front.jpg",
+        back_url=lambda: f"https://cdn/{tag}_back.jpg",
+        front_flat_url=f"https://cdn/{tag}_ff.jpg",
+        back_flat_url=f"https://cdn/{tag}_bf.jpg",
+        color_swatch_url=f"https://cdn/{tag}_sw.jpg",
+    )
+
+
+def test_images_found_when_feed_spells_the_colour_differently():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    # image row says 'Jet/Black', SKU row says 'Jet/ Black'
+    style = _style(style="PC91", images_by_color={"Jet/Black": _imgs("jb")})
+    p = _child_payload(style, _sku(color_name="Jet/ Black"))
+    assert p["shopImageUrl"] == "https://cdn/jb_front.jpg"
+    assert p["swatchUrl"] == "https://cdn/jb_sw.jpg"
+
+
+def test_images_found_when_case_differs():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    style = _style(style="PC92", images_by_color={"ASH GREY": _imgs("ag")})
+    p = _child_payload(style, _sku(color_name="Ash Grey"))
+    assert p["backFlatUrl"] == "https://cdn/ag_bf.jpg"
+
+
+def test_exact_match_still_preferred():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    style = _style(style="PC93",
+                   images_by_color={"Red": _imgs("exact"), "R.E.D": _imgs("norm")})
+    p = _child_payload(style, _sku(color_name="Red"))
+    assert p["shopImageUrl"] == "https://cdn/exact_front.jpg"
+
+
+def test_unknown_colour_still_yields_no_images():
+    import sanmar_parent_create as spc
+    spc._IMAGE_INDEX.clear()
+    style = _style(style="PC94", images_by_color={"Black": _imgs("bk")})
+    p = _child_payload(style, _sku(color_name="Fuchsia"))
+    assert p["shopImageUrl"] is None and p["swatchUrl"] is None
