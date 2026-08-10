@@ -13,7 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from ss_create_preview import combo_key
+from collections import Counter
+
+from ss_create_preview import brand_allowed, brand_allowlist, combo_key
 
 
 def test_combo_key_normalises_colour_variants():
@@ -56,22 +58,35 @@ def test_combo_key_keeps_genuinely_different_children_apart():
 
 # --- brand allowlist: creation is scoped to brands BSG actually sells
 
-def test_brand_matching_ignores_punctuation_and_case(monkeypatch):
-    import importlib
-
-    import ss_create_preview as mod
+def test_named_brands_match_ignoring_punctuation_and_case(monkeypatch):
     monkeypatch.setenv("SS_CREATE_BRANDS", "Bella+Canvas, Gildan")
-    mod = importlib.reload(mod)
-    assert mod.brand_allowed("BELLA + CANVAS")
-    assert mod.brand_allowed("gildan")
-    assert not mod.brand_allowed("Anvil")
+    allowed = brand_allowlist()
+    assert brand_allowed("BELLA + CANVAS", allowed)
+    assert brand_allowed("gildan", allowed)
+    assert not brand_allowed("Anvil", allowed)
 
 
 def test_an_empty_allowlist_permits_every_brand(monkeypatch):
-    import importlib
-
-    import ss_create_preview as mod
     monkeypatch.delenv("SS_CREATE_BRANDS", raising=False)
-    mod = importlib.reload(mod)
-    assert mod.brand_allowed("anything at all")
-    assert mod.brand_allowed("")
+    allowed = brand_allowlist()
+    assert allowed == set()
+    assert brand_allowed("anything at all", allowed)
+
+
+def test_CARRIED_resolves_to_the_brands_already_stocked(monkeypatch):
+    # Andy chose "all 36 brands we carry today" -- a rule, not a frozen list,
+    # so it resolves from the live catalogue each run.
+    monkeypatch.setenv("SS_CREATE_BRANDS", "CARRIED")
+    carried = Counter({"Gildan": 7952, "BELLA + CANVAS": 6919, "Augusta": 0})
+    allowed = brand_allowlist(carried)
+    assert brand_allowed("gildan", allowed)
+    assert brand_allowed("Bella+Canvas", allowed)
+    assert not brand_allowed("Augusta", allowed)      # stocked zero today
+    assert not brand_allowed("Never Heard Of It", allowed)
+
+
+def test_CARRIED_can_be_combined_with_explicitly_named_brands(monkeypatch):
+    monkeypatch.setenv("SS_CREATE_BRANDS", "CARRIED, Augusta Sportswear")
+    allowed = brand_allowlist(Counter({"Gildan": 10}))
+    assert brand_allowed("Gildan", allowed)
+    assert brand_allowed("augusta sportswear", allowed)
