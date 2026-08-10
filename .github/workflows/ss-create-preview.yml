@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       ss_brands:
-        description: "Brand allowlist to preview (comma-separated; blank = report every brand)"
+        description: "Brand allowlist (comma-separated, or CARRIED = brands already stocked; blank = report every brand)"
+        required: false
+        default: "CARRIED"
+      ss_exclude_brands:
+        description: "Brands never to create (blank keeps the Momentec-direct default; set to a space to disable)"
         required: false
         default: ""
 
@@ -57,7 +61,13 @@ jobs:
       - name: Preview what creation would add
         env:
           SS_CREATE_BRANDS: ${{ github.event.inputs.ss_brands }}
-        run: python scripts/ss_create_preview.py
+        run: |
+          # An unset SS_EXCLUDE_BRANDS keeps the Momentec-direct default; only
+          # export it when the operator actually typed something.
+          if [ -n "${{ github.event.inputs.ss_exclude_brands }}" ]; then
+            export SS_EXCLUDE_BRANDS="${{ github.event.inputs.ss_exclude_brands }}"
+          fi
+          python scripts/ss_create_preview.py
 
       - name: Upload the brand summary + create inputs
         uses: actions/upload-artifact@v4
