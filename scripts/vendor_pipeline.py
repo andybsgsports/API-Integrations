@@ -99,6 +99,10 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         "update": ["scripts/ua_backfill.py"],
     },
     "ss": {
+        # Read-only diff of the 195k-SKU catalog: buckets missing SKUs into
+        # adopt-a-parent children vs net-new parent styles vs itemid
+        # collisions, and emits the create/ensure-values inputs.
+        "discover": ["scripts/ss_create_preview.py"],
         "update": ["scripts/ss_backfill.py"],
     },
     "dcos": {
@@ -119,8 +123,10 @@ PIPELINE_GAPS = {
                 "a style->parent mapping built first",
     "ua": "DC OneSource parts carry no style grid; parent structure per style "
           "needs deciding before children can be created",
-    "ss": "195k-SKU feed; needs the same preview/diff stage SanMar has before "
-          "anything is created",
+    "ss": "discover (ss_create_preview) now buckets the 195k-SKU feed; the "
+          "options/create phases come after Andy reviews the preview counts "
+          "-- most S&S styles ADOPT a parent another vendor created, so the "
+          "adopt-vs-create split needs eyes before anything writes",
 }
 
 #: Vendor -> env the phase scripts expect (supplier selector, mostly).

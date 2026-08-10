@@ -54,12 +54,13 @@ def main() -> int:
 
     # Distinct bare-filename swatch values, sampled across the alphabet rather
     # than the first N (one style's colours would all hit the same directory).
+    swatches = [
+        (img.color_swatch_url or "").strip()
+        for s in styles for img in s.images_by_color.values()
+    ]
     bare = sorted({
-        (sku.color_swatch_url or "").strip()
-        for s in styles for sku in s.skus
-        if (sku.color_swatch_url or "").strip()
-        and "/" not in (sku.color_swatch_url or "")
-        and not (sku.color_swatch_url or "").lower().startswith("http")
+        v for v in swatches
+        if v and "/" not in v and not v.lower().startswith("http")
     })
     if not bare:
         print("feed carries no bare-filename swatch values -- nothing to probe")

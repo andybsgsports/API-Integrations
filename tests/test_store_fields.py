@@ -158,9 +158,21 @@ def test_relative_paths_get_the_cdn_base():
             == "https://cdnm.sanmar.com/imglib/x.gif")
 
 
-def test_bare_tokens_and_blanks_are_skipped():
+def test_bare_filenames_get_the_verified_swatch_base():
+    # The colour-swatch column carries bare filenames -- 26,090 of them, like
+    # '29Msw.jpg'. Skipping them left the swatch field at 0% coverage. The
+    # base was verified by probing real feed filenames (run 31412507404);
+    # the earlier swatch/gifs guess returned SanMar's ImageNotAvailable
+    # placeholder, which answers HTTP 200.
     from sanmar_field_update import sanmar_image_url
-    assert sanmar_image_url("Charcoal.gif") is None   # no path -> feed junk
+    assert (sanmar_image_url("29Msw.jpg")
+            == "https://marketing.sanmar.com/catalog/images/29Msw.jpg")
+    assert (sanmar_image_url("BB18012sw.jpg")
+            == "https://marketing.sanmar.com/catalog/images/BB18012sw.jpg")
+
+
+def test_blanks_are_skipped():
+    from sanmar_field_update import sanmar_image_url
     assert sanmar_image_url("") is None
     assert sanmar_image_url(None) is None
     assert sanmar_image_url("   ") is None
