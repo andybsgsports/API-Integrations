@@ -54,6 +54,10 @@ on:
         description: "Re-post existing children through the RESTlet update path (payload-schema fixes)"
         required: false
         default: "false"
+      ss_brands:
+        description: "S&S: comma-separated brand allowlist for creation (blank = the default list; 'ALL' is not a value -- pass every brand explicitly)"
+        required: false
+        default: ""
 
 # Every NetSuite writer shares one concurrency group so they QUEUE instead of
 # overlapping -- the sandbox throttles hard (429s) when writers collide.
@@ -140,6 +144,8 @@ jobs:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
           CREATE_MAX_STYLES: ${{ env.CREATE_MAX_STYLES }}
           CREATE_REFRESH_STYLES: ${{ github.event.inputs.refresh_existing || 'false' }}
+          # Blank = use the allowlist baked into vendor_pipeline.SS_DEFAULT_BRANDS.
+          SS_CREATE_BRANDS: ${{ github.event.inputs.ss_brands || '' }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
         run: |

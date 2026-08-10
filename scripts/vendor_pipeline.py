@@ -129,9 +129,18 @@ PIPELINE_GAPS = {
           "adopt-vs-create split needs eyes before anything writes",
 }
 
+#: S&S creation is scoped to brands BSG actually sells, not the whole 5,455
+#: style catalogue (Andy, 2026-08-10: "specific brands... the most popular").
+#: Ranked by how deep NetSuite already stocks each brand -- the demand signal
+#: measured by the discover run, not a guess. Empty string = every brand.
+#: Override per run with SS_CREATE_BRANDS.
+SS_DEFAULT_BRANDS = ""
+
 #: Vendor -> env the phase scripts expect (supplier selector, mostly).
 VENDOR_ENV: dict[str, dict[str, str]] = {
     "dcos": {"DCOS_SUPPLIER": os.environ.get("DCOS_SUPPLIER", "champro")},
+    "ss": {"SS_CREATE_BRANDS": os.environ.get("SS_CREATE_BRANDS")
+           or SS_DEFAULT_BRANDS},
 }
 
 #: Default per-vendor-per-night cap on NET-NEW styles created (0 = no cap).
