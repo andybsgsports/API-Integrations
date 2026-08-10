@@ -172,3 +172,36 @@ def test_download_writes_styles_alongside_products(tmp_path, monkeypatch):
         "category_name": "",
     }]
     assert _json.loads(out.read_text())[0]["sku"] == "B123"
+
+
+# --- the create phase's payload shape
+
+def test_name_fields_keep_the_style_code():
+    from ss_create import display_name
+    assert display_name("3001C", "Unisex Jersey Tee") == "Unisex Jersey Tee 3001C"
+    # No title in the feed -> the code alone, never a blank name.
+    assert display_name("3001C", "") == "3001C"
+
+
+def test_relative_image_paths_become_absolute_urls():
+    # URL-type fields reject a relative path and the error names no field --
+    # the failure mode that rejected all 45,239 SanMar records on 2026-08-05.
+    from ss_create import image_url
+    assert image_url("Images/Color/1_f.jpg") == \
+        "https://cdn.ssactivewear.com/Images/Color/1_f.jpg"
+    assert image_url("https://x.test/a.jpg") == "https://x.test/a.jpg"
+    assert image_url("") is None
+
+
+def test_a_child_is_born_with_its_ss_data():
+    from ss_create import child_fields
+    fields = child_fields({
+        "sku": "B123", "style_name": "3001C", "color_name": "Black",
+        "gtin": "00812345", "brand_name": "BELLA + CANVAS", "msrp": "12.50",
+        "front_image_url": "Images/1_f.jpg", "size_name": "",
+    })
+    assert fields["custitem_ss_sku"] == "B123"
+    assert fields["custitem_ss_gtin"] == "00812345"
+    assert fields["custitem_ss_msrp"] == "12.50"
+    assert fields["custitem_ss_front_image_url"].startswith("https://")
+    assert "custitem_ss_size_name" not in fields   # blanks are dropped

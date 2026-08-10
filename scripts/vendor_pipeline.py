@@ -103,6 +103,12 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         # adopt-a-parent children vs net-new parent styles vs itemid
         # collisions, and emits the create/ensure-values inputs.
         "discover": ["scripts/ss_create_preview.py"],
+        # Parents where none exists, then children -- adopting whatever parent
+        # already carries the style code (grid probe run 31437315008 proved a
+        # parent does not restrict its children's option values). NOT wired
+        # into the nightly chain's ss leg yet: it wants a dry run and a small
+        # pilot Andy reviews first, the way SanMar's creation rolled out.
+        "create": ["scripts/ss_create.py"],
         "update": ["scripts/ss_backfill.py"],
     },
     "dcos": {
@@ -123,10 +129,10 @@ PIPELINE_GAPS = {
                 "a style->parent mapping built first",
     "ua": "DC OneSource parts carry no style grid; parent structure per style "
           "needs deciding before children can be created",
-    "ss": "discover (ss_create_preview) now buckets the 195k-SKU feed; the "
-          "options/create phases come after Andy reviews the preview counts "
-          "-- most S&S styles ADOPT a parent another vendor created, so the "
-          "adopt-vs-create split needs eyes before anything writes",
+    "ss": "create is built (ss_create.py) but deliberately NOT in the "
+          "chain's ss leg: it wants a dry run and a small pilot Andy "
+          "reviews first, the way SanMar's creation rolled out. Scope is "
+          "the brand allowlist minus the Momentec-direct brands.",
 }
 
 #: S&S creation is scoped to brands BSG actually sells, not the whole 5,455
