@@ -16,10 +16,14 @@ permissions:
   actions: write # needed to dispatch the next vendor in the chain
 
 on:
-  # PAUSED 2026-07-31 pending first live validation of the new pipeline.
-  # Re-enable once a dry run and a capped live run look right.
-  # schedule:
-  #   - cron: "0 4 * * *"
+  # Re-enabled 2026-08-10 (Andy) after live validation: the 300-style ramp
+  # nights, preferred-vendor pricing convergence on both sides, and the
+  # image-coverage fixes. Each firing starts SanMar's create group; the
+  # chain-dispatch step walks the remaining vendors. item-lifecycle is NOT
+  # part of the chain -- it stays manual-dispatch until Andy signs off on
+  # its dry-run report.
+  schedule:
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       vendor:

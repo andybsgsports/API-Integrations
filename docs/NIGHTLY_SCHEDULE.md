@@ -1,14 +1,19 @@
-# Nightly schedule — the stagger contract
+# Nightly schedule — SUPERSEDED by the chained pipeline
 
-**PAUSED 2026-07-31 (Andy)**: all seven schedule triggers are commented out in
-the workflow files pending a redesign of the sync/pricing behaviour. The slots
-below are the contract to restore when re-enabling. Manual `workflow_dispatch`
-still works.
+**2026-08-10 (Andy)**: the seven clock-staggered schedules below stay
+**retired** (their schedule triggers remain commented out; manual
+`workflow_dispatch` still works). The nightly is now the single chained
+pipeline — `nightly-pipeline.yml`, scheduled **04:00 UTC** on the default
+branch — which runs one vendor at a time in order
+(sanmar → momentec → ua → ss → dcos → champro-csv), each run dispatching
+the next. See `docs/VENDOR_PIPELINE.md` for the full spec.
 
-Re-enabled 2026-07-30 (previously paused while the syncs were broken). Scope
-per Andy: **inventory and item status only** — the enrichment jobs
-(description-update, atlas-image-backfill, parent-sync, sanmar-autocreate)
-stay manual-dispatch.
+`item-lifecycle` is **not** in the chain: it stays manual-dispatch until
+Andy approves its dry-run report (what gets inactivated is his call).
+
+Everything below is kept as the historical record of the stagger contract
+the chain replaced — and of *why* clock slots failed (late cron firings
+bunched writers into the shared concurrency group and caused 429 storms).
 
 ## Why the times matter
 
