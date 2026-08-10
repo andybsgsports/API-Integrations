@@ -118,6 +118,15 @@ VIEW_IMAGE_FIELDS = {
 
 SANMAR_CDN_BASE = "https://cdnm.sanmar.com/"
 
+# Bare filenames (no path at all) are the colour-swatch column's format:
+# 26,090 feed values look like '29Msw.jpg'. The base was VERIFIED by probing
+# real feed filenames against six candidates (run 31412507404): this one and
+# cdnm.sanmar.com/catalog/images/ both served every sample, while the
+# swatch/gifs guess returned SanMar's ImageNotAvailable placeholder -- which
+# answers HTTP 200, so "it loaded" was never proof. Never guess a base onto
+# 26k items; re-run scripts/sanmar_swatch_probe.py if this stops working.
+SANMAR_SWATCH_BASE = "https://marketing.sanmar.com/catalog/images/"
+
 
 def sanmar_image_url(value: str | None) -> str | None:
     """A value NetSuite's URL-type fields will accept, or None to skip.
@@ -128,7 +137,7 @@ def sanmar_image_url(value: str | None) -> str | None:
     drop-and-retry salvage can't identify the offender and the WHOLE record
     PATCH dies. That failed all 45,239 matched items on 2026-08-05 (run
     31046102022, "wrote 0"). Relative paths get the SanMar CDN base; a bare
-    token with no path separator is feed junk we skip rather than guess at.
+    filename gets the verified swatch base (see SANMAR_SWATCH_BASE).
     """
     v = (value or "").strip()
     if not v:
@@ -137,7 +146,7 @@ def sanmar_image_url(value: str | None) -> str | None:
         return v
     if "/" in v:
         return SANMAR_CDN_BASE + v.lstrip("/")
-    return None
+    return SANMAR_SWATCH_BASE + v
 
 # NOTE: we deliberately do NOT write NetSuite's native Stock Description.
 # It is a legacy field hard-capped at 21 characters -- far too short for the
