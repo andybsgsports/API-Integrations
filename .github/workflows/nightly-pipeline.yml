@@ -8,7 +8,7 @@ name: Nightly Vendor Pipeline (chained)
 # late the scheduler starts.
 #
 # Phases per vendor: discover -> options -> create -> update
-#   (see scripts/vendor_pipeline.py and docs/NIGHTLY_FLOW.md)
+#   (see scripts/vendor_pipeline.py and docs/VENDOR_PIPELINE.md)
 
 permissions:
   contents: read
