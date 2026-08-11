@@ -166,6 +166,11 @@ jobs:
           # plus the image pass does not fit in one job.
           case "$VENDOR:$PHASES" in
             sanmar:*create*)  NEXT="sanmar";      NEXT_PHASES="update" ;;
+            # The image pass gets its own step: update+images together ran
+            # 295+ of the 350-minute cap the night swatch URLs first went out
+            # (run 31424046955), and a leg killed by the cap never reaches
+            # this dispatch -- every vendor after SanMar would lose the night.
+            sanmar:update)    NEXT="sanmar";      NEXT_PHASES="images" ;;
             sanmar:*)         NEXT="momentec";    NEXT_PHASES="update" ;;
             momentec:*)       NEXT="ua";          NEXT_PHASES="update" ;;
             ua:*)             NEXT="ss";          NEXT_PHASES="update" ;;

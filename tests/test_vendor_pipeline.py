@@ -26,7 +26,7 @@ def test_vendor_order_is_andys_order():
 def test_phases_are_in_dependency_order():
     # Options before create (an item can't reference a colour that doesn't
     # exist) and create before update (can't price an item that doesn't exist).
-    assert vp.PHASES == ("discover", "options", "create", "update")
+    assert vp.PHASES == ("discover", "options", "create", "update", "images")
 
 
 def test_every_vendor_has_an_update_phase():
@@ -80,6 +80,9 @@ def test_run_vendor_honours_a_phase_subset(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(vp, "_run", lambda script, env: calls.append(script) or 0)
     vp.run_vendor("sanmar", phases=("update",))
+    assert calls == ["scripts/sanmar_field_update.py"]
+    calls.clear()
+    vp.run_vendor("sanmar", phases=("update", "images"))
     assert calls == ["scripts/sanmar_field_update.py",
                      "scripts/atlas_image_backfill.py"]
 
@@ -147,3 +150,15 @@ def test_many_skipped_chunks_stay_fatal():
     from run_status import exit_code
     assert exit_code("x", 0, 0, 45000, 5) == 1
     assert exit_code("x", 10, 0, 45000, 1) == 0
+
+
+def test_the_image_pass_is_its_own_phase():
+    # update+images in one leg ran 295+ of the 350-minute job cap the night
+    # swatch URLs first went out to ~62k items (run 31424046955). A leg killed
+    # by the cap never reaches the chain's dispatch step, so every vendor
+    # after SanMar would silently lose the night -- hence its own step, with
+    # its own budget. It still runs AFTER update: it joins on the key the
+    # field update stamps.
+    assert vp.PIPELINES["sanmar"]["images"] == ["scripts/atlas_image_backfill.py"]
+    assert "scripts/atlas_image_backfill.py" not in vp.PIPELINES["sanmar"]["update"]
+    assert vp.PHASES.index("images") > vp.PHASES.index("update")
