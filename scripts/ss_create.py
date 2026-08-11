@@ -35,6 +35,7 @@ from pathlib import Path
 from native_pricing import base_price, weight_display
 from pricing_ownership import VENDOR_SS
 from run_status import exit_code
+from sanmar_parent_create import _uom_ids, resolve_parent_refs
 from ss_backfill import effective_cost
 from ss_create_preview import (
     brand_allowed,
@@ -209,6 +210,12 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
     print(f"brand scope: {len(allowed) or 'all'} allowed, {len(excluded)} excluded")
 
     created_parents = created_children = skipped = failures = done = 0
+    parent_refs: dict[str, dict] | None = None
+    uom: dict[str, str] = {}
+    if allow_write:
+        # Children need UOM ids too; resolve once up front (parent_refs stays
+        # lazy -- only net-new parents need the account/subsidiary refs).
+        uom = _uom_ids(client)
     already = 0
 
     for style_name in net_new:
@@ -234,6 +241,14 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                 already += 1
                 print(f"  parent already exists (id {rows[0]['id']}) -- adopting")
             else:
+                if parent_refs is None:
+                    # Accounts / subsidiary / location / tax schedule: NetSuite
+                    # REQUIRES these on any inventory item, and a body without
+                    # them is a bare "400 Bad Request" naming no field -- the
+                    # first live pilot (run 31535379676) lost all 5 parents to
+                    # exactly that. These are BSG-wide defaults resolved from
+                    # live records, not SanMar-specific values.
+                    parent_refs = resolve_parent_refs(client)
                 body = {
                     "itemId": style_name, "vendorName": style_name,
                     "matrixType": "PARENT", "isInactive": False, "isOnline": False,
@@ -242,6 +257,13 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                     "salesDescription": title or style_name,
                     "purchaseDescription": title or style_name,
                     "storeDescription": str(meta.get("description") or "").strip(),
+                    **{k: {"id": v} for k, v in {
+                        "unitsType": uom.get("unitsTypeId", ""),
+                        "stockUnit": uom.get("stockUnitId", ""),
+                        "purchaseUnit": uom.get("purchaseUnitId", ""),
+                        "saleUnit": uom.get("saleUnitId", ""),
+                    }.items() if v},
+                    **parent_refs,
                 }
                 try:
                     pid = client.create_record("inventoryItem", body)
@@ -249,14 +271,15 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                     print(f"  parent created: id {pid or '?'}")
                 except Exception as exc:  # noqa: BLE001
                     failures += 1
-                    print(f"  PARENT FAILED {style_name}: {str(exc)[:150]}")
+                    print(f"  PARENT FAILED {style_name}: {str(exc)[:150]} "
+                          f":: {str(getattr(exc, 'detail', ''))[:300]}")
                     continue
         else:
             created_parents += 1  # the dry-run tally must match its WOULD lines
             print(f"  WOULD create parent {style_name!r} "
                   f"({display_name(style_name, title)[:60]!r})")
 
-        payloads = [child_payload(p, style_name, resolver, {}) for p in skus]
+        payloads = [child_payload(p, style_name, resolver, uom) for p in skus]
         if not allow_write:
             created_children += len(payloads)
             print(f"  WOULD post {len(payloads)} child(ren), e.g. "
