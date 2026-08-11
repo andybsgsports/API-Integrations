@@ -57,7 +57,10 @@ ROOT = Path(__file__).resolve().parents[1]
 #: not whoever wrote last -- so this is purely about sequencing the work.
 VENDOR_ORDER = ["sanmar", "momentec", "ua", "ss", "dcos", "champro-csv"]
 
-PHASES = ("discover", "options", "create", "update")
+#: ``images`` trails ``update`` because it depends on the key that phase
+#: stamps; it is a separate phase so it can be its own chain step with its own
+#: job budget (see the SanMar note in PIPELINES).
+PHASES = ("discover", "options", "create", "update", "images")
 
 #: Per-vendor phase -> script(s). A phase absent from a vendor's map has no
 #: implementation for that vendor yet; the pipeline says so out loud and moves
@@ -80,16 +83,20 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
             "scripts/sanmar_parent_create.py",
             "scripts/sanmar_child_finalize.py",
         ],
+        "update": ["scripts/sanmar_field_update.py"],
         # atlas_image_backfill runs AFTER the field update because it joins
         # items by custitem_sanmar_unique_key, which the field update stamps
         # (matched by UPC) -- a child created minutes earlier has no key yet.
         # It uploads each colour's image to the File Cabinet once and links
         # the real Image field; diff-aware, so it only touches imageless
         # items (Andy, 2026-08-05: images are part of creation).
-        "update": [
-            "scripts/sanmar_field_update.py",
-            "scripts/atlas_image_backfill.py",
-        ],
+        #
+        # Its own chain STEP, not part of update: the two together ran 295+
+        # minutes against the 350-minute job cap on 2026-08-10 (run
+        # 31424046955, the night swatch URLs first went out to ~62k items),
+        # and a leg killed by the cap never reaches the dispatch step -- so
+        # every vendor after SanMar would silently lose the night.
+        "images": ["scripts/atlas_image_backfill.py"],
     },
     "momentec": {
         # No creation path built yet -- see PIPELINE_GAPS below.
