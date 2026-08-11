@@ -205,3 +205,12 @@ def test_a_child_is_born_with_its_ss_data():
     assert fields["custitem_ss_msrp"] == "12.50"
     assert fields["custitem_ss_front_image_url"].startswith("https://")
     assert "custitem_ss_size_name" not in fields   # blanks are dropped
+
+
+def test_richardson_is_excluded_as_sanmar_sourced(monkeypatch):
+    # Andy approved the exclusion 2026-08-11: Richardson arrives via SanMar,
+    # so S&S creation would duplicate a supply line BSG already has.
+    monkeypatch.delenv("SS_EXCLUDE_BRANDS", raising=False)
+    excluded = excluded_brands()
+    assert not brand_allowed("Richardson", set(), excluded)
+    assert not brand_allowed("RICHARDSON", set(), excluded)

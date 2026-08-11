@@ -165,15 +165,22 @@ MOMENTEC_DIRECT_BRANDS = (
     "C2 Sport",
 )
 
+#: Same principle, other vendors: brands BSG already sources through a direct
+#: feed must not be duplicated from the S&S catalogue. Richardson arrives via
+#: SanMar (384 carried; Andy approved the exclusion 2026-08-11).
+OTHER_DIRECT_BRANDS = (
+    "Richardson",
+)
+
 
 def excluded_brands() -> set[str]:
     """Brands creation must never touch, from ``SS_EXCLUDE_BRANDS``.
 
-    Defaults to the Momentec-direct list; set the env var to override (empty
-    string disables the exclusion entirely).
+    Defaults to the direct-sourced lists (Momentec + other vendors); set the
+    env var to override (empty string disables the exclusion entirely).
     """
     raw = os.environ.get("SS_EXCLUDE_BRANDS")
-    names = (MOMENTEC_DIRECT_BRANDS if raw is None
+    names = (MOMENTEC_DIRECT_BRANDS + OTHER_DIRECT_BRANDS if raw is None
              else [b for b in raw.split(",") if b.strip()])
     return {_brand_key(b) for b in names}
 
