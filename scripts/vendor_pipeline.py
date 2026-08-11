@@ -72,14 +72,17 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         "discover": ["scripts/sanmar_create_preview.py"],
         # Creates genuinely-new colours/sizes; remaps punctuation variants.
         "options": ["scripts/sanmar_ensure_matrix_values.py"],
-        # New children under EXISTING parents go via the CSV import map;
-        # net-new styles get parent-then-children via REST + the matrix
-        # RESTlet; child_finalize then copies Department/Class down from each
-        # parent (children deliberately aren't sent a class -- the RESTlet's
-        # class-path search crashes on this account, the childless-parent bug
-        # from the live pilot).
+        # New children under EXISTING parents post through the matrix RESTlet
+        # (sanmar_child_create) -- the CSV-import Suitelet it replaced came
+        # back SSS_INVALID_SCRIPTLET_ID on 2026-08-11 (issue #116), and the
+        # RESTlet path is idempotent and carries the full field spec the CSV
+        # map never did. Net-new styles get parent-then-children via REST +
+        # the same RESTlet; child_finalize then copies Department/Class down
+        # from each parent (children deliberately aren't sent a class -- the
+        # RESTlet's class-path search crashes on this account, the
+        # childless-parent bug from the live pilot).
         "create": [
-            "scripts/sanmar_csv_import.py",
+            "scripts/sanmar_child_create.py",
             "scripts/sanmar_parent_create.py",
             "scripts/sanmar_child_finalize.py",
         ],
@@ -150,9 +153,17 @@ PIPELINE_GAPS = {
 #: Override per run with SS_CREATE_BRANDS.
 SS_DEFAULT_BRANDS = "CARRIED"
 
+#: The DC OneSource suppliers the nightly covers -- every heartbeat source
+#: lifecycle expects from this leg (tck/capamerica/mizuno) plus champro's
+#: create-enabled catalogue. Override with a comma list in DCOS_SUPPLIERS.
+DCOS_SUPPLIERS = tuple(
+    s.strip().lower()
+    for s in os.environ.get("DCOS_SUPPLIERS", "champro,tck,capamerica,mizuno").split(",")
+    if s.strip()
+)
+
 #: Vendor -> env the phase scripts expect (supplier selector, mostly).
 VENDOR_ENV: dict[str, dict[str, str]] = {
-    "dcos": {"DCOS_SUPPLIER": os.environ.get("DCOS_SUPPLIER", "champro")},
     "ss": {"SS_CREATE_BRANDS": os.environ.get("SS_CREATE_BRANDS")
            or SS_DEFAULT_BRANDS},
 }
@@ -205,7 +216,18 @@ def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
             continue
         print(f"\n[{vendor}: {phase}]", flush=True)
         for script in scripts:
-            worst = max(worst, _run(script, env))
+            if vendor == "dcos":
+                # One pass per supplier. The chain's dcos leg used to run
+                # only the single DCOS_SUPPLIER default (champro), so TCK /
+                # Cap America / Mizuno never had their feed heartbeats
+                # restamped -- lifecycle saw all three at 100% stale every
+                # night and only the circuit breaker kept their items alive
+                # (dry run 31367785465, live run 31457843380).
+                for supplier in DCOS_SUPPLIERS:
+                    print(f"  -- supplier: {supplier}", flush=True)
+                    worst = max(worst, _run(script, {**env, "DCOS_SUPPLIER": supplier}))
+            else:
+                worst = max(worst, _run(script, env))
     print(f"\n=== VENDOR {vendor} complete (worst rc={worst})", flush=True)
     return worst
 

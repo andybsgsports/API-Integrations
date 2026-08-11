@@ -68,7 +68,7 @@ def test_run_vendor_runs_phases_in_order(monkeypatch):
     assert calls == [
         "scripts/sanmar_create_preview.py",
         "scripts/sanmar_ensure_matrix_values.py",
-        "scripts/sanmar_csv_import.py",
+        "scripts/sanmar_child_create.py",
         "scripts/sanmar_parent_create.py",
         "scripts/sanmar_child_finalize.py",
         "scripts/sanmar_field_update.py",
@@ -162,3 +162,22 @@ def test_the_image_pass_is_its_own_phase():
     assert vp.PIPELINES["sanmar"]["images"] == ["scripts/atlas_image_backfill.py"]
     assert "scripts/atlas_image_backfill.py" not in vp.PIPELINES["sanmar"]["update"]
     assert vp.PHASES.index("images") > vp.PHASES.index("update")
+
+
+def test_dcos_runs_every_supplier(monkeypatch):
+    # The chain's dcos leg used to run only DCOS_SUPPLIER=champro, so TCK /
+    # Cap America / Mizuno never restamped their feed heartbeats -- lifecycle
+    # saw 100% stale and only the circuit breaker kept their items alive.
+    runs: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        vp, "_run", lambda script, env: runs.append((script, env["DCOS_SUPPLIER"])) or 0)
+    vp.run_vendor("dcos", phases=("update",))
+    assert [s for _, s in runs] == list(vp.DCOS_SUPPLIERS)
+    assert set(s for _, s in runs) >= {"champro", "tck", "capamerica", "mizuno"}
+
+
+def test_sanmar_child_create_replaced_the_dead_csv_import():
+    # The CSV-import Suitelet came back SSS_INVALID_SCRIPTLET_ID (issue #116);
+    # new children under existing parents now post through the matrix RESTlet.
+    assert "scripts/sanmar_child_create.py" in vp.PIPELINES["sanmar"]["create"]
+    assert "scripts/sanmar_csv_import.py" not in vp.PIPELINES["sanmar"]["create"]
