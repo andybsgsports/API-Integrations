@@ -252,6 +252,7 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                     print(f"  PARENT FAILED {style_name}: {str(exc)[:150]}")
                     continue
         else:
+            created_parents += 1  # the dry-run tally must match its WOULD lines
             print(f"  WOULD create parent {style_name!r} "
                   f"({display_name(style_name, title)[:60]!r})")
 
