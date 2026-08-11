@@ -28,6 +28,7 @@ Honours ``SYNC_DRY_RUN``: a dry run reports exactly what it would create.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 from pathlib import Path
@@ -35,7 +36,17 @@ from pathlib import Path
 from native_pricing import base_price, weight_display
 from pricing_ownership import VENDOR_SS
 from run_status import exit_code
-from sanmar_parent_create import _uom_ids, resolve_parent_refs
+from sanmar_parent_create import (
+    DEFAULT_ASSET_ACCOUNT,
+    DEFAULT_COGS_ACCOUNT,
+    DEFAULT_DEPARTMENT,
+    DEFAULT_INCOME_ACCOUNT,
+    DEFAULT_LOCATION,
+    DEFAULT_SUBSIDIARY,
+    DEFAULT_TAX_SCHEDULE,
+    _uom_ids,
+    resolve_parent_refs,
+)
 from ss_backfill import effective_cost
 from ss_create_preview import (
     brand_allowed,
@@ -129,8 +140,30 @@ def _num(p: dict, key: str) -> float | None:
         return None
 
 
+def ensure_options(resolver: MatrixOptionResolver, prods: list[dict]) -> None:
+    """Make sure every colour/size these SKUs reference exists in its list.
+
+    ``canonical_name`` only TRANSLATES to an existing spelling -- it never
+    creates. Pilot attempt 2 (run 31536301381) lost style 0005's children to
+    "color 'Dark Navy/ Smoke' not in customlist_bsg_matrix_color" because
+    nothing had created the genuinely-new colours first (SanMar has a whole
+    ensure-values phase for this; S&S does it inline here). ``resolve`` also
+    reuses punctuation variants instead of duplicating them.
+    """
+    for color in {str(p.get("color_name") or "").strip() for p in prods}:
+        if color:
+            _id, status = resolver.resolve(COLOR_LIST, color)
+            if status == "created":
+                print(f"  colour created: {color!r}")
+    for size in {normalize_size(str(p.get("size_name") or "")) for p in prods}:
+        if size:
+            _id, status = resolver.resolve(SIZE_LIST, size)
+            if status == "created":
+                print(f"  size created: {size!r}")
+
+
 def child_payload(p: dict, style_name: str, resolver: MatrixOptionResolver,
-                  uom: dict[str, str]) -> dict[str, object]:
+                  uom: dict[str, str], title: str = "") -> dict[str, object]:
     """One RESTlet child payload.
 
     Colour and size are sent as the LIST's spelling (the RESTlet resolves
@@ -158,6 +191,21 @@ def child_payload(p: dict, style_name: str, resolver: MatrixOptionResolver,
         "weight": weight,
         "preferredVendorId": str(VENDOR_SS),
         "costingMethod": "AVG",
+        "displayName": display_name(style_name, title)[:60],
+        "description": title or style_name,
+        # Same required references SanMar's children carry, as NAMES -- the
+        # RESTlet resolves them itself. Without the tax schedule NetSuite
+        # rejects every child with "Please enter value(s) for: Tax Schedule"
+        # (pilot attempt 2, run 31536301381, all 26 chef-coat children).
+        # NO "class": the RESTlet's class-path search crashes this account.
+        "incomeAccount": DEFAULT_INCOME_ACCOUNT,
+        "cogsAccount": DEFAULT_COGS_ACCOUNT,
+        "assetAccount": DEFAULT_ASSET_ACCOUNT,
+        "taxSchedule": DEFAULT_TAX_SCHEDULE,
+        "subsidiary": DEFAULT_SUBSIDIARY,
+        "department": DEFAULT_DEPARTMENT,
+        "location": DEFAULT_LOCATION,
+        "preferredLocation": DEFAULT_LOCATION,
         "fields": child_fields(p),
     }
     if weight_unit:
@@ -170,6 +218,38 @@ def child_payload(p: dict, style_name: str, resolver: MatrixOptionResolver,
         if val:
             payload[key] = val
     return {k: v for k, v in payload.items() if v not in (None, "")}
+
+
+def post_children(client: NetSuiteClient, cfg,
+                  payloads: list[dict]) -> tuple[int, int, int]:
+    """Post child payloads through the matrix RESTlet in batches.
+
+    Returns ``(created, already_present, failures)``; an "already exists"
+    combo is idempotency, not a failure (see sanmar_parent_create).
+    """
+    created = already = failures = 0
+    for i in range(0, len(payloads), RESTLET_BATCH):
+        batch = payloads[i:i + RESTLET_BATCH]
+        try:
+            resp = client.call_restlet(
+                cfg.netsuite.matrix_script_id, cfg.netsuite.matrix_deploy_id,
+                {"items": batch},
+            )
+        except Exception as exc:  # noqa: BLE001
+            failures += len(batch)
+            print(f"  RESTLET CALL FAILED: {str(exc)[:200]}")
+            continue
+        for r in resp.get("results", []):
+            if r.get("status") == "error":
+                msg = str(r.get("message") or "")
+                if "combination of options already exists" in msg.lower():
+                    already += 1
+                    continue
+                failures += 1
+                print(f"  CHILD FAILED {r.get('externalId')}: {msg[:140]}")
+            else:
+                created += 1
+    return created, already, failures
 
 
 def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's shape
@@ -279,40 +359,69 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
             print(f"  WOULD create parent {style_name!r} "
                   f"({display_name(style_name, title)[:60]!r})")
 
-        payloads = [child_payload(p, style_name, resolver, uom) for p in skus]
+        if allow_write:
+            ensure_options(resolver, skus)
+        payloads = [child_payload(p, style_name, resolver, uom, title) for p in skus]
         if not allow_write:
             created_children += len(payloads)
             print(f"  WOULD post {len(payloads)} child(ren), e.g. "
                   f"{payloads[0].get('itemId')!r}")
             continue
-        for i in range(0, len(payloads), RESTLET_BATCH):
-            batch = payloads[i:i + RESTLET_BATCH]
-            try:
-                resp = client.call_restlet(
-                    cfg.netsuite.matrix_script_id, cfg.netsuite.matrix_deploy_id,
-                    {"items": batch},
-                )
-            except Exception as exc:  # noqa: BLE001
-                failures += len(batch)
-                print(f"  RESTLET CALL FAILED: {str(exc)[:200]}")
+        c, a, f = post_children(client, cfg, payloads)
+        created_children += c
+        already += a
+        failures += f
+
+    # -- adopt bucket: new colours/sizes under parents that already exist ----
+    # These styles never appear in ss_new_parents.txt (their parent is real,
+    # usually SanMar's), so the loop above cannot reach them. UPDATE_MAX_ITEMS
+    # caps how many children this pass posts (the pilot ran with 80).
+    adopt_children = adopt_already = 0
+    max_children = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
+    adopt_csv = ROOT / "data" / "ss_new_children.csv"
+    if adopt_csv.exists():
+        want: dict[str, set[str]] = {}
+        with adopt_csv.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                sku = str(row.get("sku") or "").strip()
+                if sku:
+                    want.setdefault(str(row.get("style") or "").strip(), set()).add(sku)
+        posted = 0
+        for style_name in sorted(want):
+            if max_children and posted >= max_children:
+                print(f"  (adopt pass capped at {max_children} children)")
+                break
+            prods = [p for p in by_style.get(style_name, [])
+                     if str(p.get("sku") or "") in want[style_name]]
+            if not prods:
                 continue
-            for r in resp.get("results", []):
-                if r.get("status") == "error":
-                    msg = str(r.get("message") or "")
-                    if "combination of options already exists" in msg.lower():
-                        already += 1
-                        continue
-                    failures += 1
-                    print(f"  CHILD FAILED {r.get('externalId')}: {msg[:140]}")
-                else:
-                    created_children += 1
+            if max_children:
+                prods = prods[:max_children - posted]
+            title = str(styles_meta.get(style_name, {}).get("title") or "").strip()
+            print(f"\n=== adopt {style_name}: {len(prods)} new child(ren) "
+                  f"under the existing parent")
+            if allow_write:
+                ensure_options(resolver, prods)
+            payloads = [child_payload(p, style_name, resolver, uom, title)
+                        for p in prods]
+            posted += len(payloads)
+            if not allow_write:
+                adopt_children += len(payloads)
+                print(f"  WOULD post {len(payloads)} child(ren)")
+                continue
+            c, a, f = post_children(client, cfg, payloads)
+            adopt_children += c
+            adopt_already += a
+            failures += f
 
     verb = "created" if allow_write else "WOULD create (dry run)"
     print(f"\nss create: {verb} {created_parents} parent(s), "
-          f"{created_children} child(ren); styles skipped (brand/no SKUs): "
-          f"{skipped}; already present: {already}; failures: {failures}")
+          f"{created_children} child(ren) under them, {adopt_children} "
+          f"child(ren) under adopted parents; styles skipped (brand/no SKUs): "
+          f"{skipped}; already present: {already + adopt_already}; "
+          f"failures: {failures}")
     return exit_code("ss create", failures, failures,
-                     created_children + failures)
+                     created_children + adopt_children + failures)
 
 
 if __name__ == "__main__":
