@@ -214,3 +214,18 @@ def test_richardson_is_excluded_as_sanmar_sourced(monkeypatch):
     excluded = excluded_brands()
     assert not brand_allowed("Richardson", set(), excluded)
     assert not brand_allowed("RICHARDSON", set(), excluded)
+
+
+def test_store_description_html_becomes_readable_text():
+    # S&S descriptions arrive as raw HTML; written verbatim they render as
+    # markup soup in Store Description (Andy, 2026-08-12: "looks funky").
+    from ss_create import clean_html
+    raw = ('<ul><li><span style="font-family: Gotham-Book;">65% Polyester/ '
+           '35% Cotton</span></li><li>Double-breasted reversible front</li>'
+           '<li>Ten non-yellowing&nbsp;UV buttons</li></ul><div><br /></div>')
+    assert clean_html(raw) == (
+        "- 65% Polyester/ 35% Cotton\n"
+        "- Double-breasted reversible front\n"
+        "- Ten non-yellowing\xa0UV buttons")
+    assert clean_html("") == ""
+    assert clean_html("plain text stays") == "plain text stays"

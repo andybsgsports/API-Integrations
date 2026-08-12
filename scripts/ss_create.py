@@ -29,8 +29,10 @@ Honours ``SYNC_DRY_RUN``: a dry run reports exactly what it would create.
 from __future__ import annotations
 
 import csv
+import html as _html
 import json
 import os
+import re
 from pathlib import Path
 
 from native_pricing import base_price, weight_display
@@ -44,6 +46,7 @@ from sanmar_parent_create import (
     DEFAULT_LOCATION,
     DEFAULT_SUBSIDIARY,
     DEFAULT_TAX_SCHEDULE,
+    _class_id,
     _uom_ids,
     resolve_parent_refs,
 )
@@ -63,6 +66,7 @@ from sanmar_netsuite.netsuite.matrix_options import (
     MatrixOptionResolver,
 )
 from sanmar_netsuite.netsuite.repository import _sql_escape
+from sanmar_netsuite.transform.csv_export import class_for_category
 from sanmar_netsuite.transform.sizes import normalize_size
 from ss_activewear_netsuite.config import get_config as ss_config
 
@@ -93,6 +97,23 @@ def image_url(path: str | None) -> str | None:
     if not v:
         return None
     return v if v.startswith(("http://", "https://")) else SS_CDN + v.lstrip("/")
+
+
+_TAG = re.compile(r"<[^>]+>")
+
+
+def clean_html(text: str | None) -> str:
+    """S&S style descriptions arrive as raw HTML (``<ul><li><span style=...``);
+    written straight to Store Description they render as markup soup (Andy,
+    2026-08-12: "looks a little funky"). Bullets become "- " lines, every
+    other tag is stripped, entities unescaped.
+    """
+    t = _html.unescape(text or "")
+    t = re.sub(r"(?i)<li[^>]*>", "\n- ", t)
+    t = re.sub(r"(?i)<br\s*/?>", "\n", t)
+    t = re.sub(r"(?i)</(p|ul|ol|div|li)>", "\n", t)
+    t = _TAG.sub("", t)
+    return "\n".join(ln.strip() for ln in t.splitlines() if ln.strip())
 
 
 def display_name(style_name: str, title: str) -> str:
@@ -220,6 +241,48 @@ def child_payload(p: dict, style_name: str, resolver: MatrixOptionResolver,
     return {k: v for k, v in payload.items() if v not in (None, "")}
 
 
+def _refresh_adopted_parent(client: NetSuiteClient, style_name: str,
+                            meta: dict, prods: list[dict]) -> None:
+    """Heal a parent WE created bare: fill blanks, de-funk our own HTML.
+
+    Fill-blanks-only for class and the store names, so a parent another
+    vendor built is never overwritten. Store Description is replaced only
+    when it is empty OR byte-identical to the RAW S&S html -- i.e. provably
+    ours from before clean_html existed (the pilot parents Andy reviewed).
+    """
+    rows = client.suiteql(
+        "SELECT id, class, storedescription, storedisplayname "
+        "FROM item WHERE matrixtype = 'PARENT' AND "
+        f"LOWER(itemid) = LOWER('{_sql_escape(style_name)}')"
+    )
+    if not rows:
+        return
+    row = rows[0]
+    raw_desc = str(meta.get("description") or "").strip()
+    title = str(meta.get("title") or "").strip()
+    patch: dict[str, object] = {}
+    current_desc = str(row.get("storedescription") or "").strip()
+    if raw_desc and current_desc in ("", raw_desc):
+        cleaned = clean_html(raw_desc)
+        if cleaned != current_desc:
+            patch["storeDescription"] = cleaned
+    if not str(row.get("class") or "").strip():
+        cls_path = class_for_category(
+            str(meta.get("category_name")
+                or (prods[0].get("category_name") if prods else "") or ""))
+        cls_id = _class_id(client, cls_path) if cls_path else None
+        if cls_id:
+            patch["class"] = {"id": cls_id}
+    if title and not str(row.get("storedisplayname") or "").strip():
+        patch["storeDisplayName"] = display_name(style_name, title)
+    if patch:
+        try:
+            client.update_record("inventoryItem", str(row["id"]), patch)
+            print(f"  parent refreshed: {sorted(patch)}")
+        except Exception as exc:  # noqa: BLE001 - refresh is best-effort
+            print(f"  parent refresh failed: {str(exc)[:120]}")
+
+
 def post_children(client: NetSuiteClient, cfg,
                   payloads: list[dict]) -> tuple[int, int, int]:
     """Post child payloads through the matrix RESTlet in batches.
@@ -343,7 +406,7 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                     "storeDisplayName": display_name(style_name, title),
                     "salesDescription": title or style_name,
                     "purchaseDescription": title or style_name,
-                    "storeDescription": str(meta.get("description") or "").strip(),
+                    "storeDescription": clean_html(str(meta.get("description") or "")),
                     **{k: {"id": v} for k, v in {
                         "unitsType": uom.get("unitsTypeId", ""),
                         "stockUnit": uom.get("stockUnitId", ""),
@@ -352,6 +415,18 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                     }.items() if v},
                     **parent_refs,
                 }
+                # Class, like SanMar's parents (Andy, 2026-08-12: "the sanmar
+                # items have classes being filled in, but not the S&S"). The
+                # keyword mapper is category-vocabulary agnostic; an unmapped
+                # category leaves the parent classless and says so.
+                cls_path = class_for_category(
+                    str(meta.get("category_name")
+                        or skus[0].get("category_name") or ""))
+                cls_id = _class_id(client, cls_path) if cls_path else None
+                if cls_id:
+                    body["class"] = {"id": cls_id}
+                elif not cls_path:
+                    print("  (category unmapped -- parent gets no class)")
                 try:
                     pid = client.create_record("inventoryItem", body)
                     created_parents += 1
@@ -385,6 +460,8 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
     # caps how many children this pass posts (the pilot ran with 80).
     adopt_children = adopt_already = 0
     max_children = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
+    refresh_parents = (os.environ.get("CREATE_REFRESH_STYLES", "")
+                       .strip().lower() in ("1", "true", "yes"))
     adopt_csv = ROOT / "data" / "ss_new_children.csv"
     if adopt_csv.exists():
         want: dict[str, set[str]] = {}
@@ -404,9 +481,12 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                 continue
             if max_children:
                 prods = prods[:max_children - posted]
-            title = str(styles_meta.get(style_name, {}).get("title") or "").strip()
+            meta = styles_meta.get(style_name, {})
+            title = str(meta.get("title") or "").strip()
             print(f"\n=== adopt {style_name}: {len(prods)} new child(ren) "
                   f"under the existing parent")
+            if allow_write and refresh_parents:
+                _refresh_adopted_parent(client, style_name, meta, prods)
             if allow_write:
                 ensure_options(resolver, prods)
             payloads = [child_payload(p, style_name, resolver, uom, title)

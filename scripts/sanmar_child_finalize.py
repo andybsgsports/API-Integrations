@@ -124,7 +124,8 @@ def main() -> int:
         chunk = ", ".join(parent_ids[i : i + 250])
         children = client.suiteql(
             f"SELECT id, parent, itemid{col_sql} FROM item "
-            f"WHERE parent IN ({chunk}) AND externalid LIKE 'SANMAR%'"
+            f"WHERE parent IN ({chunk}) AND (externalid LIKE 'SANMAR%' "
+            f"OR externalid LIKE 'SS-%')"
         )
         for child in children:
             scanned += 1
