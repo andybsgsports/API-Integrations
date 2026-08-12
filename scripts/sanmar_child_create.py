@@ -42,6 +42,15 @@ def main() -> int:
     cfg = get_config()
     allow_write = not cfg.sync.dry_run
     max_items = int(os.environ.get("UPDATE_MAX_ITEMS", "0") or "0")
+    if not max_items:
+        # A ramp cap of its own, like CREATE_MAX_STYLES. This step's first
+        # night faced the whole ~10k-child backlog the dead CSV importer had
+        # stranded, and draining it at 25/RESTlet-call plus the normal
+        # 300-style batch blew the create leg's 350-minute job cap (run
+        # 31566421138, killed at exactly 5h50m -- GitHub labels that
+        # "cancelled"). Capped, the backlog clears in ~3 nights and the leg
+        # always fits its clock; steady-state nights never near the cap.
+        max_items = int(os.environ.get("SANMAR_CHILD_CREATE_MAX", "4000") or "4000")
 
     styles = parse_styles(str(_resolve_feed(cfg)))
     client = NetSuiteClient(cfg.netsuite)
