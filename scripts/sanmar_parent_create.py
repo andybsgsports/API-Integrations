@@ -434,6 +434,14 @@ def main() -> int:
                 parent_refs = resolve_parent_refs(client)
             body = {
                 "itemId": style_name, "vendorName": style_name, "matrixType": "PARENT",
+                # Parents carry a Preferred Vendor too (Andy, 2026-08-12:
+                # "all items would need a preferred vendor" -- children had
+                # one via the RESTlet seed, parents were created bare).
+                "itemVendor": {"items": [{
+                    "vendor": {"id": str(VENDOR_SANMAR)},
+                    "preferredVendor": True,
+                    "vendorCode": style_name,
+                }]},
                 # Active in NetSuite immediately, but NOT on the storefront
                 # (Andy, 2026-07-31): nothing reaches the web store unreviewed.
                 # item_web_display_fix.py turns isOnline on once an item has a

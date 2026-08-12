@@ -332,6 +332,13 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                 body = {
                     "itemId": style_name, "vendorName": style_name,
                     "matrixType": "PARENT", "isInactive": False, "isOnline": False,
+                    # Parents carry a Preferred Vendor too (Andy, 2026-08-12:
+                    # "all items would need a preferred vendor").
+                    "itemVendor": {"items": [{
+                        "vendor": {"id": str(VENDOR_SS)},
+                        "preferredVendor": True,
+                        "vendorCode": style_name,
+                    }]},
                     "displayName": display_name(style_name, title)[:60],
                     "storeDisplayName": display_name(style_name, title),
                     "salesDescription": title or style_name,
