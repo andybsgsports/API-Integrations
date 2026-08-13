@@ -16,7 +16,9 @@ discovered here, not guessed.
 from __future__ import annotations
 
 import json
+from collections import Counter
 
+from sanmar_netsuite.transform.csv_export import class_for_category
 from ss_activewear_netsuite.config import get_config
 from ss_activewear_netsuite.ss_activewear.client import SsClient
 
@@ -43,6 +45,24 @@ def main() -> int:
                         if str(s.get("categoryName") or "").strip()]
             print(f"  {len(with_cat)} of {len(styles)} style(s) carry a "
                   f"non-empty categoryName")
+
+            # The whole baseCategory vocabulary, with what each maps to --
+            # so the class table can be completed in ONE pass instead of
+            # discovering one unmapped value per create run.
+            tally: Counter[str] = Counter(
+                str(s.get("baseCategory") or "").strip() or "(blank)"
+                for s in styles)
+            print(f"\n=== baseCategory vocabulary ({len(tally)} value(s) "
+                  f"across {len(styles)} styles)")
+            print(f"  {'category':<28} {'styles':>7}  -> NetSuite Class")
+            unmapped = 0
+            for cat, n in tally.most_common():
+                cls = class_for_category(cat) if cat != "(blank)" else ""
+                if not cls:
+                    unmapped += n
+                print(f"  {cat[:28]:<28} {n:>7}  -> {cls or 'UNMAPPED'}")
+            print(f"\n  {unmapped} of {len(styles)} styles would get NO class "
+                  f"({100.0 * unmapped / max(1, len(styles)):.0f}%)")
     except Exception as exc:  # noqa: BLE001
         print(f"/Styles probe failed: {str(exc)[:200]}")
 
