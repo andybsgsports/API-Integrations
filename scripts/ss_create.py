@@ -33,6 +33,7 @@ import html as _html
 import json
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 from native_pricing import base_price, weight_display
@@ -262,6 +263,11 @@ def _refresh_adopted_parent(client: NetSuiteClient, style_name: str,
     title = str(meta.get("title") or "").strip()
     patch: dict[str, object] = {}
     current_desc = str(row.get("storedescription") or "").strip()
+    # A description we wrote before clean_html existed starts with the markup
+    # itself -- match that shape too, since NetSuite may have trimmed or
+    # re-encoded the exact bytes on the way in.
+    if current_desc.startswith("<") and clean_html(current_desc):
+        current_desc = raw_desc if raw_desc else current_desc
     if raw_desc and current_desc in ("", raw_desc):
         cleaned = clean_html(raw_desc)
         if cleaned != current_desc:
@@ -353,6 +359,7 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
     print(f"brand scope: {len(allowed) or 'all'} allowed, {len(excluded)} excluded")
 
     created_parents = created_children = skipped = failures = done = 0
+    unmapped_cats: Counter[str] = Counter()
     parent_refs: dict[str, dict] | None = None
     uom: dict[str, str] = {}
     if allow_write:
@@ -419,14 +426,19 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
                 # items have classes being filled in, but not the S&S"). The
                 # keyword mapper is category-vocabulary agnostic; an unmapped
                 # category leaves the parent classless and says so.
-                cls_path = class_for_category(
-                    str(meta.get("category_name")
-                        or skus[0].get("category_name") or ""))
+                raw_cat = str(meta.get("category_name")
+                              or skus[0].get("category_name") or "")
+                cls_path = class_for_category(raw_cat)
                 cls_id = _class_id(client, cls_path) if cls_path else None
                 if cls_id:
                     body["class"] = {"id": cls_id}
                 elif not cls_path:
-                    print("  (category unmapped -- parent gets no class)")
+                    # Name the category, so an unmapped one can be MAPPED
+                    # rather than guessed at -- and so a category that is
+                    # simply absent from the feed is distinguishable from one
+                    # the keyword table doesn't cover.
+                    print(f"  (no class: category {raw_cat!r} unmapped)")
+                    unmapped_cats[raw_cat] += 1
                 try:
                     pid = client.create_record("inventoryItem", body)
                     created_parents += 1
@@ -501,12 +513,55 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - mirrors sanmar_parent_create's sh
             adopt_already += a
             failures += f
 
+    # -- heal every parent WE built, not just the ones with work pending -----
+    # A parent whose children all exist appears in NEITHER bucket, so the
+    # 2026-08-12 refresh reached only 054X/1000 and left the pilot parents
+    # Andy reviewed exactly as they were. Find them by their SS- children.
+    if allow_write and refresh_parents:
+        print("\n=== refreshing every parent built from S&S children")
+        healed = 0
+        try:
+            rows = client.suiteql(
+                "SELECT DISTINCT i.parent AS p FROM item i "
+                "WHERE i.externalid LIKE 'SS-%' AND i.parent IS NOT NULL"
+            )
+        except Exception as exc:  # noqa: BLE001
+            rows = []
+            print(f"  parent lookup failed: {str(exc)[:120]}")
+        pids = [str(r["p"]) for r in rows]
+        by_id: dict[str, str] = {}
+        for i in range(0, len(pids), 250):
+            chunk = ", ".join(pids[i:i + 250])
+            try:
+                for r in client.suiteql(
+                    f"SELECT id, itemid FROM item WHERE id IN ({chunk})"
+                ):
+                    by_id[str(r["id"])] = str(r.get("itemid") or "")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  name lookup failed: {str(exc)[:120]}")
+        for style_name in sorted(set(by_id.values())):
+            if not style_name:
+                continue
+            meta = styles_meta.get(style_name, {})
+            if not meta:
+                continue
+            before = healed
+            _refresh_adopted_parent(client, style_name, meta,
+                                    by_style.get(style_name, []))
+            healed = before + 1
+        print(f"  checked {len(set(by_id.values()))} S&S-built parent(s)")
+
     verb = "created" if allow_write else "WOULD create (dry run)"
     print(f"\nss create: {verb} {created_parents} parent(s), "
           f"{created_children} child(ren) under them, {adopt_children} "
           f"child(ren) under adopted parents; styles skipped (brand/no SKUs): "
           f"{skipped}; already present: {already + adopt_already}; "
           f"failures: {failures}")
+    if unmapped_cats:
+        print("\ncategories with no class mapping (add to _KEYWORD_CLASS if "
+              "they should map):")
+        for cat, n in unmapped_cats.most_common(15):
+            print(f"  {n:>4}x {cat!r}")
     return exit_code("ss create", failures, failures,
                      created_children + adopt_children + failures)
 
