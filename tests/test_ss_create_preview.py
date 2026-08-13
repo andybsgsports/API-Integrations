@@ -229,3 +229,27 @@ def test_store_description_html_becomes_readable_text():
         "- Ten non-yellowing\xa0UV buttons")
     assert clean_html("") == ""
     assert clean_html("plain text stays") == "plain text stays"
+
+
+def test_style_category_comes_from_baseCategory():
+    # S&S has no "categoryName" -- probe run 31656733104 found 0 of 5,653
+    # styles carrying it, which is why every S&S item came out classless.
+    # /Styles calls the garment type `baseCategory`.
+    from ss_activewear_netsuite.ss_activewear.client import style_from_payload
+    s = style_from_payload({
+        "styleID": 9182, "styleName": "112", "brandName": "Richardson",
+        "title": "Trucker Cap", "baseCategory": "Headwear",
+        "categories": "11,71,87,155",
+    })
+    assert s.category_name == "Headwear"
+
+
+def test_baseCategory_maps_to_a_netsuite_class():
+    from sanmar_netsuite.transform.csv_export import class_for_category
+    # The vocabulary S&S uses lands on the same keyword table SanMar's does.
+    assert class_for_category("Headwear") == "Uniforms : Headwear"
+    assert class_for_category("T-Shirts") == "Tops : Tees"
+    assert class_for_category("Polos") == "Tops : Polos"
+    assert class_for_category("Fleece") == "Tops : Sweatshirts"
+    assert class_for_category("Outerwear") == "Outerwear : Jackets"
+    assert class_for_category("Bags") == "Bags"
