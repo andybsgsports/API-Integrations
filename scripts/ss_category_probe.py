@@ -31,7 +31,8 @@ def _show(label: str, row: dict) -> None:
 
 def main() -> int:
     cfg = get_config()
-    client = SsClient(cfg.api)
+    styles: list = []
+    client = SsClient(cfg.ss_api)
 
     # /Styles -- one unpaged response; take the first row RAW.
     try:
