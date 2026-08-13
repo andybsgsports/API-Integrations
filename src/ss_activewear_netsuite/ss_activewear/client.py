@@ -158,7 +158,15 @@ def style_from_payload(row: dict[str, Any]) -> SsStyle:
         brand_name=str(row.get("brandName") or "").strip(),
         title=str(row.get("title") or "").strip(),
         description=str(row.get("description") or "").strip(),
-        category_name=str(row.get("categoryName") or "").strip(),
+        # S&S has no "categoryName": /Styles carries `baseCategory` (a plain
+        # name like "Headwear" / "T-Shirts") plus `categories`, a comma list
+        # of ids spanning every merchandising facet -- fabric weights,
+        # audiences, colours. baseCategory is the garment type, which is what
+        # a NetSuite Class means, so that is what we read. Reading the
+        # non-existent categoryName is why every S&S item came out classless
+        # (probe run 31656733104: 0 of 5,653 styles carried categoryName).
+        category_name=str(row.get("baseCategory")
+                          or row.get("categoryName") or "").strip(),
     )
 
 
