@@ -126,6 +126,12 @@ _KEYWORD_CLASS: list[tuple[str, str]] = [
     ("t-shirt", "Tops : Tees"),
     ("tee shirt", "Tops : Tees"),
     ("woven shirt", "Tops"),
+    # S&S calls its whole woven-garment family "Wovens" (chef coats, work
+    # shirts). Andy, 2026-08-12: "just do tops for the chef coat style, no
+    # need to narrow it down further" -- so the family maps to the parent
+    # class rather than being split into sub-classes. Placed AFTER the
+    # specific tags so a woven polo or a woven jacket still wins its own.
+    ("woven", "Tops"),
     ("activewear", "Tops"),
     ("pant", "Bottoms : Pants"),  # unverified -- not observed in the feed yet
     ("short", "Bottoms : Shorts"),  # unverified -- not observed in the feed yet

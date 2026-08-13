@@ -253,3 +253,14 @@ def test_baseCategory_maps_to_a_netsuite_class():
     assert class_for_category("Fleece") == "Tops : Sweatshirts"
     assert class_for_category("Outerwear") == "Outerwear : Jackets"
     assert class_for_category("Bags") == "Bags"
+
+
+def test_wovens_map_to_tops():
+    # Andy, 2026-08-12: "just do tops for the chef coat style, no need to
+    # narrow it down further". S&S files chef coats under 'Wovens'.
+    from sanmar_netsuite.transform.csv_export import class_for_category
+    assert class_for_category("Wovens") == "Tops"
+    assert class_for_category("Woven Shirts") == "Tops"
+    # Specific garment tags still win over the woven family.
+    assert class_for_category("Woven Polos") == "Tops : Polos"
+    assert class_for_category("Wovens; Outerwear") == "Outerwear : Jackets"
