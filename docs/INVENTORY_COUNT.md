@@ -32,10 +32,12 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    **Off shelf** is for stock that is yours and still on hand in NetSuite but
    not on the warehouse shelf: units out at the decoration facility, or pulled
    and staged for customer pickup on an order that has not been marked shipped.
-   **Open orders** on a line lists the sales orders that still owe the customer
-   that item (Pending Fulfillment, Partially Fulfilled), with customer and
-   unshipped quantity; tick the ones whose units are off the shelf and their
-   unshipped quantity is added to Off shelf and the order numbers are recorded.
+   A **Committed** figure above zero is a link on both pages: it opens the
+   sales orders that still owe the customer that item (Pending Fulfillment,
+   Partially Fulfilled), with customer and unshipped quantity. On the search
+   page the list is read-only; on the sheet (also via **Open orders**) tick the
+   orders whose units are off the shelf and their unshipped quantity is added
+   to Off shelf and the order numbers are recorded.
    When a line's count is below the quantity committed to open sales orders,
    the sheet warns — that is the "physically gone but never marked shipped"
    case, which should be fixed by shipping the fulfillment, not by adjusting.

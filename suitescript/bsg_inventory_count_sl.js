@@ -832,6 +832,7 @@ button{cursor:pointer}
 .ic-total{font-weight:800;font-size:16px;min-width:40px;text-align:center}
 .ic-commit-warn{font-size:12px;color:var(--warn);background:#fff3df;border-radius:6px;padding:4px 8px;margin-top:6px}
 .ic-link{background:none;border:0;color:var(--focus);font-weight:700;padding:4px 0;font-size:13px;text-decoration:underline;cursor:pointer}
+.ic-commit-link{background:none;border:0;padding:0 2px;font:inherit;font-weight:700;color:var(--focus);text-decoration:underline;cursor:pointer;min-height:28px}
 .ic-orders{margin-top:6px;border-top:1px dashed var(--line);padding-top:6px;font-size:13px}
 .ic-order{display:flex;align-items:flex-start;gap:8px;padding:4px 0}
 .ic-order input{width:22px;height:22px;margin:1px 0 0;flex:0 0 auto}
@@ -1113,8 +1114,71 @@ button{cursor:pointer}
         runSearch(true);
     }
 
+    var ordersCache = {};   // itemId -> { orders: [...] } | { error } for this page load
+
+    // The open sales orders for one item, loaded on first open. With opts
+    // (isTicked / onTick) each order gets a checkbox that moves its unshipped
+    // units into Off shelf -- that is the Sheet; the search page shows the
+    // same list read-only, since the line may not be on the sheet yet.
+    function ordersPanel(itemId, opts) {
+        var box = el('div', { class: 'ic-orders', hidden: true });
+        function paint() {
+            box.innerHTML = '';
+            var cached = ordersCache[itemId];
+            if (!cached) {
+                box.appendChild(el('div', { class: 'ic-progress', text: 'Loading open orders…' }));
+                apiGet('orders', { item: itemId, loc: state.loc || '' }).then(function (res) {
+                    ordersCache[itemId] = (!res || !res.ok) ? { error: (res && res.error) || 'Could not load orders.' } : { orders: res.orders || [] };
+                    if (!box.hidden) { paint(); }
+                });
+                return;
+            }
+            if (cached.error) { box.appendChild(el('div', { class: 'ic-error', text: cached.error })); return; }
+            if (!cached.orders.length) {
+                box.appendChild(el('div', { text: 'No open sales orders for this item' + (state.loc ? ' at ' + locName(state.loc) : '') + '.' }));
+                return;
+            }
+            box.appendChild(el('div', { class: 'ic-meta', text: opts
+                ? 'Tick the orders whose units are off the shelf (at the decorator, staged for pickup). Their unshipped quantity is added to Off shelf.'
+                : 'Open sales orders still owing this item. Add the item, then mark off-shelf units on the Sheet tab.' }));
+            cached.orders.forEach(function (o) {
+                var num = String(o.tranid || o.id);
+                var ref = /^so/i.test(num) ? num : 'SO ' + num;
+                var kids = [];
+                if (opts) {
+                    var cb = el('input', { type: 'checkbox', 'aria-label': 'Off shelf: ' + ref });
+                    cb.checked = !!opts.isTicked(ref);
+                    cb.addEventListener('change', function () { opts.onTick(o, ref, cb.checked); });
+                    kids.push(cb);
+                }
+                kids.push(el('span', {}, [
+                    o.url ? el('a', { href: o.url, target: '_blank', rel: 'noopener', text: ref }) : el('b', { text: ref }),
+                    o.customer ? ' · ' + o.customer : '',
+                    el('br'),
+                    el('small', { text: fmt(o.remaining) + ' unshipped of ' + fmt(o.qty) + (o.status ? ' · ' + o.status : '') + (o.date ? ' · ' + o.date : '') })
+                ]));
+                box.appendChild(el(opts ? 'label' : 'div', { class: 'ic-order' }, kids));
+            });
+        }
+        return {
+            box: box,
+            toggle: function () {
+                if (!box.hidden) { box.hidden = true; return; }
+                box.hidden = false;
+                paint();
+            }
+        };
+    }
+
+    // "Committed: 10" with the number clickable when there is something to see.
+    function committedEl(committed, panel) {
+        if (!(Number(committed) > 0)) { return el('b', { text: fmt(committed) }); }
+        return el('button', { class: 'ic-commit-link', type: 'button', text: fmt(committed), 'aria-label': 'Show open orders (' + fmt(committed) + ' committed)', onclick: function () { panel.toggle(); } });
+    }
+
     function resultRow(item) {
         var line = lineFor(item);
+        var panel = ordersPanel(item.id, null);
         var row = el('div', { class: 'ic-row' + (line ? ' is-onsheet' : '') + (item.blocked ? ' is-blocked' : ''), 'data-row-for': item.id });
         var meta = [];
         if (item.vendor) { meta.push(item.vendor); }
@@ -1122,9 +1186,10 @@ button{cursor:pointer}
         var info = el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: item.name }),
             (item.display || item.desc) ? el('div', { class: 'ic-desc', text: item.display && item.desc && item.display !== item.desc ? item.display + ' - ' + item.desc : (item.display || item.desc) }) : null,
-            el('div', { class: 'ic-meta' }, [meta.length ? meta.join(' · ') + ' · ' : '', 'On hand: ', el('b', { text: fmt(item.onhand) }), ' · Avail: ', el('b', { text: fmt(item.available) }), ' · Committed: ', el('b', { text: fmt(item.committed) }), ' · On order: ', el('b', { text: fmt(item.onorder) })]),
+            el('div', { class: 'ic-meta' }, [meta.length ? meta.join(' · ') + ' · ' : '', 'On hand: ', el('b', { text: fmt(item.onhand) }), ' · Avail: ', el('b', { text: fmt(item.available) }), ' · Committed: ', committedEl(item.committed, panel), ' · On order: ', el('b', { text: fmt(item.onorder) })]),
             item.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + item.blocked + ') - adjust manually' }) : null,
-            line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: 'On sheet: ' + fmt(line.count) }) : null
+            line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: 'On sheet: ' + fmt(line.count) }) : null,
+            panel.box
         ]);
         row.appendChild(info);
         if (!item.blocked) {
@@ -1219,8 +1284,6 @@ button{cursor:pointer}
 
     // -------------------------------------------------------------- sheet --
 
-    var ordersCache = {};   // itemId -> { orders: [...] } for this page load
-
     function sheetRow(line) {
         syncCount(line);
         var row = el('div', { class: 'ic-row' + (line.error ? ' has-error' : '') });
@@ -1279,63 +1342,27 @@ button{cursor:pointer}
             removeLine(line.id); render();
         } });
 
-        // Open sales orders for this item, fetched on demand. Ticking one adds its
-        // unshipped quantity to Off shelf and records the SO number for the memo.
-        var ordersBox = el('div', { class: 'ic-orders', hidden: true });
-        var ordersBtn = el('button', { class: 'ic-link', type: 'button', text: 'Open orders' + (Number(line.committed) > 0 ? ' (' + fmt(line.committed) + ' committed)' : ''), onclick: function () {
-            if (!ordersBox.hidden) { ordersBox.hidden = true; return; }
-            ordersBox.hidden = false;
-            renderOrders();
-        } });
-        function renderOrders() {
-            ordersBox.innerHTML = '';
-            var cached = ordersCache[line.id];
-            if (!cached) {
-                ordersBox.appendChild(el('div', { class: 'ic-progress', text: 'Loading open orders…' }));
-                apiGet('orders', { item: line.id, loc: state.loc || '' }).then(function (res) {
-                    if (!res || !res.ok) {
-                        ordersCache[line.id] = { error: (res && res.error) || 'Could not load orders.' };
-                    } else {
-                        ordersCache[line.id] = { orders: res.orders || [] };
-                    }
-                    renderOrders();
-                });
-                return;
+        // Open sales orders for this item. Ticking one adds its unshipped
+        // quantity to Off shelf and records the SO number for the memo.
+        var panel = ordersPanel(line.id, {
+            isTicked: function (ref) { return (line.offorders || []).indexOf(ref) !== -1; },
+            onTick: function (o, ref, checked) {
+                line.offorders = (line.offorders || []).filter(function (x) { return x !== ref; });
+                var current = Number(line.offshelf) || 0;
+                if (checked) { line.offorders.push(ref); line.offshelf = round4(current + o.remaining); }
+                else { line.offshelf = round4(Math.max(0, current - o.remaining)); }
+                off.value = line.offshelf ? fmt(line.offshelf) : '';
+                if (checked && !line.offreason) { line.offreason = (BOOT.offReasons || ['Decorator'])[0]; reason.value = line.offreason; }
+                paint();
             }
-            if (cached.error) { ordersBox.appendChild(el('div', { class: 'ic-error', text: cached.error })); return; }
-            if (!cached.orders.length) { ordersBox.appendChild(el('div', { text: 'No open sales orders for this item' + (state.loc ? ' at ' + locName(state.loc) : '') + '.' })); return; }
-            ordersBox.appendChild(el('div', { class: 'ic-meta', text: 'Tick the orders whose units are off the shelf (at the decorator, staged for pickup). Their unshipped quantity is added to Off shelf.' }));
-            cached.orders.forEach(function (o) {
-                var num = String(o.tranid || o.id);
-                var ref = /^so/i.test(num) ? num : 'SO ' + num;
-                var ticked = (line.offorders || []).indexOf(ref) !== -1;
-                var cb = el('input', { type: 'checkbox', 'aria-label': 'Off shelf: ' + ref });
-                cb.checked = ticked;
-                cb.addEventListener('change', function () {
-                    line.offorders = (line.offorders || []).filter(function (x) { return x !== ref; });
-                    var current = Number(line.offshelf) || 0;
-                    if (cb.checked) { line.offorders.push(ref); line.offshelf = round4(current + o.remaining); }
-                    else { line.offshelf = round4(Math.max(0, current - o.remaining)); }
-                    off.value = line.offshelf ? fmt(line.offshelf) : '';
-                    if (cb.checked && !line.offreason) { line.offreason = (BOOT.offReasons || ['Decorator'])[0]; reason.value = line.offreason; }
-                    paint();
-                });
-                ordersBox.appendChild(el('label', { class: 'ic-order' }, [
-                    cb,
-                    el('span', {}, [
-                        o.url ? el('a', { href: o.url, target: '_blank', rel: 'noopener', text: ref }) : el('b', { text: ref }),
-                        o.customer ? ' · ' + o.customer : '',
-                        el('br'),
-                        el('small', { text: fmt(o.remaining) + ' unshipped of ' + fmt(o.qty) + (o.status ? ' · ' + o.status : '') + (o.date ? ' · ' + o.date : '') })
-                    ])
-                ]));
-            });
-        }
+        });
+        var ordersBox = panel.box;
+        var ordersBtn = el('button', { class: 'ic-link', type: 'button', text: 'Open orders' + (Number(line.committed) > 0 ? ' (' + fmt(line.committed) + ' committed)' : ''), onclick: function () { panel.toggle(); } });
 
         row.appendChild(el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: line.name }),
             (line.display || line.desc) ? el('div', { class: 'ic-desc', text: line.display || line.desc }) : null,
-            el('div', { class: 'ic-meta' }, ['On hand: ', el('b', { text: fmt(line.onhand) }), ' · Avail: ', el('b', { text: fmt(line.available) }), ' · Committed: ', el('b', { text: fmt(line.committed) }), ' · On order: ', el('b', { text: fmt(line.onorder) }), line.vendor ? ' · ' + line.vendor : '']),
+            el('div', { class: 'ic-meta' }, ['On hand: ', el('b', { text: fmt(line.onhand) }), ' · Avail: ', el('b', { text: fmt(line.available) }), ' · Committed: ', committedEl(line.committed, panel), ' · On order: ', el('b', { text: fmt(line.onorder) }), line.vendor ? ' · ' + line.vendor : '']),
             line.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + line.blocked + ') - will be skipped' }) : null,
             line.error ? el('div', { class: 'ic-error', text: line.error }) : null,
             warn,
