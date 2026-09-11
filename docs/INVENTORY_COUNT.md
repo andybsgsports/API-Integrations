@@ -6,12 +6,13 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
 
 ## What it does
 
-1. **The list.** The page opens on every item **in stock** at the chosen
+1. **The list.** The page opens on every item at the chosen
    location — NetSuite's current inventory snapshot, the same rows as the
-   Physical Inventory Worksheet, sorted by item name, 100 per page with a
-   **Load more** button. An **In stock / All items** toggle switches between
-   items whose on-hand is not zero (the default; negatives included) and the
-   whole catalog at that location. Only active inventory items (and
+   Physical Inventory Worksheet and the *Custom Current Inventory Snapshot 2*
+   report, sorted by item name, 100 per page with a **Load more** button. An
+   **In stock / All items** toggle switches between items whose on-hand is
+   not zero (negatives included) and the whole catalog at that location
+   (the default, zeros included, matching the report's Show Zeros). Only active inventory items (and
    assemblies) show; matrix *parents* never do, because stock lives on the
    color/size children.
    **Search** narrows the list by style #, name, description, UPC or vendor
@@ -71,7 +72,7 @@ rest of the sheet still posts. Adjust those the normal way.
 | `SUBSIDIARY_ID` | `null` | OneWorld: force the subsidiary. `null` = the chosen location's subsidiary, else the logged-in user's. |
 | `ITEM_TYPES` | `['InvtPart', 'Assembly']` | Item types that can be counted. |
 | `SEARCH_PAGE_SIZE` | `100` | Rows per page of the list (a **Load more** button pages on). |
-| `IN_STOCK_DEFAULT` | `true` | Open on items whose on-hand is not zero. The toggle on the page overrides it and is remembered per browser. |
+| `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items whose on-hand is not zero. The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 

@@ -54,10 +54,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
         SEARCH_PAGE_SIZE: 100,
         SEARCH_MAX_WORDS: 6,
         // The page opens on the full list of items at the chosen location -- the
-        // "current inventory snapshot". true = only items whose on-hand is not
-        // zero (what you would physically count); the page has an "All items"
-        // toggle for the rest. Remembered per browser once changed.
-        IN_STOCK_DEFAULT: true,
+        // "current inventory snapshot". false = every item, zeros included, like
+        // BSG's "Custom Current Inventory Snapshot 2" report (Show Zeros on);
+        // true = only items whose on-hand is not zero. The page has an
+        // In stock / All items toggle either way, remembered per browser.
+        IN_STOCK_DEFAULT: false,
         // Lines per Inventory Adjustment. Bigger sheets are submitted by the page
         // as several adjustments, one after another.
         MAX_LINES_PER_ADJUSTMENT: 200,
@@ -214,15 +215,58 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
     // Every word must hit somewhere, and each word may hit a different field, so
     // "royale 5" finds "Royale NFHS V25 Soccer Ball - Size 5" (name + description)
     // and "0125666912 white" narrows a style to its white children.
+    var WORD_FIELDS = ['itemid', 'displayname', 'salesdescription', 'purchasedescription', 'vendorname', 'upccode'];
     function wordFilter(w) {
-        return [
-            ['itemid', 'contains', w], 'or',
-            ['displayname', 'contains', w], 'or',
-            ['salesdescription', 'contains', w], 'or',
-            ['purchasedescription', 'contains', w], 'or',
-            ['vendorname', 'contains', w], 'or',
-            ['upccode', 'is', w]
-        ];
+        var out = [];
+        WORD_FIELDS.forEach(function (f) {
+            if (deadFields[f]) { return; }
+            if (out.length) { out.push('or'); }
+            out.push([f, f === 'upccode' ? 'is' : 'contains', w]);
+        });
+        return out;
+    }
+
+    // Item fields NetSuite only knows when a feature is on. Asking for one in an
+    // account without the feature rejects the WHOLE search ("An nlobjSearchColumn
+    // contains an invalid column, or is not in proper syntax: isserialitem"), so
+    // each is included only when its feature is in effect.
+    var FLAG_COLS = [
+        { name: 'isserialitem', feature: 'SERIALIZEDINVENTORY', flag: 'serialized' },
+        { name: 'islotitem', feature: 'LOTNUMBEREDINVENTORY', flag: 'lot-numbered' },
+        { name: 'usebins', feature: 'BINMANAGEMENT', flag: 'bin-tracked' }
+    ];
+    function flagCols() {
+        return FLAG_COLS.filter(function (c) { return !deadFields[c.name] && feature(c.feature); });
+    }
+
+    // Fields this account rejected during this request. Anything not in REQUIRED
+    // is nice-to-have: withItemSearch drops it and retries rather than failing.
+    var deadFields = {};
+    var REQUIRED = { itemid: 1, internalid: 1, type: 1, isinactive: 1, matrix: 1, inventorylocation: 1, quantityonhand: 1, locationquantityonhand: 1 };
+    var OPTIONAL_COLS = ['displayname', 'salesdescription', 'upccode', 'vendorname', 'vendor', 'parent'];
+
+    function rejectedField(e) {
+        // "...invalid column, or is not in proper syntax: isserialitem." -- the
+        // name is followed by a full stop, which must not become part of it.
+        var m = /invalid (?:column|filter)[^:]*:\s*([a-z0-9_]+)/i.exec(userErr(e));
+        return m ? m[1].toLowerCase() : null;
+    }
+
+    // Runs an item search built by buildSpec(); if NetSuite rejects an optional
+    // column or filter field, marks it dead and rebuilds -- so one account that
+    // lacks a field degrades to a slightly thinner row instead of a broken page.
+    function withItemSearch(buildSpec, run) {
+        for (var attempt = 0; attempt < 6; attempt++) {
+            try {
+                return run(search.create(buildSpec()));
+            } catch (e) {
+                var bad = rejectedField(e);
+                if (!bad || deadFields[bad] || REQUIRED[bad]) { throw e; }
+                deadFields[bad] = true;
+                log.audit({ title: 'invcount: this account rejects item field ' + bad + '; retrying without it', details: userErr(e) });
+            }
+        }
+        throw new Error('Item search keeps failing after dropping unsupported fields.');
     }
 
     function baseFilters(locId) {
@@ -239,28 +283,38 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
     }
 
     function itemColumns(locId) {
-        return [
-            search.createColumn({ name: 'itemid', sort: search.Sort.ASC }),
-            'displayname', 'salesdescription', 'upccode', 'vendorname', 'vendor', 'type',
-            'isserialitem', 'islotitem', 'usebins', 'parent',
-            locId ? 'locationquantityonhand' : 'quantityonhand'
-        ];
+        var cols = [search.createColumn({ name: 'itemid', sort: search.Sort.ASC }), 'type', locId ? 'locationquantityonhand' : 'quantityonhand'];
+        OPTIONAL_COLS.forEach(function (c) { if (!deadFields[c]) { cols.push(c); } });
+        flagCols().forEach(function (c) { cols.push(c.name); });
+        return cols;
+    }
+
+    function itemSpec(filters, locId) {
+        return { type: search.Type.ITEM, filters: filters, columns: itemColumns(locId) };
+    }
+
+    // Column value / text that tolerates a column this account does not have.
+    function val(r, name) {
+        if (deadFields[name]) { return ''; }
+        try { return r.getValue(name) || ''; } catch (e) { return ''; }
+    }
+    function txt(r, name) {
+        if (deadFields[name]) { return ''; }
+        try { return r.getText(name) || ''; } catch (e) { return ''; }
     }
 
     function rowToItem(r, locId) {
         var qty = parseFloat(r.getValue(locId ? 'locationquantityonhand' : 'quantityonhand'));
         var flags = [];
-        if (isTrue(r.getValue('isserialitem'))) { flags.push('serialized'); }
-        if (isTrue(r.getValue('islotitem'))) { flags.push('lot-numbered'); }
-        if (isTrue(r.getValue('usebins'))) { flags.push('bin-tracked'); }
+        flagCols().forEach(function (c) { if (isTrue(r.getValue(c.name))) { flags.push(c.flag); } });
         return {
             id: String(r.id),
             name: r.getValue('itemid') || '',
-            display: r.getValue('displayname') || '',
-            desc: r.getValue('salesdescription') || '',
-            upc: r.getValue('upccode') || '',
-            vendor: r.getText('vendor') || r.getValue('vendorname') || '',
-            parent: r.getText('parent') || '',
+            display: val(r, 'displayname'),
+            desc: val(r, 'salesdescription'),
+            upc: val(r, 'upccode'),
+            vendor: txt(r, 'vendor') || val(r, 'vendorname'),
+            parent: txt(r, 'parent'),
             onhand: isFinite(qty) ? qty : 0,
             blocked: flags.length ? flags.join(', ') : ''
         };
@@ -274,17 +328,19 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
     function searchItems(q, locId, page, inStock) {
         var words = tokenize(q);
         if (!multiLocation()) { locId = null; }
-        var filters = baseFilters(locId);
-        if (inStock) {
-            filters.push('and');
-            filters.push([locId ? 'locationquantityonhand' : 'quantityonhand', 'notequalto', 0]);
+        function buildSpec() {
+            var filters = baseFilters(locId);
+            if (inStock) {
+                filters.push('and');
+                filters.push([locId ? 'locationquantityonhand' : 'quantityonhand', 'notequalto', 0]);
+            }
+            words.forEach(function (w) {
+                var wf = wordFilter(w);
+                if (wf.length) { filters.push('and'); filters.push(wf); }
+            });
+            return itemSpec(filters, locId);
         }
-        words.forEach(function (w) {
-            filters.push('and');
-            filters.push(wordFilter(w));
-        });
-        var paged = search.create({ type: search.Type.ITEM, filters: filters, columns: itemColumns(locId) })
-            .runPaged({ pageSize: CONFIG.SEARCH_PAGE_SIZE });
+        var paged = withItemSearch(buildSpec, function (srch) { return srch.runPaged({ pageSize: CONFIG.SEARCH_PAGE_SIZE }); });
         var pageCount = paged.pageRanges.length;
         var idx = Math.max(0, page || 0);
         var items = [];
@@ -301,15 +357,19 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
         var map = {};
         if (!ids.length) { return map; }
         if (!multiLocation()) { locId = null; }
-        var filters = baseFilters(locId);
-        filters.push('and');
-        filters.push(['internalid', 'anyof', ids]);
-        search.create({ type: search.Type.ITEM, filters: filters, columns: itemColumns(locId) })
-            .run().each(function (r) {
+        function buildSpec() {
+            var filters = baseFilters(locId);
+            filters.push('and');
+            filters.push(['internalid', 'anyof', ids]);
+            return itemSpec(filters, locId);
+        }
+        withItemSearch(buildSpec, function (srch) {
+            srch.run().each(function (r) {
                 var it = rowToItem(r, locId);
                 map[it.id] = it;
                 return true;
             });
+        });
         return map;
     }
 
