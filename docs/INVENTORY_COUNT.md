@@ -6,11 +6,18 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
 
 ## What it does
 
-1. **Search** items by style #, name, description, UPC or vendor code — any
-   words, in any order (`royale 5` finds "Royale NFHS V25 Soccer Ball - Size 5";
-   `0125566912 white` narrows a style to its white children). Only active
-   inventory items (and assemblies) show; matrix *parents* never do, because
-   stock lives on the color/size children.
+1. **The list.** The page opens on every item **in stock** at the chosen
+   location — NetSuite's current inventory snapshot, the same rows as the
+   Physical Inventory Worksheet, sorted by item name, 100 per page with a
+   **Load more** button. An **In stock / All items** toggle switches between
+   items whose on-hand is not zero (the default; negatives included) and the
+   whole catalog at that location. Only active inventory items (and
+   assemblies) show; matrix *parents* never do, because stock lives on the
+   color/size children.
+   **Search** narrows the list by style #, name, description, UPC or vendor
+   code — any words, in any order (`royale 5` finds "Royale NFHS V25 Soccer
+   Ball - Size 5"; `0125666912 white` narrows a style to its white children).
+   Clearing the search box brings the full list back.
 2. **Count** — key the counted quantity next to a hit and press **Add** (Enter
    jumps to the next hit, so a keyboard or barcode scanner flows down a shelf).
    Every line lands on the **Sheet** tab with the current on-hand at the chosen
@@ -63,7 +70,8 @@ rest of the sheet still posts. Adjust those the normal way.
 | `ADJUSTMENT_ACCOUNT_ID` | `222` | Internal id of the account the adjustment posts against (the header **Account** field). Locked to **5005 INVENTORY ADJUSTMENT** (Cost of Goods Sold), internal id 222 in the production account. A sandbox refreshed from production carries the same id; if a submit complains about the account, check Lists > Accounting > Accounts (Internal ID column). Set to `null` and the sheet instead shows a dropdown of active Expense / COGS / Other Expense accounts, pre-selects one whose name mentions "adjust", and remembers the pick per browser. |
 | `SUBSIDIARY_ID` | `null` | OneWorld: force the subsidiary. `null` = the chosen location's subsidiary, else the logged-in user's. |
 | `ITEM_TYPES` | `['InvtPart', 'Assembly']` | Item types that can be counted. |
-| `SEARCH_PAGE_SIZE` | `50` | Hits per page (a **Load more** button pages on). |
+| `SEARCH_PAGE_SIZE` | `100` | Rows per page of the list (a **Load more** button pages on). |
+| `IN_STOCK_DEFAULT` | `true` | Open on items whose on-hand is not zero. The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 
@@ -76,8 +84,10 @@ disappears and account-wide on-hand is used.
 ## How to run a count
 
 1. Open the link on whatever device is handy; pick the **location** once.
-2. Search, key a count, **Add**. Repeat. Counts of **0** are valid (they zero
-   the item out). Switch to the **Sheet** tab any time to review or fix lines
+   The in-stock list loads on its own.
+2. Walk the list (or search to jump), key a count, **Add**. Repeat. Counts of
+   **0** are valid (they zero the item out). Items you never key a count for
+   are left exactly as they are — the tool never zeroes anything on its own. Switch to the **Sheet** tab any time to review or fix lines
    (`×` removes one, **Clear sheet** removes all — nothing is posted until
    Submit).
 3. If a count spans hours, **Refresh on-hand** on the sheet re-reads the current
@@ -108,9 +118,10 @@ should equal what was keyed. Then repeat the same count — it should report
   created. Fix the preference or the item and submit again.
 - **"You do not have permission…"** — the counter's role lacks Inventory
   Adjustment (Create) or view access on Items / Locations / Accounts.
-- **Search finds nothing for an item that exists** — it is inactive, a matrix
-  parent (count its children), a non-inventory item, or not set up at the chosen
-  location.
+- **An item is missing from the list** — with **In stock** on, its on-hand at
+  this location is zero: switch to **All items**. Otherwise it is inactive, a
+  matrix parent (count its children), a non-inventory item, or not set up at
+  the chosen location.
 - **Non-JSON response** errors on the page mean NetSuite returned an HTML error
   page; the deployment's execution log has the stack.
 

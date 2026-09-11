@@ -1,10 +1,12 @@
 /**
  * BSG Inventory Count - phone / tablet / desktop physical-count Suitelet.
  *
- * One page, login required. Staff search items (style #, name, description,
- * UPC, vendor code -- any words, in any order), key the counted quantity next
- * to each hit, and build a "count sheet" that lives in the browser until they
- * press Submit. Submit posts the sheet back to this same Suitelet, which
+ * One page, login required. It opens on the full list of items in stock at
+ * the chosen location (NetSuite's current inventory snapshot, the same rows
+ * as the Physical Inventory Worksheet), pageable and narrowable by search
+ * (style #, name, description, UPC, vendor code -- any words, in any order).
+ * Staff key the counted quantity next to each item and build a "count sheet"
+ * that lives in the browser until they press Submit. Submit posts the sheet back to this same Suitelet, which
  * re-reads the CURRENT on-hand for every item at the chosen location and
  * creates one Inventory Adjustment whose lines bring each item's on-hand to
  * the counted quantity (Adjust Qty. By = counted - on hand). Items whose count
@@ -21,7 +23,9 @@
  * is the audit trail you want on a physical count.
  *
  * URL actions (the page calls these itself):
- *   GET  ?action=search&q=<words>&loc=<id>&offset=<n>   -> item hits + on-hand
+ *   GET  ?action=search&q=<words>&loc=<id>&page=<n>&instock=T|F
+ *                        -> one page of the item list (all items at the
+ *                           location when q is blank) with on-hand
  *   POST ?action=onhand   { ids:[], loc }                -> fresh on-hand per item
  *   POST ?action=submit   { loc, account, memo, lines:[{ item, count }] }
  *                                                       -> creates the adjustment
@@ -46,8 +50,14 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
         // Item types that can be counted. Matrix PARENTS are always excluded
         // (they hold no stock); their color/size children are what get counted.
         ITEM_TYPES: ['InvtPart', 'Assembly'],
-        SEARCH_PAGE_SIZE: 50,
+        // Rows per page of the item list (Load more pages on).
+        SEARCH_PAGE_SIZE: 100,
         SEARCH_MAX_WORDS: 6,
+        // The page opens on the full list of items at the chosen location -- the
+        // "current inventory snapshot". true = only items whose on-hand is not
+        // zero (what you would physically count); the page has an "All items"
+        // toggle for the rest. Remembered per browser once changed.
+        IN_STOCK_DEFAULT: true,
         // Lines per Inventory Adjustment. Bigger sheets are submitted by the page
         // as several adjustments, one after another.
         MAX_LINES_PER_ADJUSTMENT: 200,
@@ -122,7 +132,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
             var isPost = request.method === 'POST';
             var body = isPost ? parseBody(request) : {};
             if (action === 'search') {
-                out = searchItems(request.parameters.q, posInt(request.parameters.loc), parseInt(request.parameters.offset, 10) || 0);
+                out = searchItems(request.parameters.q, posInt(request.parameters.loc),
+                    parseInt(request.parameters.page, 10) || 0, request.parameters.instock !== 'F');
             } else if (action === 'onhand') {
                 out = isPost ? refreshOnHand(body) : { ok: false, error: 'POST required.' };
             } else if (action === 'submit') {
@@ -255,22 +266,32 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
         };
     }
 
-    function searchItems(q, locId, offset) {
+    // One search serves both modes. With no words it is the full list of items at
+    // the location (the current inventory snapshot, sorted like the Physical
+    // Inventory Worksheet); with words it narrows that list. inStock keeps only
+    // rows whose on-hand at the location is not zero (negatives included -- those
+    // need a count most of all).
+    function searchItems(q, locId, page, inStock) {
         var words = tokenize(q);
-        if (!words.length) { return { ok: true, items: [], more: false, offset: 0 }; }
         if (!multiLocation()) { locId = null; }
         var filters = baseFilters(locId);
+        if (inStock) {
+            filters.push('and');
+            filters.push([locId ? 'locationquantityonhand' : 'quantityonhand', 'notequalto', 0]);
+        }
         words.forEach(function (w) {
             filters.push('and');
             filters.push(wordFilter(w));
         });
-        var start = Math.max(0, offset || 0);
-        var size = CONFIG.SEARCH_PAGE_SIZE;
-        var rows = search.create({ type: search.Type.ITEM, filters: filters, columns: itemColumns(locId) })
-            .run().getRange({ start: start, end: start + size + 1 });
-        var more = rows.length > size;
-        var items = rows.slice(0, size).map(function (r) { return rowToItem(r, locId); });
-        return { ok: true, items: items, more: more, offset: start + items.length };
+        var paged = search.create({ type: search.Type.ITEM, filters: filters, columns: itemColumns(locId) })
+            .runPaged({ pageSize: CONFIG.SEARCH_PAGE_SIZE });
+        var pageCount = paged.pageRanges.length;
+        var idx = Math.max(0, page || 0);
+        var items = [];
+        if (idx < pageCount) {
+            paged.fetch({ index: idx }).data.forEach(function (r) { items.push(rowToItem(r, locId)); });
+        }
+        return { ok: true, items: items, total: paged.count, page: idx, more: idx + 1 < pageCount };
     }
 
     // Fresh on-hand for a set of items at a location, keyed by item id. Carries
@@ -472,6 +493,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
             accounts: [],
             accountLocked: !!posInt(CONFIG.ADJUSTMENT_ACCOUNT_ID),
             pageSize: CONFIG.SEARCH_PAGE_SIZE,
+            inStockDefault: CONFIG.IN_STOCK_DEFAULT !== false,
             maxLines: CONFIG.MAX_LINES_PER_ADJUSTMENT,
             user: '',
             warnings: []
@@ -525,7 +547,8 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font:16px/1.4
 button,input,select{font:inherit;color:inherit}
 button{cursor:pointer}
 .ic-loading{padding:40px;text-align:center;color:var(--muted)}
-.ic-head{position:sticky;top:0;z-index:5;background:var(--red);color:#fff;padding:10px 12px calc(env(safe-area-inset-top,0px) + 0px);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.ic-head{position:sticky;top:0;z-index:5;background:var(--red);color:#fff;padding:10px 12px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.ic-head{padding-top:calc(10px + env(safe-area-inset-top,0px))}
 .ic-head-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .ic-title{font-weight:800;font-size:18px;letter-spacing:.2px;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ic-user{font-size:12px;opacity:.85;white-space:nowrap}
@@ -591,7 +614,13 @@ button{cursor:pointer}
 .ic-done a{color:var(--focus);font-weight:700;font-size:17px}
 .ic-done ul{margin:6px 0 0 18px;padding:0;font-size:14px}
 .ic-progress{padding:14px;text-align:center;color:var(--muted)}
-.ic-footer{text-align:center;color:var(--muted);font-size:12px;padding:20px 0 calc(20px + env(safe-area-inset-bottom,0px))}
+.ic-footer{text-align:center;color:var(--muted);font-size:12px;padding:20px 0}
+.ic-footer{padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))}
+.ic-listhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px 2px;flex-wrap:wrap}
+.ic-count{font-size:13px;color:var(--muted);min-height:20px}
+.ic-seg{display:inline-flex;border:2px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.ic-segbtn{border:0;background:transparent;padding:8px 12px;min-height:40px;font-weight:700;color:var(--muted)}
+.ic-segbtn.is-on{background:var(--red);color:#fff}
 @media (max-width:480px){.ic-row{flex-wrap:wrap}.ic-ctl,.ic-line-ctl{width:100%;justify-content:flex-end;align-items:center;flex-direction:row}.ic-qty{flex:1 1 auto}.ic-user{display:none}.ic-loc select{max-width:100%;flex:1 1 auto}.ic-loc{flex:1 1 100%}}
 `;
 
@@ -618,7 +647,8 @@ button{cursor:pointer}
     var state = {
         view: 'search',            // search | sheet | done
         loc: '', account: '',
-        q: '', results: [], more: false, offset: 0, searching: false, searchError: '',
+        q: '', results: [], more: false, page: 0, total: 0, loaded: false, searching: false, searchError: '',
+        instock: true,             // list only items whose on-hand is not zero
         sheet: {}, order: [],      // itemId -> line; ids in the order added
         memo: '',
         submitting: false, progress: '', submitError: '',
@@ -634,7 +664,7 @@ button{cursor:pointer}
     function lsDel(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
 
     function loadPrefs() { try { return JSON.parse(lsGet(PREF_KEY) || '{}') || {}; } catch (e) { return {}; } }
-    function savePrefs() { lsSet(PREF_KEY, JSON.stringify({ loc: state.loc, account: state.account })); }
+    function savePrefs() { lsSet(PREF_KEY, JSON.stringify({ loc: state.loc, account: state.account, instock: state.instock })); }
 
     function sheetKey() { return SHEET_KEY + (state.loc || 'all'); }
     function loadSheet() {
@@ -755,31 +785,50 @@ button{cursor:pointer}
 
     // ------------------------------------------------------------- search --
 
+    // Loads one page of the item list: the full in-stock list when the search box
+    // is empty, the matching subset when it is not. reset = start from page 0
+    // (existing rows stay on screen until the new page lands, so typing does
+    // not flicker); otherwise appends the next page.
     function runSearch(reset) {
         var q = state.q.trim();
-        if (!q) {
-            state.results = []; state.more = false; state.offset = 0; state.searching = false; state.searchError = '';
+        if (BOOT.multiLoc && !state.loc) {
+            state.results = []; state.total = 0; state.more = false; state.loaded = false; state.searching = false; state.searchError = '';
             renderResults();
             return;
         }
-        if (reset) { state.offset = 0; }
         state.searching = true; state.searchError = '';
         renderResults();
         var mySeq = ++searchSeq;
-        apiGet('search', { q: q, loc: state.loc || '', offset: reset ? 0 : state.offset }).then(function (res) {
-            if (mySeq !== searchSeq) { return; } // a newer search superseded this one
+        var page = reset ? 0 : state.page + 1;
+        apiGet('search', { q: q, loc: state.loc || '', page: page, instock: state.instock ? 'T' : 'F' }).then(function (res) {
+            if (mySeq !== searchSeq) { return; } // a newer request superseded this one
             state.searching = false;
             if (!res || !res.ok) {
-                state.searchError = (res && res.error) || 'Search failed.';
-                if (reset) { state.results = []; }
+                state.searchError = (res && res.error) || 'Could not load items.';
+                if (reset) { state.results = []; state.total = 0; state.more = false; }
             } else {
                 state.results = reset ? res.items : state.results.concat(res.items);
+                state.total = typeof res.total === 'number' ? res.total : state.results.length;
+                state.page = res.page || 0;
                 state.more = !!res.more;
-                state.offset = res.offset || state.results.length;
+                state.loaded = true;
             }
             renderResults();
-            if (reset && res && res.ok) { autoFocusSingle(q); }
+            if (reset && q && res && res.ok) { autoFocusSingle(q); }
         });
+    }
+    function setInStock(v) {
+        if (state.instock === v) { return; }
+        state.instock = v; savePrefs();
+        runSearch(true);
+    }
+    function countLabel(q) {
+        var n = state.total, shown = state.results.length;
+        var where = state.loc ? ' at ' + locName(state.loc) : '';
+        if (q) {
+            return (n > shown ? shown + ' of ' + n : String(n)) + ' match' + (n === 1 ? '' : 'es') + ' for "' + q + '"' + (state.instock ? ' in stock' : '');
+        }
+        return (n > shown ? shown + ' of ' + n : String(n)) + (state.instock ? ' items in stock' : ' items') + where;
     }
     var searchSeq = 0;
 
@@ -860,22 +909,32 @@ button{cursor:pointer}
         if (!box) { return; }
         box.innerHTML = '';
         if (state.searchError) { box.appendChild(el('div', { class: 'ic-error', text: state.searchError })); }
-        if (!state.q.trim()) {
-            box.appendChild(el('div', { class: 'ic-empty', text: state.order.length
-                ? 'Search for the next item to count. Your sheet has ' + state.order.length + ' line' + (state.order.length === 1 ? '' : 's') + '.'
-                : 'Search by style #, name, description, UPC or vendor code. Any words, any order.' }));
+        if (BOOT.multiLoc && !state.loc) {
+            box.appendChild(el('div', { class: 'ic-empty', text: 'Pick a location at the top to load its inventory.' }));
             return;
         }
+        var q = state.q.trim();
+        box.appendChild(el('div', { class: 'ic-listhead' }, [
+            el('div', { class: 'ic-count', text: state.loaded ? countLabel(q) : '' }),
+            el('div', { class: 'ic-seg', role: 'group', 'aria-label': 'Which items to list' }, [
+                el('button', { class: 'ic-segbtn' + (state.instock ? ' is-on' : ''), type: 'button', text: 'In stock', onclick: function () { setInStock(true); } }),
+                el('button', { class: 'ic-segbtn' + (!state.instock ? ' is-on' : ''), type: 'button', text: 'All items', onclick: function () { setInStock(false); } })
+            ])
+        ]));
         var list = el('div', { class: 'ic-list' });
         state.results.forEach(function (it) { list.appendChild(resultRow(it)); });
         box.appendChild(list);
         if (state.searching) {
-            box.appendChild(el('div', { class: 'ic-progress', text: state.results.length ? 'Loading more…' : 'Searching…' }));
+            box.appendChild(el('div', { class: 'ic-progress', text: state.results.length ? 'Loading…' : 'Loading inventory…' }));
         } else if (!state.results.length) {
-            box.appendChild(el('div', { class: 'ic-empty', text: 'No inventory items match "' + state.q.trim() + '".' }));
+            var msg;
+            if (q) { msg = 'No ' + (state.instock ? 'in-stock ' : '') + 'items match "' + q + '".' + (state.instock ? ' Try All items.' : ''); }
+            else { msg = state.instock ? 'Nothing in stock at this location. Try All items.' : 'No inventory items at this location.'; }
+            box.appendChild(el('div', { class: 'ic-empty', text: msg }));
         } else if (state.more) {
+            var left = Math.max(0, state.total - state.results.length);
             box.appendChild(el('div', { class: 'ic-more' }, [
-                el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Load more', onclick: function () { runSearch(false); } })
+                el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Load more' + (left ? ' (' + left + ' left)' : ''), onclick: function () { runSearch(false); } })
             ]));
         }
     }
@@ -894,10 +953,10 @@ button{cursor:pointer}
             } })
         ]);
         main.appendChild(wrap);
-        main.appendChild(el('p', { class: 'ic-hint', text: 'Key the counted quantity next to an item and press Add (Enter jumps to the next item). Counts wait on the Sheet tab until you submit.' }));
+        main.appendChild(el('p', { class: 'ic-hint', text: 'Every item in stock at this location is listed below. Search to jump to one, key the counted quantity and press Add (Enter jumps to the next item). Counts wait on the Sheet tab until you submit.' }));
         main.appendChild(el('div', { id: 'icResults' }));
         renderResults();
-        if (!state.results.length && state.q.trim()) { runSearch(true); }
+        if (!state.loaded && !state.searching && !state.searchError) { runSearch(true); }
     }
 
     // -------------------------------------------------------------- sheet --
@@ -1115,7 +1174,7 @@ button{cursor:pointer}
         }
         main.appendChild(box);
         main.appendChild(el('div', { class: 'ic-actions' }, [
-            el('button', { class: 'ic-btn', type: 'button', text: 'Count more items', onclick: function () { state.done = null; state.q = ''; state.results = []; state.view = 'search'; render(); } }),
+            el('button', { class: 'ic-btn', type: 'button', text: 'Count more items', onclick: function () { state.done = null; state.q = ''; state.loaded = false; state.results = []; state.view = 'search'; render(); } }),
             state.order.length ? el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Back to sheet (' + state.order.length + ')', onclick: function () { state.done = null; state.view = 'sheet'; render(); } }) : null
         ]));
     }
@@ -1135,9 +1194,8 @@ button{cursor:pointer}
                     saveSheet();
                 }
                 state.loc = ev.target.value; savePrefs(); loadSheet();
-                state.results = []; state.offset = 0;
-                render();
-                if (state.q.trim()) { runSearch(true); }
+                state.results = []; state.total = 0; state.page = 0; state.loaded = false; state.searchError = '';
+                render(); // the search view reloads the list for the new location
             } });
             sel.appendChild(el('option', { value: '', text: (BOOT.locations || []).length ? '— pick location —' : 'No locations found' }));
             (BOOT.locations || []).forEach(function (l) {
@@ -1169,11 +1227,13 @@ button{cursor:pointer}
         if (BOOT.multiLoc && !state.loc) {
             main.appendChild(el('div', { class: 'ic-warn', text: 'Pick the location you are counting at the top. On-hand quantities and the adjustment are per location.' }));
         }
+        // Attach before rendering the view: the list renderer finds its container
+        // by id, which only works once the section is in the document.
+        root.appendChild(main);
         if (state.view === 'done') { renderDoneView(main); }
         else if (state.view === 'sheet') { renderSheetView(main); }
         else { renderSearchView(main); }
         main.appendChild(el('div', { class: 'ic-footer', text: 'Counts are saved in this browser until you submit. Submitting creates an Inventory Adjustment in NetSuite as you.' }));
-        root.appendChild(main);
         if (state.view === 'search' && (keepSearchFocus || !state.q)) {
             var s = document.getElementById('icSearch');
             if (s && !('ontouchstart' in window && !keepSearchFocus)) { s.focus(); }
@@ -1189,6 +1249,7 @@ button{cursor:pointer}
             var known = locs.filter(function (l) { return l.id === prefs.loc; })[0];
             state.loc = known ? known.id : (locs.length === 1 ? locs[0].id : '');
         }
+        state.instock = typeof prefs.instock === 'boolean' ? prefs.instock : BOOT.inStockDefault !== false;
         if (!BOOT.accountLocked) {
             var accts = BOOT.accounts || [];
             var pick = accts.filter(function (a) { return a.id === prefs.account; })[0] || accts.filter(function (a) { return a.suggested; })[0];
