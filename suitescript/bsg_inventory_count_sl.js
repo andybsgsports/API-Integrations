@@ -26,8 +26,10 @@
  *   GET  ?action=search&q=<words>&loc=<id>&page=<n>&instock=T|F
  *                        -> one page of the item list (all items at the
  *                           location when q is blank) with on-hand
+ *   GET  ?action=orders&item=<id>&loc=<id>   -> open sales-order lines for the item
  *   POST ?action=onhand   { ids:[], loc }                -> fresh on-hand per item
- *   POST ?action=submit   { loc, account, memo, lines:[{ item, count }] }
+ *   POST ?action=submit   { loc, account, memo,
+ *                           lines:[{ item, count, shelf, offshelf, offreason, offorders }] }
  *                                                       -> creates the adjustment
  *
  * @NApiVersion 2.1
@@ -138,6 +140,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                     parseInt(request.parameters.page, 10) || 0, request.parameters.instock !== 'F');
             } else if (action === 'onhand') {
                 out = isPost ? refreshOnHand(body) : { ok: false, error: 'POST required.' };
+            } else if (action === 'orders') {
+                out = openOrders(posInt(request.parameters.item), posInt(request.parameters.loc));
             } else if (action === 'submit') {
                 out = isPost ? submitCount(body) : { ok: false, error: 'POST required.' };
             } else {
@@ -222,7 +226,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
     function wordFilter(w) {
         var out = [];
         WORD_FIELDS.forEach(function (f) {
-            if (dead.filter[f]) { return; }
+            if (isDead('item', 'filter', f)) { return; }
             if (out.length) { out.push('or'); }
             out.push([f, f === 'upccode' ? 'is' : 'contains', w]);
         });
@@ -239,16 +243,23 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         { name: 'usebins', feature: 'BINMANAGEMENT', flag: 'bin-tracked' }
     ];
     function flagCols() {
-        return FLAG_COLS.filter(function (c) { return !dead.column[c.name] && feature(c.feature); });
+        return FLAG_COLS.filter(function (c) { return !isDead('item', 'column', c.name) && feature(c.feature); });
     }
 
     // Fields this account rejected during this request, columns and filters kept
     // apart (the same name can be fine as one and not the other). Anything not in
-    // REQUIRED is nice-to-have: withItemSearch drops it and retries.
-    var dead = { column: {}, filter: {} };
+    // REQUIRED is nice-to-have: withSearch drops it and retries.
+    var dead = {};   // 'item:column' -> { fieldname: true }, 'transaction:filter' -> ...
+    function deadSet(type, kind) {
+        var k = type + ':' + kind;
+        return dead[k] || (dead[k] = {});
+    }
+    function isDead(type, kind, name) { return !!deadSet(type, kind)[name]; }
     var REQUIRED = {
-        column: { itemid: 1, type: 1, quantityonhand: 1, locationquantityonhand: 1 },
-        filter: { internalid: 1, type: 1, isinactive: 1, matrix: 1, inventorylocation: 1 }
+        'item:column': { itemid: 1, type: 1, quantityonhand: 1, locationquantityonhand: 1 },
+        'item:filter': { internalid: 1, type: 1, isinactive: 1, matrix: 1, inventorylocation: 1 },
+        'transaction:column': { tranid: 1, quantity: 1 },
+        'transaction:filter': { type: 1, mainline: 1, item: 1, status: 1 }
     };
     var OPTIONAL_COLS = ['displayname', 'salesdescription', 'upccode', 'vendorname', 'vendor', 'parent'];
 
@@ -263,9 +274,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
     function stockFilter(locId) {
         var oh = qtyField(locId, 'onhand'), av = qtyField(locId, 'available'), oo = qtyField(locId, 'onorder');
         var parts = [];
-        if (!dead.filter[oh]) { parts.push([oh, 'greaterthan', '0']); parts.push([oh, 'lessthan', '0']); }
-        if (!dead.filter[av]) { parts.push([av, 'greaterthan', '0']); }
-        if (!dead.filter[oo]) { parts.push([oo, 'greaterthan', '0']); }
+        if (!isDead('item', 'filter', oh)) { parts.push([oh, 'greaterthan', '0']); parts.push([oh, 'lessthan', '0']); }
+        if (!isDead('item', 'filter', av)) { parts.push([av, 'greaterthan', '0']); }
+        if (!isDead('item', 'filter', oo)) { parts.push([oo, 'greaterthan', '0']); }
         var expr = [];
         parts.forEach(function (p, i) { if (i) { expr.push('or'); } expr.push(p); });
         return expr.length ? expr : null;
@@ -283,7 +294,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
 
     // Rejected fields are remembered across requests (a day) so a page load does
     // not pay for a failing search before the one that works.
-    var DEAD_CACHE_KEY = 'dead_fields_v1';
+    var DEAD_CACHE_KEY = 'dead_fields_v2';
     function deadCache() {
         try { return cache.getCache({ name: 'bsg_invcount', scope: cache.Scope.PROTECTED }); } catch (e) { return null; }
     }
@@ -293,7 +304,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         try {
             var raw = c.get({ key: DEAD_CACHE_KEY });
             var parsed = raw ? JSON.parse(raw) : null;
-            if (parsed && parsed.column && parsed.filter) { dead = parsed; }
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) { dead = parsed; }
         } catch (e) { /* miss or garbage: start clean */ }
     }
     function saveDead() {
@@ -302,22 +313,23 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         try { c.put({ key: DEAD_CACHE_KEY, value: JSON.stringify(dead), ttl: 86400 }); } catch (e) { /* best effort */ }
     }
 
-    // Runs an item search built by buildSpec(); if NetSuite rejects an optional
-    // column or filter field, marks it dead and rebuilds -- so one account that
-    // lacks a field degrades to a slightly thinner row instead of a broken page.
-    function withItemSearch(buildSpec, run) {
+    // Runs a search built by buildSpec(); if NetSuite rejects an optional column
+    // or filter field, marks it dead (per search type) and rebuilds -- so an
+    // account that lacks a field degrades to a slightly thinner row instead of
+    // a broken page. type is the dead-field namespace ('item', 'transaction').
+    function withSearch(type, buildSpec, run) {
         for (var attempt = 0; attempt < 8; attempt++) {
             try {
                 return run(search.create(buildSpec()));
             } catch (e) {
                 var bad = rejectedField(e);
-                if (!bad || dead[bad.kind][bad.name] || REQUIRED[bad.kind][bad.name]) { throw e; }
-                dead[bad.kind][bad.name] = true;
+                if (!bad || isDead(type, bad.kind, bad.name) || (REQUIRED[type + ':' + bad.kind] || {})[bad.name]) { throw e; }
+                deadSet(type, bad.kind)[bad.name] = true;
                 saveDead();
-                log.audit({ title: 'invcount: this account rejects item ' + bad.kind + ' ' + bad.name + '; retrying without it', details: userErr(e) });
+                log.audit({ title: 'invcount: this account rejects ' + type + ' ' + bad.kind + ' ' + bad.name + '; retrying without it', details: userErr(e) });
             }
         }
-        throw new Error('Item search keeps failing after dropping unsupported fields.');
+        throw new Error('Search keeps failing after dropping unsupported fields.');
     }
 
     function baseFilters(locId) {
@@ -335,8 +347,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
 
     function itemColumns(locId) {
         var cols = [search.createColumn({ name: 'itemid', sort: search.Sort.ASC }), 'type', qtyField(locId, 'onhand')];
-        [qtyField(locId, 'available'), qtyField(locId, 'onorder')].concat(OPTIONAL_COLS).forEach(function (c) {
-            if (!dead.column[c]) { cols.push(c); }
+        [qtyField(locId, 'available'), qtyField(locId, 'committed'), qtyField(locId, 'onorder')].concat(OPTIONAL_COLS).forEach(function (c) {
+            if (!isDead('item', 'column', c)) { cols.push(c); }
         });
         flagCols().forEach(function (c) { cols.push(c.name); });
         return cols;
@@ -348,11 +360,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
 
     // Column value / text that tolerates a column this account does not have.
     function val(r, name) {
-        if (dead.column[name]) { return ''; }
+        if (isDead('item', 'column', name)) { return ''; }
         try { return r.getValue(name) || ''; } catch (e) { return ''; }
     }
     function txt(r, name) {
-        if (dead.column[name]) { return ''; }
+        if (isDead('item', 'column', name)) { return ''; }
         try { return r.getText(name) || ''; } catch (e) { return ''; }
     }
     function num(r, name) {
@@ -374,6 +386,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             parent: txt(r, 'parent'),
             onhand: isFinite(qty) ? qty : 0,
             available: num(r, qtyField(locId, 'available')),
+            committed: num(r, qtyField(locId, 'committed')),
             onorder: num(r, qtyField(locId, 'onorder')),
             blocked: flags.length ? flags.join(', ') : ''
         };
@@ -400,7 +413,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             });
             return itemSpec(filters, locId);
         }
-        var paged = withItemSearch(buildSpec, function (srch) { return srch.runPaged({ pageSize: CONFIG.SEARCH_PAGE_SIZE }); });
+        var paged = withSearch('item', buildSpec, function (srch) { return srch.runPaged({ pageSize: CONFIG.SEARCH_PAGE_SIZE }); });
         var pageCount = paged.pageRanges.length;
         var idx = Math.max(0, page || 0);
         var items = [];
@@ -423,7 +436,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             filters.push(['internalid', 'anyof', ids]);
             return itemSpec(filters, locId);
         }
-        withItemSearch(buildSpec, function (srch) {
+        withSearch('item', buildSpec, function (srch) {
             srch.run().each(function (r) {
                 var it = rowToItem(r, locId);
                 map[it.id] = it;
@@ -431,6 +444,65 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             });
         });
         return map;
+    }
+
+    // Sales orders that still owe the customer some of this item: the stock
+    // counters may find pulled and staged, out at the decorator, or waiting for
+    // pickup rather than on the shelf. Pending Fulfillment, Partially Fulfilled,
+    // and Pending Billing/Partially Fulfilled are the statuses with unshipped
+    // lines; anything shipped is off the books already and must not be counted.
+    var OPEN_SO_STATUSES = ['SalesOrd:B', 'SalesOrd:D', 'SalesOrd:E'];
+    function openOrders(itemId, locId) {
+        if (!itemId) { return { ok: false, error: 'Item required.' }; }
+        if (!multiLocation()) { locId = null; }
+        var out = [];
+        function buildSpec() {
+            var filters = [
+                ['type', 'anyof', ['SalesOrd']], 'and',
+                ['mainline', 'is', 'F'], 'and',
+                ['item', 'anyof', [String(itemId)]], 'and',
+                ['status', 'anyof', OPEN_SO_STATUSES]
+            ];
+            if (locId && !isDead('transaction', 'filter', 'location')) {
+                filters.push('and');
+                filters.push(['location', 'anyof', [String(locId)]]);
+            }
+            var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity'];
+            ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted'].forEach(function (c) {
+                if (!isDead('transaction', 'column', c)) { cols.push(c); }
+            });
+            return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
+        }
+        function tval(r, name) {
+            if (isDead('transaction', 'column', name)) { return ''; }
+            try { return r.getValue(name) || ''; } catch (e) { return ''; }
+        }
+        function ttxt(r, name) {
+            if (isDead('transaction', 'column', name)) { return ''; }
+            try { return r.getText(name) || ''; } catch (e) { return ''; }
+        }
+        withSearch('transaction', buildSpec, function (srch) {
+            srch.run().getRange({ start: 0, end: 50 }).forEach(function (r) {
+                var qty = Math.abs(parseFloat(tval(r, 'quantity')) || 0);
+                var shipped = Math.abs(parseFloat(tval(r, 'quantityshiprecv')) || 0);
+                var committed = Math.abs(parseFloat(tval(r, 'quantitycommitted')) || 0);
+                var recUrl = '';
+                try { recUrl = url.resolveRecord({ recordType: 'salesorder', recordId: r.id, isEditMode: false }); } catch (e) { /* cosmetic */ }
+                out.push({
+                    id: String(r.id),
+                    tranid: String(tval(r, 'tranid')),
+                    customer: ttxt(r, 'entity') || tval(r, 'entity'),
+                    date: String(tval(r, 'trandate')),
+                    qty: qty,
+                    shipped: shipped,
+                    remaining: round4(Math.max(0, qty - shipped)),
+                    committed: committed,
+                    status: ttxt(r, 'statusref') || '',
+                    url: recUrl
+                });
+            });
+        });
+        return { ok: true, orders: out };
     }
 
     function idList(raw, max) {
@@ -450,18 +522,50 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
 
     // ---------------------------------------------------------------- submit --
 
+    var OFF_REASONS = ['Decorator', 'Customer pickup', 'Other'];
+    function cleanRef(v) {
+        return String(v == null ? '' : v).replace(/[^A-Za-z0-9#_\-. ]/g, '').trim().slice(0, 30);
+    }
+
+    // A line is { item, count } at minimum. When the page also sends the split
+    // (shelf + offshelf, with a reason and the sales orders that explain it),
+    // the count is recomputed from the split and the split goes on the line memo.
     function normalizeLines(raw) {
         var seen = {}, out = [];
         (Array.isArray(raw) ? raw : []).forEach(function (l) {
             if (!l) { return; }
             var id = posInt(l.item);
+            if (!id) { return; }
             var count = parseFloat(l.count);
-            if (!id || !isFinite(count) || count < 0) { return; }
-            if (seen[id]) { seen[id].count = count; return; } // same item twice: last wins
-            seen[id] = { item: String(id), count: count };
-            out.push(seen[id]);
+            var shelf = parseFloat(l.shelf), off = parseFloat(l.offshelf);
+            var split = isFinite(shelf) && shelf >= 0 && isFinite(off) && off >= 0;
+            if (split) { count = round4(shelf + off); }
+            if (!isFinite(count) || count < 0) { return; }
+            var line = { item: String(id), count: count };
+            if (split && off > 0) {
+                line.shelf = round4(shelf);
+                line.offshelf = round4(off);
+                line.offreason = OFF_REASONS.indexOf(l.offreason) !== -1 ? l.offreason : 'Off shelf';
+                line.offorders = (Array.isArray(l.offorders) ? l.offorders : []).map(cleanRef).filter(Boolean).slice(0, 20);
+            }
+            if (seen[id]) { // same item twice: last wins
+                var keep = seen[id];
+                Object.keys(keep).forEach(function (k) { if (k !== 'item') { delete keep[k]; } });
+                Object.keys(line).forEach(function (k) { keep[k] = line[k]; });
+                return;
+            }
+            seen[id] = line;
+            out.push(line);
         });
         return out;
+    }
+
+    function lineMemo(l) {
+        if (l.offshelf > 0) {
+            var so = l.offorders && l.offorders.length ? ': ' + l.offorders.join(', ') : '';
+            return 'Counted ' + l.count + ' = ' + l.shelf + ' on shelf + ' + l.offshelf + ' off shelf (' + l.offreason + so + '); on hand ' + l.onhand;
+        }
+        return 'Counted ' + l.count + ' (on hand ' + l.onhand + ')';
     }
 
     function defaultMemo() {
@@ -512,7 +616,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                 blocked.push({ item: l.item, name: it.name, count: l.count, reason: 'Needs inventory detail (' + it.blocked + ') -- adjust this one manually.' });
                 return;
             }
-            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand });
+            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand, shelf: l.shelf, offshelf: l.offshelf || 0, offreason: l.offreason, offorders: l.offorders });
         });
         if (!candidates.length) {
             return { ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Nothing on this sheet could be adjusted.' };
@@ -542,7 +646,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                 return;
             }
             rec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'adjustqtyby', value: l.delta });
-            trySetLine(rec, 'memo', 'Counted ' + l.count + ' (on hand ' + l.onhand + ')');
+            trySetLine(rec, 'memo', lineMemo(l).slice(0, 999));
             rec.commitLine({ sublistId: 'inventory' });
             applied.push(l);
         });
@@ -614,6 +718,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             accountLocked: !!posInt(CONFIG.ADJUSTMENT_ACCOUNT_ID),
             pageSize: CONFIG.SEARCH_PAGE_SIZE,
             inStockDefault: CONFIG.IN_STOCK_DEFAULT !== false,
+            offReasons: OFF_REASONS,
             maxLines: CONFIG.MAX_LINES_PER_ADJUSTMENT,
             user: '',
             warnings: []
@@ -720,7 +825,18 @@ button{cursor:pointer}
 .ic-delta.is-neg{background:var(--neg-bg);color:var(--bad)}
 .ic-delta.is-zero{background:#eeeef1;color:var(--muted)}
 .ic-line-ctl{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:0 0 auto}
-.ic-line-top{display:flex;align-items:center;gap:6px}
+.ic-line-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.ic-lbl{font-size:12px;color:var(--muted);min-width:58px;text-align:right}
+.ic-qty.is-sm{width:72px;min-height:40px;font-size:17px}
+.ic-sel{min-height:40px;border:2px solid var(--line);border-radius:10px;padding:0 8px;background:#fff;font-size:14px;max-width:160px}
+.ic-total{font-weight:800;font-size:16px;min-width:40px;text-align:center}
+.ic-commit-warn{font-size:12px;color:var(--warn);background:#fff3df;border-radius:6px;padding:4px 8px;margin-top:6px}
+.ic-link{background:none;border:0;color:var(--focus);font-weight:700;padding:4px 0;font-size:13px;text-decoration:underline;cursor:pointer}
+.ic-orders{margin-top:6px;border-top:1px dashed var(--line);padding-top:6px;font-size:13px}
+.ic-order{display:flex;align-items:flex-start;gap:8px;padding:4px 0}
+.ic-order input{width:22px;height:22px;margin:1px 0 0;flex:0 0 auto}
+.ic-order a{color:var(--focus);font-weight:700}
+.ic-order small{color:var(--muted)}
 .ic-form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px;display:flex;flex-direction:column;gap:10px}
 .ic-form label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px}
 .ic-form input,.ic-form select{width:100%;min-height:46px;padding:10px 12px;border:2px solid var(--line);border-radius:10px;background:#fff}
@@ -741,7 +857,7 @@ button{cursor:pointer}
 .ic-seg{display:inline-flex;border:2px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
 .ic-segbtn{border:0;background:transparent;padding:8px 12px;min-height:40px;font-weight:700;color:var(--muted)}
 .ic-segbtn.is-on{background:var(--red);color:#fff}
-@media (max-width:480px){.ic-row{flex-wrap:wrap}.ic-ctl,.ic-line-ctl{width:100%;justify-content:flex-end;align-items:center;flex-direction:row}.ic-qty{flex:1 1 auto}.ic-user{display:none}.ic-loc select{max-width:100%;flex:1 1 auto}.ic-loc{flex:1 1 100%}}
+@media (max-width:480px){.ic-row{flex-wrap:wrap}.ic-ctl{width:100%;justify-content:flex-end;align-items:center;flex-direction:row}.ic-ctl .ic-qty{flex:1 1 auto}.ic-line-ctl{width:100%;flex-direction:column;align-items:stretch}.ic-line-top{justify-content:flex-start}.ic-lbl{min-width:72px;text-align:left}.ic-sel{flex:1 1 auto;max-width:none}.ic-user{display:none}.ic-loc select{max-width:100%;flex:1 1 auto}.ic-loc{flex:1 1 100%}}
 `;
 
     // ---------------------------------------------------------------- client --
@@ -857,17 +973,33 @@ button{cursor:pointer}
 
     // -------------------------------------------------------------- sheet --
 
+    function round4(n) { return Math.round((Number(n) || 0) * 10000) / 10000; }
+    // count = shelf + off shelf, always. Older saved lines only carry count.
+    function syncCount(line) {
+        if (line.shelf == null) { line.shelf = Number(line.count) || 0; }
+        if (line.offshelf == null) { line.offshelf = 0; }
+        line.count = round4((Number(line.shelf) || 0) + (Number(line.offshelf) || 0));
+        return line.count;
+    }
+    function belowCommitted(line) {
+        var c = Number(line.committed) || 0;
+        return !line.blocked && c > 0 && (Number(line.count) || 0) < c;
+    }
+
     function lineFor(item) {
         return state.sheet[item.id] || null;
     }
     function setCount(item, count) {
         var line = state.sheet[item.id];
         if (!line) {
-            line = { id: item.id, name: item.name, display: item.display, desc: item.desc, upc: item.upc, vendor: item.vendor, onhand: item.onhand, available: item.available, onorder: item.onorder, blocked: item.blocked || '' };
+            line = { id: item.id, name: item.name, display: item.display, desc: item.desc, upc: item.upc, vendor: item.vendor, onhand: item.onhand, available: item.available, committed: item.committed, onorder: item.onorder, blocked: item.blocked || '', shelf: 0, offshelf: 0, offreason: '', offorders: [] };
             state.sheet[item.id] = line;
             state.order.push(item.id);
         }
-        line.count = count;
+        // The Qty box on a result row is what was found on the shelf; anything
+        // off shelf (decorator, pickup) is added on the sheet and kept here.
+        line.shelf = count;
+        syncCount(line);
         line.error = '';
         line.addedAt = Date.now();
         saveSheet();
@@ -887,16 +1019,18 @@ button{cursor:pointer}
         return Math.round(n * 10000) / 10000;
     }
     function totals() {
-        var lines = 0, pos = 0, neg = 0, blocked = 0;
+        var lines = 0, pos = 0, neg = 0, blocked = 0, below = 0;
         state.order.forEach(function (id) {
             var l = state.sheet[id];
             if (!l) { return; }
+            syncCount(l);
             lines++;
             if (l.blocked) { blocked++; return; }
+            if (belowCommitted(l)) { below++; }
             var d = (Number(l.count) || 0) - (Number(l.onhand) || 0);
             if (d > 0) { pos += d; } else { neg += -d; }
         });
-        return { lines: lines, pos: pos, neg: neg, blocked: blocked };
+        return { lines: lines, pos: pos, neg: neg, blocked: blocked, below: below };
     }
     function updateBadge() {
         var b = document.getElementById('icSheetBadge');
@@ -988,7 +1122,7 @@ button{cursor:pointer}
         var info = el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: item.name }),
             (item.display || item.desc) ? el('div', { class: 'ic-desc', text: item.display && item.desc && item.display !== item.desc ? item.display + ' - ' + item.desc : (item.display || item.desc) }) : null,
-            el('div', { class: 'ic-meta' }, [meta.length ? meta.join(' · ') + ' · ' : '', 'On hand: ', el('b', { text: fmt(item.onhand) }), ' · Avail: ', el('b', { text: fmt(item.available) }), ' · On order: ', el('b', { text: fmt(item.onorder) })]),
+            el('div', { class: 'ic-meta' }, [meta.length ? meta.join(' · ') + ' · ' : '', 'On hand: ', el('b', { text: fmt(item.onhand) }), ' · Avail: ', el('b', { text: fmt(item.available) }), ' · Committed: ', el('b', { text: fmt(item.committed) }), ' · On order: ', el('b', { text: fmt(item.onorder) })]),
             item.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + item.blocked + ') - adjust manually' }) : null,
             line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: 'On sheet: ' + fmt(line.count) }) : null
         ]);
@@ -1085,49 +1219,135 @@ button{cursor:pointer}
 
     // -------------------------------------------------------------- sheet --
 
+    var ordersCache = {};   // itemId -> { orders: [...] } for this page load
+
     function sheetRow(line) {
+        syncCount(line);
         var row = el('div', { class: 'ic-row' + (line.error ? ' has-error' : '') });
         var delta = el('div', { class: 'ic-delta' });
-        function paintDelta() {
-            if (line.blocked) { delta.className = 'ic-delta is-zero'; delta.textContent = 'n/a'; return; }
-            var d = (Number(line.count) || 0) - (Number(line.onhand) || 0);
-            d = Math.round(d * 10000) / 10000;
-            delta.className = 'ic-delta ' + (d > 0 ? 'is-pos' : d < 0 ? 'is-neg' : 'is-zero');
-            delta.textContent = signed(d);
+        var total = el('span', { class: 'ic-total' });
+        var warn = el('div', { class: 'ic-commit-warn' });
+        function paint() {
+            syncCount(line);
+            total.textContent = fmt(line.count);
+            if (line.blocked) { delta.className = 'ic-delta is-zero'; delta.textContent = 'n/a'; }
+            else {
+                var d = round4((Number(line.count) || 0) - (Number(line.onhand) || 0));
+                delta.className = 'ic-delta ' + (d > 0 ? 'is-pos' : d < 0 ? 'is-neg' : 'is-zero');
+                delta.textContent = signed(d);
+            }
+            if (belowCommitted(line)) {
+                warn.textContent = fmt(line.committed) + ' committed to open sales orders but only ' + fmt(line.count) + ' counted. Check Open orders: units at the decorator or waiting for pickup belong in Off shelf.';
+                warn.hidden = false;
+            } else { warn.hidden = true; }
+            saveSheet(); paintTotals();
         }
-        paintDelta();
-        var input = el('input', {
-            class: 'ic-qty', type: 'text', inputmode: 'decimal', autocomplete: 'off', value: fmt(line.count),
-            'aria-label': 'Counted quantity for ' + line.name
-        });
-        function apply(v) {
+
+        // Shelf count with -/+ steppers.
+        var shelf = el('input', { class: 'ic-qty is-sm', type: 'text', inputmode: 'decimal', autocomplete: 'off', value: fmt(line.shelf), 'aria-label': 'Shelf count for ' + line.name });
+        function applyShelf(v) {
             var c = parseCount(v);
             if (c === null) { return; }
-            line.count = c; line.error = '';
-            row.classList.remove('has-error');
-            saveSheet(); paintDelta(); paintTotals();
+            line.shelf = c; line.error = ''; row.classList.remove('has-error'); paint();
         }
-        input.addEventListener('input', function () { apply(input.value); });
-        input.addEventListener('blur', function () { input.value = fmt(line.count); });
+        shelf.addEventListener('input', function () { applyShelf(shelf.value); });
+        shelf.addEventListener('blur', function () { shelf.value = fmt(line.shelf); });
         var minus = el('button', { class: 'ic-step', type: 'button', text: '−', 'aria-label': 'Minus one', onclick: function () {
-            var c = Math.max(0, (Number(line.count) || 0) - 1); input.value = fmt(c); apply(c);
+            var c = Math.max(0, (Number(line.shelf) || 0) - 1); shelf.value = fmt(c); applyShelf(c);
         } });
         var plus = el('button', { class: 'ic-step', type: 'button', text: '+', 'aria-label': 'Plus one', onclick: function () {
-            var c = (Number(line.count) || 0) + 1; input.value = fmt(c); apply(c);
+            var c = (Number(line.shelf) || 0) + 1; shelf.value = fmt(c); applyShelf(c);
         } });
+
+        // Off-shelf quantity + where it is.
+        var off = el('input', { class: 'ic-qty is-sm', type: 'text', inputmode: 'decimal', autocomplete: 'off', value: line.offshelf ? fmt(line.offshelf) : '', placeholder: '0', 'aria-label': 'Off-shelf quantity for ' + line.name });
+        off.addEventListener('input', function () {
+            var c = off.value.trim() === '' ? 0 : parseCount(off.value);
+            if (c === null) { return; }
+            line.offshelf = c; paint();
+        });
+        off.addEventListener('blur', function () { off.value = line.offshelf ? fmt(line.offshelf) : ''; });
+        var reason = el('select', { class: 'ic-sel', 'aria-label': 'Where the off-shelf units are', onchange: function (ev) { line.offreason = ev.target.value; saveSheet(); } });
+        reason.appendChild(el('option', { value: '', text: 'Where?' }));
+        (BOOT.offReasons || ['Decorator', 'Customer pickup', 'Other']).forEach(function (r) {
+            var o = el('option', { value: r, text: r });
+            if (r === line.offreason) { o.selected = true; }
+            reason.appendChild(o);
+        });
+
         var remove = el('button', { class: 'ic-x', type: 'button', text: '×', 'aria-label': 'Remove ' + line.name, onclick: function () {
             removeLine(line.id); render();
         } });
+
+        // Open sales orders for this item, fetched on demand. Ticking one adds its
+        // unshipped quantity to Off shelf and records the SO number for the memo.
+        var ordersBox = el('div', { class: 'ic-orders', hidden: true });
+        var ordersBtn = el('button', { class: 'ic-link', type: 'button', text: 'Open orders' + (Number(line.committed) > 0 ? ' (' + fmt(line.committed) + ' committed)' : ''), onclick: function () {
+            if (!ordersBox.hidden) { ordersBox.hidden = true; return; }
+            ordersBox.hidden = false;
+            renderOrders();
+        } });
+        function renderOrders() {
+            ordersBox.innerHTML = '';
+            var cached = ordersCache[line.id];
+            if (!cached) {
+                ordersBox.appendChild(el('div', { class: 'ic-progress', text: 'Loading open orders…' }));
+                apiGet('orders', { item: line.id, loc: state.loc || '' }).then(function (res) {
+                    if (!res || !res.ok) {
+                        ordersCache[line.id] = { error: (res && res.error) || 'Could not load orders.' };
+                    } else {
+                        ordersCache[line.id] = { orders: res.orders || [] };
+                    }
+                    renderOrders();
+                });
+                return;
+            }
+            if (cached.error) { ordersBox.appendChild(el('div', { class: 'ic-error', text: cached.error })); return; }
+            if (!cached.orders.length) { ordersBox.appendChild(el('div', { text: 'No open sales orders for this item' + (state.loc ? ' at ' + locName(state.loc) : '') + '.' })); return; }
+            ordersBox.appendChild(el('div', { class: 'ic-meta', text: 'Tick the orders whose units are off the shelf (at the decorator, staged for pickup). Their unshipped quantity is added to Off shelf.' }));
+            cached.orders.forEach(function (o) {
+                var num = String(o.tranid || o.id);
+                var ref = /^so/i.test(num) ? num : 'SO ' + num;
+                var ticked = (line.offorders || []).indexOf(ref) !== -1;
+                var cb = el('input', { type: 'checkbox', 'aria-label': 'Off shelf: ' + ref });
+                cb.checked = ticked;
+                cb.addEventListener('change', function () {
+                    line.offorders = (line.offorders || []).filter(function (x) { return x !== ref; });
+                    var current = Number(line.offshelf) || 0;
+                    if (cb.checked) { line.offorders.push(ref); line.offshelf = round4(current + o.remaining); }
+                    else { line.offshelf = round4(Math.max(0, current - o.remaining)); }
+                    off.value = line.offshelf ? fmt(line.offshelf) : '';
+                    if (cb.checked && !line.offreason) { line.offreason = (BOOT.offReasons || ['Decorator'])[0]; reason.value = line.offreason; }
+                    paint();
+                });
+                ordersBox.appendChild(el('label', { class: 'ic-order' }, [
+                    cb,
+                    el('span', {}, [
+                        o.url ? el('a', { href: o.url, target: '_blank', rel: 'noopener', text: ref }) : el('b', { text: ref }),
+                        o.customer ? ' · ' + o.customer : '',
+                        el('br'),
+                        el('small', { text: fmt(o.remaining) + ' unshipped of ' + fmt(o.qty) + (o.status ? ' · ' + o.status : '') + (o.date ? ' · ' + o.date : '') })
+                    ])
+                ]));
+            });
+        }
+
         row.appendChild(el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: line.name }),
             (line.display || line.desc) ? el('div', { class: 'ic-desc', text: line.display || line.desc }) : null,
-            el('div', { class: 'ic-meta' }, ['On hand: ', el('b', { text: fmt(line.onhand) }), ' · Avail: ', el('b', { text: fmt(line.available) }), ' · On order: ', el('b', { text: fmt(line.onorder) }), line.vendor ? ' · ' + line.vendor : '']),
+            el('div', { class: 'ic-meta' }, ['On hand: ', el('b', { text: fmt(line.onhand) }), ' · Avail: ', el('b', { text: fmt(line.available) }), ' · Committed: ', el('b', { text: fmt(line.committed) }), ' · On order: ', el('b', { text: fmt(line.onorder) }), line.vendor ? ' · ' + line.vendor : '']),
             line.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + line.blocked + ') - will be skipped' }) : null,
-            line.error ? el('div', { class: 'ic-error', text: line.error }) : null
+            line.error ? el('div', { class: 'ic-error', text: line.error }) : null,
+            warn,
+            line.blocked ? null : ordersBtn,
+            ordersBox
         ]));
         row.appendChild(el('div', { class: 'ic-line-ctl' }, [
-            el('div', { class: 'ic-line-top' }, [minus, input, plus, delta, remove])
+            el('div', { class: 'ic-line-top' }, [el('span', { class: 'ic-lbl', text: 'Shelf' }), minus, shelf, plus]),
+            el('div', { class: 'ic-line-top' }, [el('span', { class: 'ic-lbl', text: 'Off shelf' }), off, reason]),
+            el('div', { class: 'ic-line-top' }, [el('span', { class: 'ic-lbl', text: 'Count' }), total, delta, remove])
         ]));
+        paint();
         return row;
     }
 
@@ -1185,7 +1405,7 @@ button{cursor:pointer}
             var live = t.lines - t.blocked;
             form.appendChild(el('div', { class: 'ic-confirm' }, [
                 el('p', {}, [el('b', { text: 'Create an Inventory Adjustment for ' + live + ' line' + (live === 1 ? '' : 's') + (state.loc ? ' at ' + locName(state.loc) : '') + '?' })]),
-                el('p', { text: 'Each item’s on-hand becomes the count you entered (' + '+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). Items whose count already matches are left out.' + (t.blocked ? ' ' + t.blocked + ' flagged line' + (t.blocked === 1 ? ' is' : 's are') + ' skipped.' : '') }),
+                el('p', { text: 'Each item’s on-hand becomes the count you entered (shelf plus off shelf: ' + '+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). Items whose count already matches are left out.' + (t.blocked ? ' ' + t.blocked + ' flagged line' + (t.blocked === 1 ? ' is' : 's are') + ' skipped.' : '') + (t.below ? ' ' + t.below + ' line' + (t.below === 1 ? ' is' : 's are') + ' below the quantity committed to open sales orders.' : '') }),
                 el('div', { class: 'ic-actions' }, [
                     el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Cancel', onclick: function () { state.confirm = false; render(); } }),
                     el('button', { class: 'ic-btn is-ok', type: 'button', text: 'Yes, submit count', onclick: submitSheet })
@@ -1222,7 +1442,7 @@ button{cursor:pointer}
             ids.forEach(function (id) {
                 var line = state.sheet[id], fresh = res.items && res.items[id];
                 if (!line) { return; }
-                if (fresh) { line.onhand = fresh.onhand; line.available = fresh.available; line.onorder = fresh.onorder; line.blocked = fresh.blocked || ''; line.error = ''; }
+                if (fresh) { line.onhand = fresh.onhand; line.available = fresh.available; line.committed = fresh.committed; line.onorder = fresh.onorder; line.blocked = fresh.blocked || ''; line.error = ''; }
                 else { line.error = 'Not found at this location any more.'; }
             });
             saveSheet(); render();
@@ -1251,7 +1471,10 @@ button{cursor:pointer}
             render();
             apiPost('submit', {
                 loc: state.loc || '', account: state.account || '', memo: state.memo || '',
-                lines: batch.map(function (id) { return { item: id, count: state.sheet[id].count }; })
+                lines: batch.map(function (id) {
+                    var l = state.sheet[id]; syncCount(l);
+                    return { item: id, count: l.count, shelf: l.shelf, offshelf: l.offshelf, offreason: l.offreason || '', offorders: l.offorders || [] };
+                })
             }).then(function (res) {
                 if (!res || !res.ok) {
                     state.submitting = false; state.progress = '';
