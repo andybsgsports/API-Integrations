@@ -101,8 +101,9 @@ rest of the sheet still posts. Adjust those the normal way.
      `invcount: adjustment <id>` line with the counts).
    - **Audience** → the roles that count stock (Administrator, Warehouse, …).
    - Leave **Execute as Role** blank so the adjustment posts as the person
-     counting. Their role needs **Inventory Adjustment (Create)** plus
-     **Items**, **Locations** and **Accounts** (View).
+     counting. Their role needs **Items**, **Locations** and **Accounts**
+     (View); a role that will *submit* also needs **Inventory Adjustment
+     (Create)**.
    - Leave **Available Without Login** *unchecked*.
    - **Save** and open the deployment's **URL** — that link is the app.
 4. **Put it where people will find it.** Add the URL as a Center Link
@@ -121,6 +122,7 @@ rest of the sheet still posts. Adjust those the normal way.
 | `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand, available, or on order. The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
+| `SUBMIT_ROLE_IDS` | `[3]` | Internal ids of the roles allowed to post the adjustment. `3` is NetSuite's Administrator. Every other role counts, ticks open orders and exports, but sees no **Refresh on-hand** / **Clear sheet** / **Submit count** buttons, and the submit endpoint refuses them — a hidden button is not a permission. Find a role's id in the `id=` of its URL under Setup > Users/Roles > Manage Roles. `null` lets any role in the deployment's audience submit. |
 | `EXPORT_MAX_ROWS` | `20000` | Cap on rows in a CSV / Excel export. |
 | `PDF_MAX_ROWS` | `2000` | Cap on rows in a PDF export (the renderer is slow on large tables). |
 
@@ -147,6 +149,13 @@ disappears and account-wide on-hand is used.
 6. **Submit count…** → confirm → the adjustment link appears. Any lines the
    server refused stay on the sheet with the reason. The adjustment posts to
    5005 INVENTORY ADJUSTMENT; there is nothing to pick.
+
+**Counters who cannot submit.** Only `SUBMIT_ROLE_IDS` (Administrator by
+default) sees Refresh on-hand, Clear sheet and Submit count. Everyone else
+counts and ticks orders exactly the same way, then **exports the sheet** (CSV,
+Excel or PDF) and hands it over; an administrator keys or imports those counts
+and posts the adjustment. Their sheet lives in their own browser, so the export
+is the handoff — clearing their browser data loses it.
 
 ## Count-day rules (what moves inventory)
 

@@ -22,6 +22,11 @@
  * Accounts (View). The adjustment is stamped with that user as creator, which
  * is the audit trail you want on a physical count.
  *
+ * Only the roles in CONFIG.SUBMIT_ROLE_IDS (Administrator by default) can post
+ * the adjustment: everyone else counts, ticks orders and exports, and the
+ * Refresh / Clear sheet / Submit buttons are not shown to them. The submit
+ * endpoint enforces this too -- a hidden button is not a permission.
+ *
  * URL actions (the page calls these itself):
  *   GET  ?action=search&q=<words>&loc=<id>&page=<n>&instock=T|F
  *                        -> one page of the item list (all items at the
@@ -53,6 +58,13 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // OneWorld: force the adjustment's subsidiary. Leave null to use the
         // chosen location's subsidiary, falling back to the logged-in user's.
         SUBSIDIARY_ID: null,
+        // Internal ids of the roles allowed to post the count as an Inventory
+        // Adjustment. 3 is NetSuite's Administrator. Every other role still
+        // counts, ticks open orders and exports, but sees no Refresh / Clear
+        // sheet / Submit buttons and is refused by the submit endpoint. Add an
+        // id here (Setup > Users/Roles > Manage Roles, the id= in its URL) to
+        // let another role submit; set to null to let any role submit.
+        SUBMIT_ROLE_IDS: [3],
         // Item types that can be counted. Matrix PARENTS are always excluded
         // (they hold no stock); their color/size children are what get counted.
         ITEM_TYPES: ['InvtPart', 'Assembly'],
@@ -195,6 +207,25 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     function feature(id) {
         try { return !!runtime.isFeatureInEffect({ feature: id }); } catch (e) { return false; }
+    }
+
+    // May this user post the adjustment? Matched on the role's internal id, with
+    // the script id ('administrator') accepted too so the stock Administrator
+    // role passes even in an account where its id differs.
+    function canSubmit() {
+        var allowed = CONFIG.SUBMIT_ROLE_IDS;
+        if (!allowed) { return true; }   // null = any role
+        var user;
+        try { user = runtime.getCurrentUser(); } catch (e) { return false; }
+        var roleId = null, roleScriptId = '';
+        try { roleId = posInt(user.role); } catch (e1) { /* ignore */ }
+        try { roleScriptId = String(user.roleId || '').toLowerCase(); } catch (e2) { /* ignore */ }
+        if (roleScriptId === 'administrator') { return true; }
+        for (var i = 0; i < allowed.length; i++) {
+            if (roleId && posInt(allowed[i]) === roleId) { return true; }
+            if (roleScriptId && String(allowed[i]).toLowerCase() === roleScriptId) { return true; }
+        }
+        return false;
     }
 
     // Multi-Location Inventory decides whether on-hand is per location (and the
@@ -726,6 +757,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     }
 
     function submitCount(body) {
+        if (!canSubmit()) {
+            return { ok: false, error: 'Your role cannot post inventory adjustments. Export the sheet and hand it to an administrator.' };
+        }
         var lines = normalizeLines(body.lines);
         if (!lines.length) { return { ok: false, error: 'Nothing to submit -- enter at least one count.' }; }
         if (lines.length > CONFIG.MAX_LINES_PER_ADJUSTMENT) {
@@ -1064,6 +1098,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             pageSize: CONFIG.SEARCH_PAGE_SIZE,
             inStockDefault: CONFIG.IN_STOCK_DEFAULT !== false,
             maxLines: CONFIG.MAX_LINES_PER_ADJUSTMENT,
+            canSubmit: canSubmit(),
             user: '',
             warnings: []
         };
@@ -1857,6 +1892,8 @@ button{cursor:pointer}
                     el('button', { class: 'ic-btn is-ok', type: 'button', text: 'Yes, submit count', onclick: submitSheet })
                 ])
             ]));
+        } else if (!BOOT.canSubmit) {
+            form.appendChild(el('div', { class: 'ic-warn', text: 'Your role cannot post inventory adjustments. Export the sheet above and hand it to an administrator, who can key or import the counts.' }));
         } else {
             form.appendChild(el('div', { class: 'ic-actions' }, [
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Refresh on-hand', onclick: refreshOnHand }),
@@ -2201,7 +2238,9 @@ button{cursor:pointer}
         else if (state.view === 'sheet') { renderSheetView(main); }
         else if (state.view === 'orders') { renderOrdersView(main); }
         else { renderSearchView(main); }
-        main.appendChild(el('div', { class: 'ic-footer', text: 'Counts are saved in this browser until you submit. Submitting creates an Inventory Adjustment in NetSuite as you.' }));
+        main.appendChild(el('div', { class: 'ic-footer', text: BOOT.canSubmit
+            ? 'Counts are saved in this browser until you submit. Submitting creates an Inventory Adjustment in NetSuite as you.'
+            : 'Counts are saved in this browser. Your role cannot post adjustments, so export the sheet when you are done.' }));
         if (state.view === 'search' && (keepSearchFocus || !state.q)) {
             var s = document.getElementById('icSearch');
             if (s && !('ontouchstart' in window && !keepSearchFocus)) { s.focus(); }
