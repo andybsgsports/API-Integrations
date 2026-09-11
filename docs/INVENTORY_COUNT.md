@@ -33,15 +33,22 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    facility, or waiting for customer pickup. Instead of printing every open
    order, the **Open orders** tab lists every such line at the location,
    grouped by order with customer, date and status, as `0 shipped of 5 · 5 to
-   count`. Tick a line once its units are found and those units are added to
+   count`. Orders start collapsed; the header shows how many lines, units to
+   count and ticks each has, and clicking it (or **Expand all**) opens it.
+   The filter box narrows by order number, customer or item and opens what it
+   matches. Tick a line once its units are found and those units are added to
    the item's count on the sheet (the line is created if needed); untick to
    take them back out. Lines whose items have **not been received** (nothing
    committed from stock, still on order from the vendor) and anything marked
    **shipped** are not listed — they are not in the building or are already
-   off the books. Picked or packed fulfillments that have not shipped (Pick,
-   Pack, Ship) are listed under their sales order. The same list opens per
-   item from the **Committed** figure on either page, and from **Open orders**
-   on a sheet line; the sheet line shows "Includes N on open orders: …".
+   off the books. Units pulled or put on layaway (a Picked / Packed
+   fulfillment that has not shipped) are still inside the order line's
+   committed quantity, so they show on that line as context — `10 to count
+   (10 layaway)` — rather than as a second row that could be ticked twice;
+   a fulfillment with no matching open line is listed on its own. The same
+   list opens per item from the **Committed** figure on either page, and from
+   **Open orders** on a sheet line; the sheet line shows "Includes N on open
+   orders: …".
    When a line's count is below the quantity committed to open sales orders,
    the sheet warns — that is the "physically gone but never marked shipped"
    case, which should be fixed by shipping the fulfillment, not by adjusting.
