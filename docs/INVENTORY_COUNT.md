@@ -10,15 +10,17 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    location — NetSuite's current inventory snapshot, the same rows as the
    Physical Inventory Worksheet and the *Custom Current Inventory Snapshot 2*
    report, sorted by item name, 100 per page with a **Load more** button. An
-   **In stock / All items** toggle switches between items whose on-hand is
-   not zero (negatives included) and the whole catalog at that location
-   (the default, zeros included, matching the report's Show Zeros). Only active inventory items (and
+   **In stock / All items** toggle switches between items that have quantity
+   **on hand** (positive or negative), **available** to sell, or **on order**
+   and not yet received, and the whole catalog at that location (the default,
+   zeros included, matching the report's Show Zeros). Each row shows On hand,
+   Avail and On order. Only active inventory items (and
    assemblies) show; matrix *parents* never do, because stock lives on the
    color/size children.
-   **Search** narrows the list by style #, name, description, UPC or vendor
-   code — any words, in any order (`royale 5` finds "Royale NFHS V25 Soccer
-   Ball - Size 5"; `0125666912 white` narrows a style to its white children).
-   Clearing the search box brings the full list back.
+   **Search** narrows the list by style #, display name, sales description,
+   UPC or vendor code — any words, in any order (`royale 5` finds "Royale NFHS
+   V25 Soccer Ball - Size 5"; `0125666912 white` narrows a style to its white
+   children). Clearing the search box brings the full list back.
 2. **Count** — key the counted quantity next to a hit and press **Add** (Enter
    jumps to the next hit, so a keyboard or barcode scanner flows down a shelf).
    Every line lands on the **Sheet** tab with the current on-hand at the chosen
@@ -72,7 +74,7 @@ rest of the sheet still posts. Adjust those the normal way.
 | `SUBSIDIARY_ID` | `null` | OneWorld: force the subsidiary. `null` = the chosen location's subsidiary, else the logged-in user's. |
 | `ITEM_TYPES` | `['InvtPart', 'Assembly']` | Item types that can be counted. |
 | `SEARCH_PAGE_SIZE` | `100` | Rows per page of the list (a **Load more** button pages on). |
-| `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items whose on-hand is not zero. The toggle on the page overrides it and is remembered per browser. |
+| `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand, available, or on order. The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 
@@ -119,10 +121,14 @@ should equal what was keyed. Then repeat the same count — it should report
   created. Fix the preference or the item and submit again.
 - **"You do not have permission…"** — the counter's role lacks Inventory
   Adjustment (Create) or view access on Items / Locations / Accounts.
-- **An item is missing from the list** — with **In stock** on, its on-hand at
-  this location is zero: switch to **All items**. Otherwise it is inactive, a
-  matrix parent (count its children), a non-inventory item, or not set up at
-  the chosen location.
+- **An item is missing from the list** — with **In stock** on, it has nothing
+  on hand, available, or on order at this location: switch to **All items**.
+  Otherwise it is inactive, a matrix parent (count its children), a
+  non-inventory item, or not set up at the chosen location.
+- **"This account does not support the In stock filter"** — NetSuite rejected
+  every quantity filter field, so the list falls back to all items. The
+  execution log names the rejected fields (`invcount: this account rejects
+  item filter …`); those are remembered for a day so pages stay fast.
 - **Non-JSON response** errors on the page mean NetSuite returned an HTML error
   page; the deployment's execution log has the stack.
 

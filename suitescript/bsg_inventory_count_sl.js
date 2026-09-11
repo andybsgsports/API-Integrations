@@ -33,7 +33,7 @@
  * @NApiVersion 2.1
  * @NScriptType Suitelet
  */
-define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search, record, runtime, url, log) {
+define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], function (search, record, runtime, url, cache, log) {
 
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
@@ -130,6 +130,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
         response.addHeader({ name: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, max-age=0' });
         var out;
         try {
+            loadDead();
             var isPost = request.method === 'POST';
             var body = isPost ? parseBody(request) : {};
             if (action === 'search') {
@@ -215,11 +216,13 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
     // Every word must hit somewhere, and each word may hit a different field, so
     // "royale 5" finds "Royale NFHS V25 Soccer Ball - Size 5" (name + description)
     // and "0125666912 white" narrows a style to its white children.
-    var WORD_FIELDS = ['itemid', 'displayname', 'salesdescription', 'purchasedescription', 'vendorname', 'upccode'];
+    // Not in the list: purchasedescription -- NetSuite rejects it as search
+    // criteria ("An nlobjSearchFilter contains invalid search criteria").
+    var WORD_FIELDS = ['itemid', 'displayname', 'salesdescription', 'vendorname', 'upccode'];
     function wordFilter(w) {
         var out = [];
         WORD_FIELDS.forEach(function (f) {
-            if (deadFields[f]) { return; }
+            if (dead.filter[f]) { return; }
             if (out.length) { out.push('or'); }
             out.push([f, f === 'upccode' ? 'is' : 'contains', w]);
         });
@@ -236,34 +239,82 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
         { name: 'usebins', feature: 'BINMANAGEMENT', flag: 'bin-tracked' }
     ];
     function flagCols() {
-        return FLAG_COLS.filter(function (c) { return !deadFields[c.name] && feature(c.feature); });
+        return FLAG_COLS.filter(function (c) { return !dead.column[c.name] && feature(c.feature); });
     }
 
-    // Fields this account rejected during this request. Anything not in REQUIRED
-    // is nice-to-have: withItemSearch drops it and retries rather than failing.
-    var deadFields = {};
-    var REQUIRED = { itemid: 1, internalid: 1, type: 1, isinactive: 1, matrix: 1, inventorylocation: 1, quantityonhand: 1, locationquantityonhand: 1 };
+    // Fields this account rejected during this request, columns and filters kept
+    // apart (the same name can be fine as one and not the other). Anything not in
+    // REQUIRED is nice-to-have: withItemSearch drops it and retries.
+    var dead = { column: {}, filter: {} };
+    var REQUIRED = {
+        column: { itemid: 1, type: 1, quantityonhand: 1, locationquantityonhand: 1 },
+        filter: { internalid: 1, type: 1, isinactive: 1, matrix: 1, inventorylocation: 1 }
+    };
     var OPTIONAL_COLS = ['displayname', 'salesdescription', 'upccode', 'vendorname', 'vendor', 'parent'];
 
+    function qtyField(locId, which) {
+        return (locId ? 'locationquantity' : 'quantity') + which;
+    }
+
+    // "In stock" = anything a counter should see: on hand (positive or negative),
+    // available to sell, or on order and not yet received. Values are strings on
+    // purpose -- a bare numeric 0 is dropped as "no value" by the filter parser,
+    // which silently turns the condition into "any", zeros and all.
+    function stockFilter(locId) {
+        var oh = qtyField(locId, 'onhand'), av = qtyField(locId, 'available'), oo = qtyField(locId, 'onorder');
+        var parts = [];
+        if (!dead.filter[oh]) { parts.push([oh, 'greaterthan', '0']); parts.push([oh, 'lessthan', '0']); }
+        if (!dead.filter[av]) { parts.push([av, 'greaterthan', '0']); }
+        if (!dead.filter[oo]) { parts.push([oo, 'greaterthan', '0']); }
+        var expr = [];
+        parts.forEach(function (p, i) { if (i) { expr.push('or'); } expr.push(p); });
+        return expr.length ? expr : null;
+    }
+
+    // Both wordings seen in production, the field name last, after the final colon:
+    //   "An nlobjSearchColumn contains an invalid column, or is not in proper syntax: isserialitem."
+    //   "An nlobjSearchFilter contains invalid search criteria: purchasedescription."
     function rejectedField(e) {
-        // "...invalid column, or is not in proper syntax: isserialitem." -- the
-        // name is followed by a full stop, which must not become part of it.
-        var m = /invalid (?:column|filter)[^:]*:\s*([a-z0-9_]+)/i.exec(userErr(e));
-        return m ? m[1].toLowerCase() : null;
+        var msg = userErr(e);
+        var kind = /nlobjSearchColumn/i.test(msg) ? 'column' : (/nlobjSearchFilter/i.test(msg) ? 'filter' : null);
+        var m = /:\s*([a-z0-9_]+)\.?\s*$/i.exec(msg);
+        return kind && m ? { kind: kind, name: m[1].toLowerCase() } : null;
+    }
+
+    // Rejected fields are remembered across requests (a day) so a page load does
+    // not pay for a failing search before the one that works.
+    var DEAD_CACHE_KEY = 'dead_fields_v1';
+    function deadCache() {
+        try { return cache.getCache({ name: 'bsg_invcount', scope: cache.Scope.PROTECTED }); } catch (e) { return null; }
+    }
+    function loadDead() {
+        var c = deadCache();
+        if (!c) { return; }
+        try {
+            var raw = c.get({ key: DEAD_CACHE_KEY });
+            var parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && parsed.column && parsed.filter) { dead = parsed; }
+        } catch (e) { /* miss or garbage: start clean */ }
+    }
+    function saveDead() {
+        var c = deadCache();
+        if (!c) { return; }
+        try { c.put({ key: DEAD_CACHE_KEY, value: JSON.stringify(dead), ttl: 86400 }); } catch (e) { /* best effort */ }
     }
 
     // Runs an item search built by buildSpec(); if NetSuite rejects an optional
     // column or filter field, marks it dead and rebuilds -- so one account that
     // lacks a field degrades to a slightly thinner row instead of a broken page.
     function withItemSearch(buildSpec, run) {
-        for (var attempt = 0; attempt < 6; attempt++) {
+        for (var attempt = 0; attempt < 8; attempt++) {
             try {
                 return run(search.create(buildSpec()));
             } catch (e) {
                 var bad = rejectedField(e);
-                if (!bad || deadFields[bad] || REQUIRED[bad]) { throw e; }
-                deadFields[bad] = true;
-                log.audit({ title: 'invcount: this account rejects item field ' + bad + '; retrying without it', details: userErr(e) });
+                if (!bad || dead[bad.kind][bad.name] || REQUIRED[bad.kind][bad.name]) { throw e; }
+                dead[bad.kind][bad.name] = true;
+                saveDead();
+                log.audit({ title: 'invcount: this account rejects item ' + bad.kind + ' ' + bad.name + '; retrying without it', details: userErr(e) });
             }
         }
         throw new Error('Item search keeps failing after dropping unsupported fields.');
@@ -283,8 +334,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
     }
 
     function itemColumns(locId) {
-        var cols = [search.createColumn({ name: 'itemid', sort: search.Sort.ASC }), 'type', locId ? 'locationquantityonhand' : 'quantityonhand'];
-        OPTIONAL_COLS.forEach(function (c) { if (!deadFields[c]) { cols.push(c); } });
+        var cols = [search.createColumn({ name: 'itemid', sort: search.Sort.ASC }), 'type', qtyField(locId, 'onhand')];
+        [qtyField(locId, 'available'), qtyField(locId, 'onorder')].concat(OPTIONAL_COLS).forEach(function (c) {
+            if (!dead.column[c]) { cols.push(c); }
+        });
         flagCols().forEach(function (c) { cols.push(c.name); });
         return cols;
     }
@@ -295,16 +348,20 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
 
     // Column value / text that tolerates a column this account does not have.
     function val(r, name) {
-        if (deadFields[name]) { return ''; }
+        if (dead.column[name]) { return ''; }
         try { return r.getValue(name) || ''; } catch (e) { return ''; }
     }
     function txt(r, name) {
-        if (deadFields[name]) { return ''; }
+        if (dead.column[name]) { return ''; }
         try { return r.getText(name) || ''; } catch (e) { return ''; }
+    }
+    function num(r, name) {
+        var n = parseFloat(val(r, name));
+        return isFinite(n) ? n : 0;
     }
 
     function rowToItem(r, locId) {
-        var qty = parseFloat(r.getValue(locId ? 'locationquantityonhand' : 'quantityonhand'));
+        var qty = parseFloat(r.getValue(qtyField(locId, 'onhand')));
         var flags = [];
         flagCols().forEach(function (c) { if (isTrue(r.getValue(c.name))) { flags.push(c.flag); } });
         return {
@@ -316,6 +373,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
             vendor: txt(r, 'vendor') || val(r, 'vendorname'),
             parent: txt(r, 'parent'),
             onhand: isFinite(qty) ? qty : 0,
+            available: num(r, qtyField(locId, 'available')),
+            onorder: num(r, qtyField(locId, 'onorder')),
             blocked: flags.length ? flags.join(', ') : ''
         };
     }
@@ -323,16 +382,17 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
     // One search serves both modes. With no words it is the full list of items at
     // the location (the current inventory snapshot, sorted like the Physical
     // Inventory Worksheet); with words it narrows that list. inStock keeps only
-    // rows whose on-hand at the location is not zero (negatives included -- those
-    // need a count most of all).
+    // rows with quantity on hand, available, or on order (see stockFilter).
     function searchItems(q, locId, page, inStock) {
         var words = tokenize(q);
         if (!multiLocation()) { locId = null; }
+        var stockApplied = false;
         function buildSpec() {
             var filters = baseFilters(locId);
+            stockApplied = false;
             if (inStock) {
-                filters.push('and');
-                filters.push([locId ? 'locationquantityonhand' : 'quantityonhand', 'notequalto', 0]);
+                var sf = stockFilter(locId);
+                if (sf) { filters.push('and'); filters.push(sf); stockApplied = true; }
             }
             words.forEach(function (w) {
                 var wf = wordFilter(w);
@@ -347,7 +407,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/log'], function (search
         if (idx < pageCount) {
             paged.fetch({ index: idx }).data.forEach(function (r) { items.push(rowToItem(r, locId)); });
         }
-        return { ok: true, items: items, total: paged.count, page: idx, more: idx + 1 < pageCount };
+        return { ok: true, items: items, total: paged.count, page: idx, more: idx + 1 < pageCount, stockApplied: !inStock || stockApplied };
     }
 
     // Fresh on-hand for a set of items at a location, keyed by item id. Carries
@@ -707,8 +767,8 @@ button{cursor:pointer}
     var state = {
         view: 'search',            // search | sheet | done
         loc: '', account: '',
-        q: '', results: [], more: false, page: 0, total: 0, loaded: false, searching: false, searchError: '',
-        instock: true,             // list only items whose on-hand is not zero
+        q: '', results: [], more: false, page: 0, total: 0, loaded: false, searching: false, searchError: '', stockApplied: true,
+        instock: true,             // list only items with qty on hand, available or on order
         sheet: {}, order: [],      // itemId -> line; ids in the order added
         memo: '',
         submitting: false, progress: '', submitError: '',
@@ -803,7 +863,7 @@ button{cursor:pointer}
     function setCount(item, count) {
         var line = state.sheet[item.id];
         if (!line) {
-            line = { id: item.id, name: item.name, display: item.display, desc: item.desc, upc: item.upc, vendor: item.vendor, onhand: item.onhand, blocked: item.blocked || '' };
+            line = { id: item.id, name: item.name, display: item.display, desc: item.desc, upc: item.upc, vendor: item.vendor, onhand: item.onhand, available: item.available, onorder: item.onorder, blocked: item.blocked || '' };
             state.sheet[item.id] = line;
             state.order.push(item.id);
         }
@@ -871,6 +931,7 @@ button{cursor:pointer}
                 state.total = typeof res.total === 'number' ? res.total : state.results.length;
                 state.page = res.page || 0;
                 state.more = !!res.more;
+                state.stockApplied = res.stockApplied !== false;
                 state.loaded = true;
             }
             renderResults();
@@ -927,7 +988,7 @@ button{cursor:pointer}
         var info = el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: item.name }),
             (item.display || item.desc) ? el('div', { class: 'ic-desc', text: item.display && item.desc && item.display !== item.desc ? item.display + ' - ' + item.desc : (item.display || item.desc) }) : null,
-            el('div', { class: 'ic-meta' }, [meta.length ? meta.join(' · ') + ' · ' : '', 'On hand: ', el('b', { text: fmt(item.onhand) })]),
+            el('div', { class: 'ic-meta' }, [meta.length ? meta.join(' · ') + ' · ' : '', 'On hand: ', el('b', { text: fmt(item.onhand) }), ' · Avail: ', el('b', { text: fmt(item.available) }), ' · On order: ', el('b', { text: fmt(item.onorder) })]),
             item.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + item.blocked + ') - adjust manually' }) : null,
             line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: 'On sheet: ' + fmt(line.count) }) : null
         ]);
@@ -974,6 +1035,9 @@ button{cursor:pointer}
             return;
         }
         var q = state.q.trim();
+        if (state.instock && state.loaded && !state.stockApplied) {
+            box.appendChild(el('div', { class: 'ic-warn', text: 'This account does not support the In stock filter, so every item is listed.' }));
+        }
         box.appendChild(el('div', { class: 'ic-listhead' }, [
             el('div', { class: 'ic-count', text: state.loaded ? countLabel(q) : '' }),
             el('div', { class: 'ic-seg', role: 'group', 'aria-label': 'Which items to list' }, [
@@ -1013,7 +1077,7 @@ button{cursor:pointer}
             } })
         ]);
         main.appendChild(wrap);
-        main.appendChild(el('p', { class: 'ic-hint', text: 'Every item in stock at this location is listed below. Search to jump to one, key the counted quantity and press Add (Enter jumps to the next item). Counts wait on the Sheet tab until you submit.' }));
+        main.appendChild(el('p', { class: 'ic-hint', text: 'Every item at this location is listed below; In stock keeps those with quantity on hand, available, or on order. Search to jump to one, key the counted quantity and press Add (Enter jumps to the next item). Counts wait on the Sheet tab until you submit.' }));
         main.appendChild(el('div', { id: 'icResults' }));
         renderResults();
         if (!state.loaded && !state.searching && !state.searchError) { runSearch(true); }
@@ -1057,7 +1121,7 @@ button{cursor:pointer}
         row.appendChild(el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: line.name }),
             (line.display || line.desc) ? el('div', { class: 'ic-desc', text: line.display || line.desc }) : null,
-            el('div', { class: 'ic-meta' }, ['On hand: ', el('b', { text: fmt(line.onhand) }), line.vendor ? ' · ' + line.vendor : '']),
+            el('div', { class: 'ic-meta' }, ['On hand: ', el('b', { text: fmt(line.onhand) }), ' · Avail: ', el('b', { text: fmt(line.available) }), ' · On order: ', el('b', { text: fmt(line.onorder) }), line.vendor ? ' · ' + line.vendor : '']),
             line.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + line.blocked + ') - will be skipped' }) : null,
             line.error ? el('div', { class: 'ic-error', text: line.error }) : null
         ]));
@@ -1158,7 +1222,7 @@ button{cursor:pointer}
             ids.forEach(function (id) {
                 var line = state.sheet[id], fresh = res.items && res.items[id];
                 if (!line) { return; }
-                if (fresh) { line.onhand = fresh.onhand; line.blocked = fresh.blocked || ''; line.error = ''; }
+                if (fresh) { line.onhand = fresh.onhand; line.available = fresh.available; line.onorder = fresh.onorder; line.blocked = fresh.blocked || ''; line.error = ''; }
                 else { line.error = 'Not found at this location any more.'; }
             });
             saveSheet(); render();
