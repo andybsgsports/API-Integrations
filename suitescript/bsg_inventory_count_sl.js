@@ -487,8 +487,19 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
     function openOrders(itemId, locId) {
         if (!multiLocation()) { locId = null; }
         var out = [];
-        var MAX = 1000;
+        var MAX = 5000;
         var truncated = false;
+        function fetchAll(srch) {
+            var rs = srch.run(), rows = [], start = 0, page = 1000;
+            while (start < MAX) {
+                var chunk = rs.getRange({ start: start, end: Math.min(start + page, MAX) });
+                rows = rows.concat(chunk);
+                if (chunk.length < page) { break; }
+                start += page;
+            }
+            if (rows.length >= MAX) { truncated = true; }
+            return rows;
+        }
 
         function soSpec() {
             var filters = [
@@ -505,9 +516,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
         }
         withSearch('transaction', soSpec, function (srch) {
-            var rows = srch.run().getRange({ start: 0, end: MAX });
-            if (rows.length >= MAX) { truncated = true; }
-            rows.forEach(function (r) {
+            fetchAll(srch).forEach(function (r) {
                 var qty = Math.abs(parseFloat(tval(r, 'quantity')) || 0);
                 var shipped = Math.abs(parseFloat(tval(r, 'quantityshiprecv')) || 0);
                 var remaining = round4(Math.max(0, qty - shipped));
@@ -533,8 +542,13 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             });
         });
 
-        // Picked / packed fulfillments: best effort, an account without Pick,
-        // Pack, Ship simply has none (or rejects the status values -> logged).
+        // Picked / packed fulfillments (BSG's labels: Pulled / Layaway): best
+        // effort, an account without Pick, Pack, Ship simply has none (or
+        // rejects the status values -> logged). A fulfillment line comes back
+        // twice from a transaction search -- the item line and its cost-of-goods
+        // posting line -- so the COGS rows are filtered out and, in case that
+        // filter is ever rejected, the rows are de-duplicated by record + item.
+        var pulled = [];
         try {
             function ifSpec() {
                 var filters = [
@@ -542,6 +556,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                     ['mainline', 'is', 'F'], 'and',
                     ['status', 'anyof', UNSHIPPED_IF_STATUSES]
                 ];
+                if (!isDead('transaction', 'filter', 'cogs')) { filters.push('and'); filters.push(['cogs', 'is', 'F']); }
                 if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
                 if (locId && !isDead('transaction', 'filter', 'location')) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
                 var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item'];
@@ -551,15 +566,17 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                 return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
             }
             withSearch('transaction', ifSpec, function (srch) {
-                var rows = srch.run().getRange({ start: 0, end: MAX });
-                if (rows.length >= MAX) { truncated = true; }
-                rows.forEach(function (r) {
+                var seen = {};
+                fetchAll(srch).forEach(function (r) {
                     var qty = Math.abs(parseFloat(tval(r, 'quantity')) || 0);
                     if (qty <= 0) { return; }
+                    var key = String(r.id) + ':' + String(tval(r, 'item'));
+                    if (seen[key]) { return; }
+                    seen[key] = true;
                     var from = ttxt(r, 'createdfrom');           // "Sales Order #JH-SO625"
                     var m = /#\s*(\S+)/.exec(from);
                     var ref = m ? orderRef(m[1], '') : ('IF ' + String(tval(r, 'tranid') || r.id));
-                    out.push({
+                    pulled.push({
                         kind: 'fulfillment',
                         id: String(r.id),
                         ref: ref,
@@ -573,6 +590,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                         remaining: qty,
                         committed: qty,
                         backordered: 0,
+                        pulledStatus: ttxt(r, 'statusref') || 'Pulled',
                         status: (ttxt(r, 'statusref') || 'Picked/packed') + ', not shipped',
                         url: recUrl('itemfulfillment', r.id)
                     });
@@ -581,6 +599,23 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         } catch (e) {
             log.audit({ title: 'invcount: picked/packed fulfillment search skipped', details: userErr(e) });
         }
+        // A pulled/packed fulfillment's units are still inside its sales-order
+        // line's committed quantity (the order shows Committed 10, Pulled 10),
+        // so it is folded into that line as context rather than listed as a
+        // second row that could be ticked twice. Only a fulfillment with no
+        // matching open line is listed on its own.
+        pulled.forEach(function (f) {
+            var so = null;
+            for (var i = 0; i < out.length; i++) {
+                if (out[i].kind === 'order' && out[i].ref === f.ref && out[i].item === f.item) { so = out[i]; break; }
+            }
+            if (so) {
+                so.pulled = round4((so.pulled || 0) + f.qty);
+                so.pulledStatus = f.pulledStatus;
+            } else {
+                out.push(f);
+            }
+        });
         return { ok: true, orders: out, truncated: truncated };
     }
 
@@ -899,7 +934,11 @@ button{cursor:pointer}
 .ic-commit-warn{font-size:12px;color:var(--warn);background:#fff3df;border-radius:6px;padding:4px 8px;margin-top:6px}
 .ic-incl{font-size:12px;color:var(--ok);background:#e0f3e6;border-radius:6px;padding:4px 8px;margin-top:6px}
 .ic-ordgrp{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
-.ic-ordhead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:4px}
+.ic-ordhead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;cursor:pointer;user-select:none;padding:4px 0}
+.ic-ordhead:hover{background:#fafafc}
+.ic-caret{display:inline-block;width:18px;color:var(--muted);font-size:14px}
+.ic-ordsum{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap}
+.ic-ordsum.is-ticked{color:var(--ok);font-weight:700}
 .ic-ordhead a{color:var(--focus);font-weight:800;font-size:16px}
 .ic-ordhead small{color:var(--muted)}
 .ic-ordline{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px dashed var(--line)}
@@ -960,6 +999,7 @@ button{cursor:pointer}
         view: 'search',            // search | orders | sheet | done
         allOrders: null,           // Open orders tab: { entries, loc } | { error }
         ordersFilter: '',
+        ordersOpen: {},            // Open orders tab: order refs expanded by the user
         loc: '', account: '',
         q: '', results: [], more: false, page: 0, total: 0, loaded: false, searching: false, searchError: '', stockApplied: true,
         instock: true,             // list only items with qty on hand, available or on order
@@ -1272,10 +1312,13 @@ button{cursor:pointer}
         };
     }
 
-    // "0 shipped of 5 · 5 to count · Pending Fulfillment"
+    // "0 shipped of 10 · 10 to count (10 layaway) · Pending Fulfillment"
     function orderDetail(o) {
         if (o.kind === 'fulfillment') { return fmt(o.qty) + ' to count · ' + o.status; }
-        return fmt(o.shipped) + ' shipped of ' + fmt(o.qty) + ' · ' + fmt(o.committed) + ' to count' + (o.backordered ? ' · ' + fmt(o.backordered) + ' more not received yet' : '') + (o.status ? ' · ' + o.status : '');
+        return fmt(o.shipped) + ' shipped of ' + fmt(o.qty) + ' · ' + fmt(o.committed) + ' to count'
+            + (o.pulled ? ' (' + fmt(o.pulled) + ' ' + String(o.pulledStatus || 'pulled').toLowerCase() + ')' : '')
+            + (o.backordered ? ' · ' + fmt(o.backordered) + ' more not received yet' : '')
+            + (o.status ? ' · ' + o.status : '');
     }
 
     // One order line with its checkbox, shared by the item panels and the
@@ -1679,8 +1722,17 @@ button{cursor:pointer}
         main.appendChild(bar);
         var head = el('div', { class: 'ic-listhead' }, [
             el('div', { class: 'ic-count', id: 'icOrdCount' }),
-            el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Reload', onclick: function () { state.allOrders = null; render(); } })
+            el('div', { class: 'ic-actions' }, [
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Expand all', onclick: function () { setAllOpen(true); } }),
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Collapse all', onclick: function () { setAllOpen(false); } }),
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Reload', onclick: function () { state.allOrders = null; render(); } })
+            ])
         ]);
+        function setAllOpen(open) {
+            state.ordersOpen = {};
+            if (open && a.entries) { a.entries.forEach(function (o) { state.ordersOpen[o.ref] = true; }); }
+            paintGroups();
+        }
         main.appendChild(head);
         var box = el('div', { id: 'icOrdGroups', class: 'ic-list' });
         main.appendChild(box);
@@ -1711,11 +1763,23 @@ button{cursor:pointer}
             order.forEach(function (ref) {
                 var g = groups[ref];
                 var grp = el('div', { class: 'ic-ordgrp' });
-                grp.appendChild(el('div', { class: 'ic-ordhead' }, [
+                // Collapsed unless the user opened it; a filter opens what it matched.
+                var open = !!q || !!state.ordersOpen[ref];
+                var gTicked = 0, gToCount = 0;
+                g.lines.forEach(function (o) { gToCount += Number(o.committed) || 0; if (isTicked(o.item, o.ref)) { gTicked++; } });
+                var headEl = el('div', { class: 'ic-ordhead', role: 'button', 'aria-expanded': open ? 'true' : 'false', onclick: function (ev) {
+                    if (ev.target && ev.target.tagName === 'A') { return; } // the order link itself
+                    state.ordersOpen[ref] = !state.ordersOpen[ref];
+                    paintGroups();
+                } }, [
+                    el('span', { class: 'ic-caret', text: open ? '▾' : '▸' }),
                     g.url ? el('a', { href: g.url, target: '_blank', rel: 'noopener', text: g.ref }) : el('b', { text: g.ref }),
                     g.customer ? el('span', { text: g.customer }) : null,
-                    el('small', { text: (g.date ? g.date + ' · ' : '') + (g.status || '') })
-                ]));
+                    el('small', { text: (g.date ? g.date + ' · ' : '') + (g.status || '') }),
+                    el('span', { class: 'ic-ordsum' + (gTicked === g.lines.length ? ' is-ticked' : ''), text: g.lines.length + ' line' + (g.lines.length === 1 ? '' : 's') + ' · ' + fmt(gToCount) + ' to count · ' + gTicked + ' ticked' })
+                ]);
+                grp.appendChild(headEl);
+                if (!open) { box.appendChild(grp); return; }
                 g.lines.forEach(function (o) {
                     var item = { id: o.item, name: o.itemName };
                     var off = !(o.committed > 0);
