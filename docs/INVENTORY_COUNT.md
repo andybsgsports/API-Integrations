@@ -41,7 +41,9 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    take them back out. Lines whose items have **not been received** (nothing
    committed from stock, still on order from the vendor) and anything marked
    **shipped** are not listed — they are not in the building or are already
-   off the books. Units pulled or put on layaway (a Picked / Packed
+   off the books. Only inventory items and assemblies (the same types the
+   count list shows) appear; decoration, setup and other service or charge
+   lines such as PP3C never do. Units pulled or put on layaway (a Picked / Packed
    fulfillment that has not shipped) are still inside the order line's
    committed quantity, so they show on that line as context — `10 to count
    (10 layaway)` — rather than as a second row that could be ticked twice;

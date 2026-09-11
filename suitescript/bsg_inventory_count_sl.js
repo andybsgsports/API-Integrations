@@ -290,7 +290,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
     function rejectedField(e) {
         var msg = userErr(e);
         var kind = /nlobjSearchColumn/i.test(msg) ? 'column' : (/nlobjSearchFilter/i.test(msg) ? 'filter' : null);
-        var m = /:\s*([a-z0-9_]+)\.?\s*$/i.exec(msg);
+        var m = /:\s*([a-z0-9_.]*[a-z0-9_])\.?\s*$/i.exec(msg);
         return kind && m ? { kind: kind, name: m[1].toLowerCase() } : null;
     }
 
@@ -501,12 +501,21 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             return rows;
         }
 
+        // Decoration, setup and other service / charge lines (PP3C, STTEMBLOGO)
+        // are never counted: only the item types the count list itself shows.
+        function itemTypeFilter(filters) {
+            if (!isDead('transaction', 'filter', 'item.type')) {
+                filters.push('and');
+                filters.push(['item.type', 'anyof', CONFIG.ITEM_TYPES]);
+            }
+        }
         function soSpec() {
             var filters = [
                 ['type', 'anyof', ['SalesOrd']], 'and',
                 ['mainline', 'is', 'F'], 'and',
                 ['status', 'anyof', OPEN_SO_STATUSES]
             ];
+            itemTypeFilter(filters);
             if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
             if (locId && !isDead('transaction', 'filter', 'location')) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
             var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item'];
@@ -557,6 +566,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                     ['status', 'anyof', UNSHIPPED_IF_STATUSES]
                 ];
                 if (!isDead('transaction', 'filter', 'cogs')) { filters.push('and'); filters.push(['cogs', 'is', 'F']); }
+                itemTypeFilter(filters);
                 if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
                 if (locId && !isDead('transaction', 'filter', 'location')) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
                 var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item'];
@@ -599,6 +609,24 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         } catch (e) {
             log.audit({ title: 'invcount: picked/packed fulfillment search skipped', details: userErr(e) });
         }
+        // If the item-type join filter was rejected, do the same check through
+        // the item search the count list uses (one query per 1,000 items).
+        if (isDead('transaction', 'filter', 'item.type')) {
+            var ids = {}, list = [];
+            out.concat(pulled).forEach(function (e) { if (e.item && !ids[e.item]) { ids[e.item] = true; list.push(e.item); } });
+            var countable = {};
+            for (var i = 0; i < list.length; i += 1000) {
+                var chunk = list.slice(i, i + 1000);
+                withSearch('item', function () {
+                    return { type: search.Type.ITEM, filters: [['type', 'anyof', CONFIG.ITEM_TYPES], 'and', ['internalid', 'anyof', chunk]], columns: ['internalid'] };
+                }, function (srch) {
+                    srch.run().each(function (r) { countable[String(r.id)] = true; return true; });
+                });
+            }
+            out = out.filter(function (e) { return countable[e.item]; });
+            pulled = pulled.filter(function (e) { return countable[e.item]; });
+        }
+
         // A pulled/packed fulfillment's units are still inside its sales-order
         // line's committed quantity (the order shows Committed 10, Pulled 10),
         // so it is folded into that line as context rather than listed as a
