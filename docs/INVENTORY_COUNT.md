@@ -60,7 +60,7 @@ rest of the sheet still posts. Adjust those the normal way.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `ADJUSTMENT_ACCOUNT_ID` | `null` | Internal id of the account the adjustment posts against (the header **Account** field, e.g. *Inventory Adjustment* / *Shrinkage*). `null` = the sheet shows a dropdown of active Expense / COGS / Other Expense accounts, pre-selects one whose name mentions "adjust", and remembers the pick per browser. Set it once to lock the choice. |
+| `ADJUSTMENT_ACCOUNT_ID` | `222` | Internal id of the account the adjustment posts against (the header **Account** field). Locked to **5005 INVENTORY ADJUSTMENT** (Cost of Goods Sold), internal id 222 in the production account. A sandbox refreshed from production carries the same id; if a submit complains about the account, check Lists > Accounting > Accounts (Internal ID column). Set to `null` and the sheet instead shows a dropdown of active Expense / COGS / Other Expense accounts, pre-selects one whose name mentions "adjust", and remembers the pick per browser. |
 | `SUBSIDIARY_ID` | `null` | OneWorld: force the subsidiary. `null` = the chosen location's subsidiary, else the logged-in user's. |
 | `ITEM_TYPES` | `['InvtPart', 'Assembly']` | Item types that can be counted. |
 | `SEARCH_PAGE_SIZE` | `50` | Hits per page (a **Load more** button pages on). |
@@ -83,7 +83,8 @@ disappears and account-wide on-hand is used.
 3. If a count spans hours, **Refresh on-hand** on the sheet re-reads the current
    quantities so the deltas stay honest (submit re-reads them again anyway).
 4. **Submit count…** → confirm → the adjustment link appears. Any lines the
-   server refused stay on the sheet with the reason.
+   server refused stay on the sheet with the reason. The adjustment posts to
+   5005 INVENTORY ADJUSTMENT; there is nothing to pick.
 
 Several people can count at once from their own devices; each submit is its
 own adjustment. Do not have two people count the *same* item at the same time
