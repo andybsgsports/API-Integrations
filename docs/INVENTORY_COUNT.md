@@ -38,7 +38,9 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    The filter box narrows by order number, customer or item and opens what it
    matches. Tick a line once its units are found and those units are added to
    the item's count on the sheet (the line is created if needed); untick to
-   take them back out. Lines whose items have **not been received** (nothing
+   take them back out, and a line that only existed because of a tick leaves
+   the sheet again. An order with several lines has a **Select all** row
+   under its number that ticks or unticks every countable line at once. Lines whose items have **not been received** (nothing
    committed from stock, still on order from the vendor) and anything marked
    **shipped** are not listed — they are not in the building or are already
    off the books. Only inventory items and assemblies (the same types the

@@ -965,6 +965,8 @@ button{cursor:pointer}
 .ic-ordhead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;cursor:pointer;user-select:none;padding:4px 0}
 .ic-ordhead:hover{background:#fafafc}
 .ic-caret{display:inline-block;width:18px;color:var(--muted);font-size:14px}
+.ic-ordall-row{background:#fafafc;border-radius:8px;padding:8px 6px;margin-top:6px;border-top:0}
+.ic-ordall-row .ic-name{font-size:14px}
 .ic-ordsum{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap}
 .ic-ordsum.is-ticked{color:var(--ok);font-weight:700}
 .ic-ordhead a{color:var(--focus);font-weight:800;font-size:16px}
@@ -1166,6 +1168,7 @@ button{cursor:pointer}
     function setCount(item, count) {
         var line = ensureLine(item);
         line.count = round4(count + ordersTotal(line));
+        line.viaTick = false;
         line.error = '';
         line.addedAt = Date.now();
         saveSheet();
@@ -1175,7 +1178,9 @@ button{cursor:pointer}
     // Tick / untick an open order (or picked/packed fulfillment) for an item:
     // its committed units go into that item's count and the order is recorded.
     function tickOrder(item, entry, checked) {
+        var existed = !!state.sheet[item.id];
         var line = ensureLine(item);
+        if (!existed) { line.viaTick = true; } // never keyed: only here because of a tick
         var qty = round4(entry.committed);
         line.orders = (line.orders || []).filter(function (o) { return o.ref !== entry.ref; });
         if (checked) {
@@ -1183,6 +1188,10 @@ button{cursor:pointer}
             line.count = round4((Number(line.count) || 0) + qty);
         } else {
             line.count = round4(Math.max(0, (Number(line.count) || 0) - qty));
+            if (line.viaTick && !line.orders.length && line.count === 0) {
+                removeLine(item.id);
+                return null;
+            }
         }
         line.error = '';
         saveSheet();
@@ -1808,6 +1817,27 @@ button{cursor:pointer}
                 ]);
                 grp.appendChild(headEl);
                 if (!open) { box.appendChild(grp); return; }
+                // "Select all" first: large team orders have dozens of lines.
+                var tickable = g.lines.filter(function (o) { return o.committed > 0; });
+                if (tickable.length > 1) {
+                    var all = el('input', { type: 'checkbox', class: 'ic-ordall', 'aria-label': 'Select all lines on ' + g.ref });
+                    all.checked = gTicked === tickable.length;
+                    all.indeterminate = gTicked > 0 && gTicked < tickable.length;
+                    all.addEventListener('change', function () {
+                        var want = all.checked;
+                        tickable.forEach(function (o) {
+                            if (isTicked(o.item, o.ref) !== want) { tickOrder({ id: o.item, name: o.itemName }, o, want); }
+                        });
+                        paintGroups();
+                    });
+                    grp.appendChild(el('label', { class: 'ic-ordline ic-ordall-row' }, [
+                        all,
+                        el('span', { class: 'ic-info' }, [
+                            el('div', { class: 'ic-name', text: 'Select all' }),
+                            el('div', { class: 'ic-meta', text: tickable.length + ' lines · ' + fmt(gToCount) + ' to count' })
+                        ])
+                    ]));
+                }
                 g.lines.forEach(function (o) {
                     var item = { id: o.item, name: o.itemName };
                     var off = !(o.committed > 0);
