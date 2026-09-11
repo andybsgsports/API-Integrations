@@ -24,24 +24,28 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
 2. **Count** — key the quantity found on the shelf next to a hit and press
    **Add** (Enter jumps to the next hit, so a keyboard or barcode scanner flows
    down a shelf). Nothing is posted yet: every line lands on the **Sheet** tab
-   with the current on-hand at the chosen location, an editable **Shelf** count
-   with `−`/`+` buttons, an **Off shelf** quantity with a reason (Decorator,
-   Customer pickup, Other), the resulting **Count** (shelf + off shelf) and its
-   delta. The sheet is saved in the browser, per location, so a refresh or a
-   dead battery does not lose the count.
-   **Off shelf** is for stock that is yours and still on hand in NetSuite but
-   not on the warehouse shelf: units out at the decoration facility, or pulled
-   and staged for customer pickup on an order that has not been marked shipped.
-   A **Committed** figure above zero is a link on both pages: it opens the
-   sales orders that still owe the customer that item (Pending Fulfillment,
-   Partially Fulfilled), with customer and unshipped quantity. On the search
-   page the list is read-only; on the sheet (also via **Open orders**) tick the
-   orders whose units are off the shelf and their unshipped quantity is added
-   to Off shelf and the order numbers are recorded.
+   with the current on-hand at the chosen location, an editable count with
+   `−`/`+` buttons and its delta. The sheet is saved in the browser, per
+   location, so a refresh or a dead battery does not lose the count.
+3. **Open orders** — the units that are yours and still on hand in NetSuite
+   but not on the shelf: received (or pulled and packed) for a sales order
+   that has not been marked shipped, sitting staged, at the decoration
+   facility, or waiting for customer pickup. Instead of printing every open
+   order, the **Open orders** tab lists every such line at the location,
+   grouped by order with customer, date and status, as `0 shipped of 5 · 5 to
+   count`. Tick a line once its units are found and those units are added to
+   the item's count on the sheet (the line is created if needed); untick to
+   take them back out. Lines whose items have **not been received** (nothing
+   committed from stock, still on order from the vendor) and anything marked
+   **shipped** are not listed — they are not in the building or are already
+   off the books. Picked or packed fulfillments that have not shipped (Pick,
+   Pack, Ship) are listed under their sales order. The same list opens per
+   item from the **Committed** figure on either page, and from **Open orders**
+   on a sheet line; the sheet line shows "Includes N on open orders: …".
    When a line's count is below the quantity committed to open sales orders,
    the sheet warns — that is the "physically gone but never marked shipped"
    case, which should be fixed by shipping the fulfillment, not by adjusting.
-3. **Submit** — the page posts the sheet to the Suitelet, which re-reads each
+4. **Submit** — the page posts the sheet to the Suitelet, which re-reads each
    item's on-hand *at that moment* and creates one Inventory Adjustment whose
    lines bring on-hand to the counted quantity (`Adjust Qty. By = counted −
    on hand`). Items whose count already matches are left off; if nothing
@@ -52,8 +56,8 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
 The adjustment is created **as the logged-in user** — that is the audit trail
 you want on a count — and the transaction memo records who counted and when
 (editable on the sheet). Each line's memo reads `Counted 20 (on hand 25)`, or
-with off-shelf units `Counted 20 = 15 on shelf + 5 off shelf (Decorator:
-SO12345); on hand 25`, so an auditor can see where the units were.
+with ticked orders `Counted 20 (incl. 5 on open orders: JH-SO625); on hand
+25`, so an auditor can see which orders the units belonged to.
 
 **Serialized, lot-numbered and bin-tracked items** need Inventory Detail, which
 this tool does not collect. They are flagged in search results (no count box)
@@ -93,7 +97,6 @@ rest of the sheet still posts. Adjust those the normal way.
 | `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand, available, or on order. The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
-| `OFF_REASONS` (in code, below `CONFIG`) | `Decorator`, `Customer pickup`, `Other` | The choices in the sheet's "Where?" dropdown for off-shelf units. |
 
 **Locations.** With *Multi-Location Inventory* on (it is), the header has a
 location picker: on-hand quantities are per location and every adjustment line
@@ -110,9 +113,9 @@ disappears and account-wide on-hand is used.
    are left exactly as they are — the tool never zeroes anything on its own. Switch to the **Sheet** tab any time to review or fix lines
    (`×` removes one, **Clear sheet** removes all — nothing is posted until
    Submit).
-3. For units at the decorator or staged for pickup, open the line on the sheet,
-   press **Open orders**, tick the orders those units belong to (or key the
-   **Off shelf** quantity by hand) and pick where they are.
+3. Open the **Open orders** tab and walk the staging area, the decorator log
+   and the pickup rack: tick each line as its units are found. Use the filter
+   box to jump to a customer, order number or item.
 4. If a count spans hours, **Refresh on-hand** on the sheet re-reads the current
    quantities so the deltas stay honest (submit re-reads them again anyway).
 5. **Submit count…** → confirm → the adjustment link appears. Any lines the
@@ -130,10 +133,10 @@ disappears and account-wide on-hand is used.
 - Before counting, mark Shipped every fulfillment that has physically left,
   then hold shipping until the count is submitted.
 - Count staged orders that are still in the building and not marked Shipped
-  (shelf or Off shelf). Do not count anything already marked Shipped, even if
-  the box is still on the dock.
-- Units at the decoration facility are still on hand: count them as Off shelf
-  from the decoration log.
+  (tick them on the Open orders tab). Do not count anything already marked
+  Shipped, even if the box is still on the dock.
+- Units at the decoration facility are still on hand: tick their orders from
+  the decoration log.
 
 Several people can count at once from their own devices; each submit is its
 own adjustment. Do not have two people count the *same* item at the same time
