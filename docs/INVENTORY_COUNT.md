@@ -40,23 +40,36 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    the item's count on the sheet (the line is created if needed); untick to
    take them back out, and a line that only existed because of a tick leaves
    the sheet again. An order with several lines has a **Select all** row
-   under its number that ticks or unticks every countable line at once. Lines whose items have **not been received** (nothing
-   committed from stock, still on order from the vendor) and anything marked
-   **shipped** are not listed — they are not in the building or are already
-   off the books. Only inventory items and assemblies (the same types the
+   under its number that ticks or unticks every countable line at once.
+   A line appears only while it still has **committed** units on an order
+   that is itself open (Pending Fulfillment, Partially Fulfilled, Pending
+   Billing/Partially Fulfilled — never Billed, Closed or Cancelled).
+   Committed quantity is the reliable signal: picking or packing does not
+   clear it, shipping does, and a line that was zeroed or returned to the
+   vendor has none even when a pick record survives. So backordered lines,
+   zeroed lines with a leftover pick record, and anything marked **shipped**
+   never appear — they are not in the building or are already off the books. Only inventory items and assemblies (the same types the
    count list shows) appear; decoration, setup and other service or charge
    lines such as PP3C never do. Units pulled or put on layaway (a Picked / Packed
    fulfillment that has not shipped) are still inside the order line's
    committed quantity, so they show on that line as context — `10 to count
-   (10 layaway)` — rather than as a second row that could be ticked twice;
-   a fulfillment with no matching open line is listed on its own. The same
+   (10 layaway)` — rather than as a second row that could be ticked twice.
+   Order numbers link to the **sales order**, never the fulfillment. The same
    list opens per item from the **Committed** figure on either page, and from
    **Open orders** on a sheet line; the sheet line shows "Includes N on open
    orders: …".
    When a line's count is below the quantity committed to open sales orders,
    the sheet warns — that is the "physically gone but never marked shipped"
    case, which should be fixed by shipping the fulfillment, not by adjusting.
-4. **Submit** — the page posts the sheet to the Suitelet, which re-reads each
+4. **Export** — each tab has CSV, Excel and PDF buttons. The Count tab
+   exports the whole list as filtered on screen (In stock / All items and any
+   search), with a blank Count column to fill in by hand; the Open orders tab
+   exports every line with a Ticked column; the Sheet tab exports the lines
+   you have keyed with their on-hand, count and adjust-by. CSV and Excel
+   cover the whole list; the PDF stops at `PDF_MAX_ROWS` (2,000) and says so.
+   Excel needs `N/compress`; if an account lacks it the page says to use CSV,
+   which Excel opens.
+5. **Submit** — the page posts the sheet to the Suitelet, which re-reads each
    item's on-hand *at that moment* and creates one Inventory Adjustment whose
    lines bring on-hand to the counted quantity (`Adjust Qty. By = counted −
    on hand`). Items whose count already matches are left off; if nothing
@@ -108,6 +121,8 @@ rest of the sheet still posts. Adjust those the normal way.
 | `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand, available, or on order. The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
+| `EXPORT_MAX_ROWS` | `20000` | Cap on rows in a CSV / Excel export. |
+| `PDF_MAX_ROWS` | `2000` | Cap on rows in a PDF export (the renderer is slow on large tables). |
 
 **Locations.** With *Multi-Location Inventory* on (it is), the header has a
 location picker: on-hand quantities are per location and every adjustment line
@@ -129,7 +144,7 @@ disappears and account-wide on-hand is used.
    box to jump to a customer, order number or item.
 4. If a count spans hours, **Refresh on-hand** on the sheet re-reads the current
    quantities so the deltas stay honest (submit re-reads them again anyway).
-5. **Submit count…** → confirm → the adjustment link appears. Any lines the
+6. **Submit count…** → confirm → the adjustment link appears. Any lines the
    server refused stay on the sheet with the reason. The adjustment posts to
    5005 INVENTORY ADJUSTMENT; there is nothing to pick.
 
