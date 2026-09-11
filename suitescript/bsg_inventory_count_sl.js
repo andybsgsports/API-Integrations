@@ -32,12 +32,14 @@
  *   POST ?action=onhand   { ids:[], loc }                -> fresh on-hand per item
  *   POST ?action=submit   { loc, account, memo,
  *                           lines:[{ item, count, orders:[{ ref, qty }] }] }
+ *   POST ?action=export   form fields what=items|orders|sheet, format=csv|xlsx|pdf,
+ *                         loc, instock, q, payload (JSON)  -> file download
  *                                                       -> creates the adjustment
  *
  * @NApiVersion 2.1
  * @NScriptType Suitelet
  */
-define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], function (search, record, runtime, url, cache, log) {
+define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/render', 'N/log'], function (search, record, runtime, url, cache, file, render, log) {
 
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
@@ -66,7 +68,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         // Lines per Inventory Adjustment. Bigger sheets are submitted by the page
         // as several adjustments, one after another.
         MAX_LINES_PER_ADJUSTMENT: 200,
-        MEMO_PREFIX: 'Physical count'
+        MEMO_PREFIX: 'Physical count',
+        // Export caps. CSV / Excel page through the whole list; the PDF renderer
+        // is slow on big tables, so it stops at PDF_MAX_ROWS and says so.
+        EXPORT_MAX_ROWS: 20000,
+        PDF_MAX_ROWS: 2000
     };
 
     // ---------------------------------------------------------------- entry --
@@ -102,6 +108,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             action = (request.parameters && request.parameters.action) || null;
         }
 
+        if (action === 'export') {
+            try {
+                handleExport(request, response);
+            } catch (eExp) {
+                log.error({ title: 'invcount export error', details: safeErr(eExp) });
+                try { response.addHeader({ name: 'Content-Type', value: 'text/html; charset=utf-8' }); } catch (eh2) { /* headers may be sent */ }
+                response.write('<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px"><h2>Export failed</h2><p>' + escapeHtml(userErr(eExp)) + '</p><p><a href="javascript:history.back()">Back</a></p></body></html>');
+            }
+            return;
+        }
         if (action) {
             // Whatever happens, an API call returns JSON -- never a NetSuite HTML
             // error page the client can't parse.
@@ -478,12 +494,18 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
     }
 
     // Sales-order lines whose units have been RECEIVED (committed from stock)
-    // and not shipped, plus picked/packed fulfillments that have not shipped.
-    // Those units are what the counters may find pulled and staged, out at the
-    // decorator, or waiting for pickup rather than on the shelf. Backordered
-    // lines (nothing received yet) are not in the building and are not listed;
-    // anything marked Shipped is off the books already and never appears.
-    // itemId null = every item at the location.
+    // and not shipped. Those units are what the counters may find pulled and
+    // staged, out at the decorator, or waiting for pickup rather than on the
+    // shelf. Committed quantity is the one reliable signal: picking or packing
+    // does not clear it (an order shows Committed 10 next to Pulled 10),
+    // shipping does, and a line that was zeroed or returned to the vendor has
+    // none even when a pick record survives. So a line is listed only when it
+    // still has committed units on an order that is itself open (Pending
+    // Fulfillment / Partially Fulfilled / Pending Billing-Partially Fulfilled;
+    // never Billed, Closed or Cancelled). Picked / packed fulfillments only
+    // annotate their order line -- "10 to count (10 layaway)" -- and a
+    // fulfillment with no committed line behind it is a leftover pick record
+    // with nothing to count. itemId null = every item at the location.
     function openOrders(itemId, locId) {
         if (!multiLocation()) { locId = null; }
         var out = [];
@@ -551,13 +573,15 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
             });
         });
 
-        // Picked / packed fulfillments (BSG's labels: Pulled / Layaway): best
-        // effort, an account without Pick, Pack, Ship simply has none (or
-        // rejects the status values -> logged). A fulfillment line comes back
-        // twice from a transaction search -- the item line and its cost-of-goods
-        // posting line -- so the COGS rows are filtered out and, in case that
-        // filter is ever rejected, the rows are de-duplicated by record + item.
+        // Picked / packed fulfillments (BSG's labels: Pulled / Layaway) annotate
+        // the order lines above; they never add rows of their own. Best effort:
+        // an account without Pick, Pack, Ship simply has none (or rejects the
+        // status values -> logged). A fulfillment line comes back twice from a
+        // transaction search -- the item line and its cost-of-goods posting line
+        // -- so the COGS rows are filtered out and, in case that filter is ever
+        // rejected, the rows are de-duplicated by record + item.
         var pulled = [];
+        if (!out.length) { return { ok: true, orders: out, truncated: truncated }; }
         try {
             function ifSpec() {
                 var filters = [
@@ -586,24 +610,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                     var from = ttxt(r, 'createdfrom');           // "Sales Order #JH-SO625"
                     var m = /#\s*(\S+)/.exec(from);
                     var ref = m ? orderRef(m[1], '') : ('IF ' + String(tval(r, 'tranid') || r.id));
-                    pulled.push({
-                        kind: 'fulfillment',
-                        id: String(r.id),
-                        ref: ref,
-                        fulfillment: String(tval(r, 'tranid') || r.id),
-                        customer: ttxt(r, 'entity') || '',
-                        date: String(tval(r, 'trandate')),
-                        item: String(tval(r, 'item')),
-                        itemName: ttxt(r, 'item') || '',
-                        qty: qty,
-                        shipped: 0,
-                        remaining: qty,
-                        committed: qty,
-                        backordered: 0,
-                        pulledStatus: ttxt(r, 'statusref') || 'Pulled',
-                        status: (ttxt(r, 'statusref') || 'Picked/packed') + ', not shipped',
-                        url: recUrl('itemfulfillment', r.id)
-                    });
+                    pulled.push({ ref: ref, item: String(tval(r, 'item')), qty: qty, pulledStatus: ttxt(r, 'statusref') || 'Pulled' });
                 });
             });
         } catch (e) {
@@ -613,7 +620,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         // the item search the count list uses (one query per 1,000 items).
         if (isDead('transaction', 'filter', 'item.type')) {
             var ids = {}, list = [];
-            out.concat(pulled).forEach(function (e) { if (e.item && !ids[e.item]) { ids[e.item] = true; list.push(e.item); } });
+            out.forEach(function (e) { if (e.item && !ids[e.item]) { ids[e.item] = true; list.push(e.item); } });
             var countable = {};
             for (var i = 0; i < list.length; i += 1000) {
                 var chunk = list.slice(i, i + 1000);
@@ -624,24 +631,17 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
                 });
             }
             out = out.filter(function (e) { return countable[e.item]; });
-            pulled = pulled.filter(function (e) { return countable[e.item]; });
         }
 
-        // A pulled/packed fulfillment's units are still inside its sales-order
-        // line's committed quantity (the order shows Committed 10, Pulled 10),
-        // so it is folded into that line as context rather than listed as a
-        // second row that could be ticked twice. Only a fulfillment with no
-        // matching open line is listed on its own.
+        // A pulled / packed fulfillment's units are still inside its order
+        // line's committed quantity, so it only annotates that line.
         pulled.forEach(function (f) {
-            var so = null;
             for (var i = 0; i < out.length; i++) {
-                if (out[i].kind === 'order' && out[i].ref === f.ref && out[i].item === f.item) { so = out[i]; break; }
-            }
-            if (so) {
-                so.pulled = round4((so.pulled || 0) + f.qty);
-                so.pulledStatus = f.pulledStatus;
-            } else {
-                out.push(f);
+                if (out[i].ref === f.ref && out[i].item === f.item) {
+                    out[i].pulled = round4((out[i].pulled || 0) + f.qty);
+                    out[i].pulledStatus = f.pulledStatus;
+                    break;
+                }
             }
         });
         return { ok: true, orders: out, truncated: truncated };
@@ -809,6 +809,217 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/log'], funct
         };
     }
 
+    // ---------------------------------------------------------------- export --
+    // One dataset shape { title, subtitle, columns:[{ key, label, num }], rows:[{}] }
+    // rendered three ways. Items and orders are fetched here so the export covers
+    // the whole list, not the page on screen; the sheet lives in the browser, so
+    // the page posts its lines.
+
+    function handleExport(request, response) {
+        loadDead();
+        var P = request.parameters || {};
+        var what = String(P.what || 'items');
+        var format = String(P.format || 'csv').toLowerCase();
+        var locId = multiLocation() ? posInt(P.loc) : null;
+        var payload = {};
+        try { payload = P.payload ? JSON.parse(P.payload) : {}; } catch (e) { payload = {}; }
+        var where = locName(locId);
+        var stamp = new Date().toISOString().slice(0, 10);
+        var ds;
+        if (what === 'orders') { ds = exportOrders(locId, where, payload); }
+        else if (what === 'sheet') { ds = exportSheet(where, payload); }
+        else { ds = exportItems(String(P.q || ''), locId, P.instock !== 'F', where); }
+        var base = 'BSG-count-' + what + (where ? '-' + where.replace(/[^A-Za-z0-9]+/g, '_') : '') + '-' + stamp;
+        if (format === 'pdf') {
+            if (ds.rows.length > CONFIG.PDF_MAX_ROWS) {
+                throw new Error('The PDF export stops at ' + CONFIG.PDF_MAX_ROWS + ' rows and this is ' + ds.rows.length + '. Narrow the list (In stock, or a search) or use CSV / Excel.');
+            }
+            var pdf = render.xmlToPdf({ xmlString: pdfXml(ds) });
+            pdf.name = base + '.pdf';
+            response.writeFile({ file: pdf, isInline: false });
+        } else if (format === 'xlsx') {
+            response.writeFile({ file: xlsxFile(ds, base + '.xlsx'), isInline: false });
+        } else {
+            var csv = file.create({ name: base + '.csv', fileType: file.Type.CSV, contents: '\ufeff' + csvText(ds) });
+            response.writeFile({ file: csv, isInline: false });
+        }
+    }
+
+    function locName(locId) {
+        if (!locId) { return ''; }
+        try { return String(search.lookupFields({ type: search.Type.LOCATION, id: locId, columns: ['name'] }).name || ''); } catch (e) { return ''; }
+    }
+
+    var ITEM_COLS = [
+        { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'vendor', label: 'Pref. vendor' },
+        { key: 'upc', label: 'UPC' }, { key: 'onhand', label: 'On hand', num: true }, { key: 'available', label: 'Available', num: true },
+        { key: 'committed', label: 'Committed', num: true }, { key: 'onorder', label: 'On order', num: true }, { key: 'count', label: 'Count' }
+    ];
+
+    function exportItems(q, locId, inStock, where) {
+        var words = tokenize(q);
+        var stockApplied = false;
+        function buildSpec() {
+            var filters = baseFilters(locId);
+            stockApplied = false;
+            if (inStock) {
+                var sf = stockFilter(locId);
+                if (sf) { filters.push('and'); filters.push(sf); stockApplied = true; }
+            }
+            words.forEach(function (w) {
+                var wf = wordFilter(w);
+                if (wf.length) { filters.push('and'); filters.push(wf); }
+            });
+            return itemSpec(filters, locId);
+        }
+        var rows = [];
+        withSearch('item', buildSpec, function (srch) {
+            var paged = srch.runPaged({ pageSize: 1000 });
+            for (var i = 0; i < paged.pageRanges.length && rows.length < CONFIG.EXPORT_MAX_ROWS; i++) {
+                paged.fetch({ index: i }).data.forEach(function (r) {
+                    var it = rowToItem(r, locId);
+                    it.display = it.display || it.desc;
+                    it.count = '';
+                    rows.push(it);
+                });
+            }
+        });
+        return {
+            title: 'Inventory count list' + (where ? ' - ' + where : ''),
+            subtitle: (inStock && stockApplied ? 'Items in stock (on hand, available or on order)' : 'All items') + (words.length ? ' matching "' + words.join(' ') + '"' : '') + ' · ' + rows.length + ' items · blank Count column to fill in',
+            columns: ITEM_COLS, rows: rows
+        };
+    }
+
+    var ORDER_COLS = [
+        { key: 'ref', label: 'Order' }, { key: 'customer', label: 'Customer' }, { key: 'date', label: 'Date' }, { key: 'status', label: 'Status' },
+        { key: 'itemName', label: 'Item' }, { key: 'qty', label: 'Ordered', num: true }, { key: 'shipped', label: 'Shipped', num: true },
+        { key: 'committed', label: 'To count', num: true }, { key: 'pulled', label: 'Pulled', num: true }, { key: 'ticked', label: 'Ticked' }
+    ];
+
+    function exportOrders(locId, where, payload) {
+        var ticked = {};
+        (Array.isArray(payload.ticked) ? payload.ticked : []).forEach(function (t) { ticked[String(t)] = true; });
+        var rows = openOrders(null, locId).orders.map(function (o) {
+            return {
+                ref: o.ref, customer: o.customer, date: o.date, status: o.status,
+                itemName: o.itemName, qty: o.qty, shipped: o.shipped, committed: o.committed, pulled: o.pulled || 0,
+                ticked: ticked[o.ref + '|' + o.item] ? 'Yes' : ''
+            };
+        });
+        return {
+            title: 'Open orders to count' + (where ? ' - ' + where : ''),
+            subtitle: 'Sales-order lines received but not shipped · ' + rows.length + ' lines',
+            columns: ORDER_COLS, rows: rows
+        };
+    }
+
+    var SHEET_COLS = [
+        { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'onhand', label: 'On hand', num: true },
+        { key: 'count', label: 'Count', num: true }, { key: 'delta', label: 'Adjust by', num: true }, { key: 'orders', label: 'On open orders' }
+    ];
+
+    function exportSheet(where, payload) {
+        var rows = (Array.isArray(payload.lines) ? payload.lines : []).slice(0, CONFIG.EXPORT_MAX_ROWS).map(function (l) {
+            var onhand = parseFloat(l.onhand) || 0, count = parseFloat(l.count) || 0;
+            return {
+                name: String(l.name || ''), display: String(l.display || l.desc || ''), onhand: onhand, count: count,
+                delta: round4(count - onhand),
+                orders: (Array.isArray(l.orders) ? l.orders : []).map(function (o) { return cleanRef(o && o.ref) + (o && o.qty ? ' (' + o.qty + ')' : ''); }).filter(Boolean).join(', ')
+            };
+        });
+        return {
+            title: 'Count sheet' + (where ? ' - ' + where : ''),
+            subtitle: rows.length + ' lines · not yet submitted' + (payload.memo ? ' · ' + String(payload.memo).slice(0, 200) : ''),
+            columns: SHEET_COLS, rows: rows
+        };
+    }
+
+    function cell(v) { return v == null ? '' : String(v); }
+
+    function csvText(ds) {
+        function q(v) {
+            var t = cell(v);
+            return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+        }
+        var lines = [ds.columns.map(function (c) { return q(c.label); }).join(',')];
+        ds.rows.forEach(function (r) { lines.push(ds.columns.map(function (c) { return q(r[c.key]); }).join(',')); });
+        return lines.join('\r\n') + '\r\n';
+    }
+
+    function xmlEsc(v) {
+        return cell(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
+    }
+
+    // A minimal .xlsx: the OOXML parts zipped with N/compress (loaded on demand so
+    // an account without it still serves CSV and PDF). Inline strings, so no
+    // shared-string table; numbers are real numbers.
+    function xlsxFile(ds, name) {
+        var compress;
+        try { compress = require('N/compress'); } catch (e) { throw new Error('Excel export is not available in this account (N/compress). Use CSV, which opens in Excel.'); }
+        function colRef(i) {
+            var s2 = '';
+            i += 1;
+            while (i > 0) { var m = (i - 1) % 26; s2 = String.fromCharCode(65 + m) + s2; i = Math.floor((i - 1) / 26); }
+            return s2;
+        }
+        var xml = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'];
+        var head = ['<row r="1">'];
+        ds.columns.forEach(function (c, i) { head.push('<c r="' + colRef(i) + '1" t="inlineStr"><is><t>' + xmlEsc(c.label) + '</t></is></c>'); });
+        head.push('</row>');
+        xml.push(head.join(''));
+        ds.rows.forEach(function (r, ri) {
+            var rn = ri + 2, row = ['<row r="' + rn + '">'];
+            ds.columns.forEach(function (c, i) {
+                var v = r[c.key];
+                if (c.num && v !== '' && v != null && isFinite(parseFloat(v))) {
+                    row.push('<c r="' + colRef(i) + rn + '"><v>' + parseFloat(v) + '</v></c>');
+                } else if (v !== '' && v != null) {
+                    row.push('<c r="' + colRef(i) + rn + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEsc(v) + '</t></is></c>');
+                }
+            });
+            row.push('</row>');
+            xml.push(row.join(''));
+        });
+        xml.push('</sheetData></worksheet>');
+        var parts = [
+            { dir: '', name: '[Content_Types].xml', body: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
+            { dir: '_rels', name: '.rels', body: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+            { dir: 'xl', name: 'workbook.xml', body: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Count" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+            { dir: 'xl/_rels', name: 'workbook.xml.rels', body: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>' },
+            { dir: 'xl/worksheets', name: 'sheet1.xml', body: xml.join('') }
+        ];
+        var archiver = compress.createArchiver();
+        parts.forEach(function (pt) {
+            var f = file.create({ name: pt.name, fileType: file.Type.XMLDOC, contents: pt.body });
+            var opts = { file: f };
+            if (pt.dir) { opts.directory = pt.dir; }
+            archiver.add(opts);
+        });
+        return archiver.archive({ name: name, type: compress.Type.ZIP });
+    }
+
+    // BFO template for N/render: landscape, header row repeated on every page.
+    function pdfXml(ds) {
+        var widths = ds.columns.map(function (c) { return c.num ? 7 : (c.key === 'display' || c.key === 'customer' || c.key === 'itemName' ? 22 : 12); });
+        var total = widths.reduce(function (a, b) { return a + b; }, 0);
+        var head = ds.columns.map(function (c, i) {
+            return '<th width="' + Math.round(widths[i] / total * 100) + '%"' + (c.num ? ' align="right"' : '') + '>' + xmlEsc(c.label) + '</th>';
+        }).join('');
+        var body = ds.rows.map(function (r) {
+            return '<tr>' + ds.columns.map(function (c) {
+                return '<td' + (c.num ? ' align="right"' : '') + '>' + xmlEsc(r[c.key]) + '</td>';
+            }).join('') + '</tr>';
+        }).join('');
+        return '<?xml version="1.0"?><!DOCTYPE pdf PUBLIC "-//big.faceless.org//report" "report-1.1.dtd">' +
+            '<pdf><head><style type="text/css">body{font-family:Helvetica,sans-serif;font-size:8pt}h1{font-size:14pt;margin:0 0 2pt 0}p.sub{color:#555;margin:0 0 8pt 0}table{width:100%;border-collapse:collapse}th{background:#b3252a;color:#fff;font-weight:bold;padding:3pt 4pt;text-align:left;font-size:8pt}td{padding:2pt 4pt;border-bottom:0.5pt solid #ccc;vertical-align:top}</style>' +
+            '<macrolist><macro id="nlfooter"><p align="right" style="font-size:7pt;color:#777">' + xmlEsc(ds.title) + ' · page <pagenumber/> of <totalpages/></p></macro></macrolist></head>' +
+            '<body size="Letter-Landscape" footer="nlfooter" footer-height="14pt" margin-top="24pt" margin-bottom="28pt" margin-left="24pt" margin-right="24pt">' +
+            '<h1>' + xmlEsc(ds.title) + '</h1><p class="sub">' + xmlEsc(ds.subtitle) + ' · ' + xmlEsc(new Date().toISOString().slice(0, 10)) + '</p>' +
+            '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></body></pdf>';
+    }
+
     // ------------------------------------------------------------------ page --
 
     function listLocations() {
@@ -965,6 +1176,8 @@ button{cursor:pointer}
 .ic-ordhead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;cursor:pointer;user-select:none;padding:4px 0}
 .ic-ordhead:hover{background:#fafafc}
 .ic-caret{display:inline-block;width:18px;color:var(--muted);font-size:14px}
+.ic-export{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:10px 0}
+.ic-export .ic-btn{min-height:36px;padding:0 12px;font-size:13px}
 .ic-ordall-row{background:#fafafc;border-radius:8px;padding:8px 6px;margin-top:6px;border-top:0}
 .ic-ordall-row .ic-name{font-size:14px}
 .ic-ordsum{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap}
@@ -1351,7 +1564,6 @@ button{cursor:pointer}
 
     // "0 shipped of 10 · 10 to count (10 layaway) · Pending Fulfillment"
     function orderDetail(o) {
-        if (o.kind === 'fulfillment') { return fmt(o.qty) + ' to count · ' + o.status; }
         return fmt(o.shipped) + ' shipped of ' + fmt(o.qty) + ' · ' + fmt(o.committed) + ' to count'
             + (o.pulled ? ' (' + fmt(o.pulled) + ' ' + String(o.pulledStatus || 'pulled').toLowerCase() + ')' : '')
             + (o.backordered ? ' · ' + fmt(o.backordered) + ' more not received yet' : '')
@@ -1511,6 +1723,7 @@ button{cursor:pointer}
         main.appendChild(el('p', { class: 'ic-hint', text: 'Every item at this location is listed below; In stock keeps those with quantity on hand, available, or on order. Search to jump to one, key the counted quantity and press Add (Enter jumps to the next item). Counts wait on the Sheet tab until you submit.' }));
         main.appendChild(el('div', { id: 'icResults' }));
         renderResults();
+        if (!(BOOT.multiLoc && !state.loc)) { main.appendChild(exportBar('items')); }
         if (!state.loaded && !state.searching && !state.searchError) { runSearch(true); }
     }
 
@@ -1630,6 +1843,7 @@ button{cursor:pointer}
             });
             form.appendChild(el('div', {}, [el('label', { for: 'icAccount', text: 'Adjustment account' }), sel]));
         }
+        form.appendChild(exportBar('sheet'));
         if (state.submitError) { form.appendChild(el('div', { class: 'ic-error', text: state.submitError })); }
         if (state.submitting) {
             form.appendChild(el('div', { class: 'ic-progress', text: state.progress || 'Submitting…' }));
@@ -1731,6 +1945,43 @@ button{cursor:pointer}
         next();
     }
 
+    // Downloads go through a hidden form POST to the same Suitelet (action=export)
+    // in a new tab, so the browser handles the file and the page keeps its state.
+    function exportBar(what) {
+        function go(format) {
+            var fields = { action: 'export', what: what, format: format, loc: state.loc || '', instock: state.instock ? 'T' : 'F', q: state.q || '' };
+            if (what === 'orders') {
+                var ticked = [];
+                state.order.forEach(function (id) {
+                    var l = state.sheet[id];
+                    (l && l.orders || []).forEach(function (o) { ticked.push(o.ref + '|' + id); });
+                });
+                fields.payload = JSON.stringify({ ticked: ticked });
+            } else if (what === 'sheet') {
+                fields.payload = JSON.stringify({
+                    memo: state.memo || '',
+                    lines: state.order.map(function (id) { return state.sheet[id]; }).filter(Boolean).map(function (l) {
+                        return { name: l.name, display: l.display || l.desc || '', onhand: l.onhand, count: l.count, orders: l.orders || [] };
+                    })
+                });
+            }
+            var form = el('form', { method: 'post', action: API, target: '_blank', style: 'display:none' });
+            Object.keys(fields).forEach(function (k) {
+                form.appendChild(el('input', { type: 'hidden', name: k, value: fields[k] }));
+            });
+            document.body.appendChild(form);
+            form.submit();
+            setTimeout(function () { if (form.parentNode) { form.parentNode.removeChild(form); } }, 1000);
+        }
+        var label = what === 'orders' ? 'Export open orders:' : what === 'sheet' ? 'Export sheet:' : 'Export this list:';
+        return el('div', { class: 'ic-export', 'data-export': what }, [
+            el('span', { text: label }),
+            el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'CSV', onclick: function () { go('csv'); } }),
+            el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Excel', onclick: function () { go('xlsx'); } }),
+            el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'PDF', onclick: function () { go('pdf'); } })
+        ]);
+    }
+
     // Open orders tab: every unshipped sales-order line (and picked/packed
     // fulfillment) at the location, grouped by order -- the printout replaced.
     function loadAllOrders() {
@@ -1773,6 +2024,7 @@ button{cursor:pointer}
         main.appendChild(head);
         var box = el('div', { id: 'icOrdGroups', class: 'ic-list' });
         main.appendChild(box);
+        main.appendChild(exportBar('orders'));
         function paintGroups() {
             box.innerHTML = '';
             var cnt = document.getElementById('icOrdCount');
