@@ -226,6 +226,10 @@ should equal what was keyed. Then repeat the same count — it should report
   item filter …`); those are remembered for a day so pages stay fast.
 - **Non-JSON response** errors on the page mean NetSuite returned an HTML error
   page; the deployment's execution log has the stack.
+- **The page looks right but the type is Helvetica/Arial** — the page asks
+  Google Fonts for Archivo. If the warehouse network blocks
+  `fonts.googleapis.com` it falls back to the system sans automatically;
+  nothing else changes and no error is shown.
 
 ## Updating the script
 

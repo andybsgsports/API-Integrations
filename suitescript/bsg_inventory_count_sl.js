@@ -1165,197 +1165,247 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     // ------------------------------------------------------------------- css --
 
     var PAGE_CSS = String.raw`
-/* Palette: BSG red as the accent, a cool neutral scale for everything else.
-   Red is reserved for the masthead, the active tab and the one primary action
-   on a screen -- spreading it over every control is what made this look like a
-   toy rather than a tool. */
+/* Modernist: Archivo throughout, BSG red as the one accent, flat surfaces,
+   zero corner radius, 2px rules for structure and 1px between rows. Counts
+   line up in real columns -- a count sheet is a table, so it reads as one. */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap');
 :root{
-  --red:#a4161a;--red-deep:#7f1113;--red-tint:#fbeced;
-  --ink:#16181d;--ink-2:#3d424d;--muted:#6b7280;--faint:#9aa0aa;
-  --line:#e3e5ea;--line-2:#eff0f3;--bg:#f5f6f8;--card:#fff;
-  --ok:#16794c;--ok-bg:#e7f5ee;--warn:#9a5b00;--warn-bg:#fdf4e3;--bad:#b3261e;--bad-bg:#fdecea;
-  --focus:#2563eb;
-  --shadow:0 1px 2px rgba(16,24,40,.05);
-  --shadow-lift:0 4px 12px rgba(16,24,40,.09);
-  --r:10px;
+  --red:#ec3013;--red-600:#dd2b0f;--red-700:#ae1800;--red-tint:#ffe0d9;--red-100:#fff2ef;
+  --ink:#201e1d;--ink-2:rgba(32,30,29,.75);--muted:rgba(32,30,29,.55);--faint:rgba(32,30,29,.4);
+  --line:rgba(32,30,29,.4);--line-2:rgba(32,30,29,.17);--wash:rgba(32,30,29,.05);
+  --bg:#f3f2f2;--surface:#eae9e9;
+  --ok:#1a6b3f;--ok-bg:#e2eee8;--ok-line:#8ab8a0;
+  --warn:#7c4a00;--warn-bg:#f6ecd8;--warn-line:#c9a35c;
+  --bad:#ae1800;--bad-bg:#ffe0d9;
+  --font:"Archivo","Helvetica Neue",Helvetica,Arial,system-ui,sans-serif;
+  --wide:1320px;
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--font);-webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
 button{cursor:pointer}
 b,strong{font-weight:600}
-:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
-.ic-loading{padding:56px 20px;text-align:center;color:var(--muted)}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0}
+::selection{background:rgba(236,48,19,.28)}
+.ic-loading{padding:64px 20px;text-align:center;color:var(--muted)}
 
 /* ------------------------------------------------------------- masthead -- */
-.ic-head{position:sticky;top:0;z-index:20;background:var(--red);color:#fff;box-shadow:var(--shadow-lift)}
-.ic-head-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;max-width:1120px;margin:0 auto;padding:13px 20px;padding-top:calc(13px + env(safe-area-inset-top,0px))}
-.ic-title{font-weight:700;font-size:17px;letter-spacing:-.01em;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ic-user{font-size:13px;color:rgba(255,255,255,.78);white-space:nowrap}
-.ic-loc{display:flex;align-items:center;gap:8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.7)}
-.ic-loc select{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:7px 10px;max-width:60vw;min-height:38px;font-size:14px;letter-spacing:normal;text-transform:none;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%23fff' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
-.ic-loc select:hover{background-color:rgba(255,255,255,.2)}
-.ic-loc select option{color:var(--ink);background:#fff}
+/* Flat, not a red bar: red is spent on the active tab and the one primary
+   action, which is what makes it mean something. */
+.ic-head{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:2px solid var(--line)}
+.ic-head-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;max-width:var(--wide);margin:0 auto;padding-left:24px;padding-right:24px;padding-bottom:12px;padding-top:12px;padding-top:calc(12px + env(safe-area-inset-top,0px))}
+.ic-title{font-weight:800;font-size:19px;letter-spacing:-.015em;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ic-user{font-size:13px;color:var(--muted);white-space:nowrap}
+.ic-loc{display:flex;align-items:center;gap:8px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ic-loc select{background-color:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:0;padding:6px 30px 6px 10px;max-width:60vw;min-height:36px;font-size:14px;letter-spacing:normal;text-transform:none;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%23201e1d' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+.ic-loc select:hover{border-color:var(--ink)}
 
-/* Tabs sit on their own white rail under the masthead: an underlined strip
-   reads as navigation, where three big red blocks read as three buttons. */
-.ic-tabs{display:flex;gap:0;background:var(--card);border-bottom:1px solid var(--line);padding:0 20px;max-width:1120px;margin:0 auto}
-.ic-tab{flex:1 1 0;max-width:190px;background:none;border:0;border-bottom:2.5px solid transparent;border-radius:0;color:var(--muted);font-weight:600;font-size:14.5px;padding:13px 14px 11px;min-height:46px;white-space:nowrap;transition:color .12s,border-color .12s}
-.ic-tab:hover{color:var(--ink)}
-.ic-tab.is-on{color:var(--red);border-bottom-color:var(--red)}
-.ic-badge{display:inline-block;min-width:20px;padding:1px 7px;border-radius:10px;background:var(--line);color:var(--ink-2);font-size:11.5px;font-weight:700;margin-left:7px;vertical-align:1px;font-variant-numeric:tabular-nums}
-.ic-tab.is-on .ic-badge{background:var(--red);color:#fff}
+/* Tabs are one segmented control -- a single hard-edged block, no floating. */
+.ic-tabs{max-width:var(--wide);margin:0 auto;padding:18px 24px 0}
+.ic-tabseg{display:inline-flex;max-width:100%;border:1px solid var(--line)}
+.ic-tab{display:inline-flex;align-items:center;gap:8px;background:none;border:0;border-radius:0;color:var(--ink);font-family:var(--font);font-weight:600;font-size:16px;padding:12px 24px;min-height:50px;white-space:nowrap}
+.ic-tab+.ic-tab{border-left:1px solid var(--line)}
+.ic-tab:hover{background:var(--wash)}
+.ic-tab.is-on{background:var(--red);color:#fff}
+.ic-tab.is-on:hover{background:var(--red-600)}
+.ic-badge{display:inline-flex;align-items:center;justify-content:center;min-width:22px;padding:2px 8px;background:var(--surface);color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.02em;font-variant-numeric:tabular-nums;line-height:1.5}
+.ic-tab.is-on .ic-badge{background:#fff;color:var(--red-700)}
 
-.ic-main{padding:20px;max-width:1120px;margin:0 auto}
+.ic-main{padding:24px;max-width:var(--wide);margin:0 auto}
 
 /* --------------------------------------------------------------- notices -- */
-.ic-warn{background:var(--warn-bg);border:1px solid #f0dcb4;color:var(--warn);padding:11px 14px;border-radius:var(--r);margin-bottom:12px;font-size:13.5px;line-height:1.5}
-.ic-error{background:var(--bad-bg);border:1px solid #f3c6c1;color:var(--bad);padding:11px 14px;border-radius:var(--r);margin:12px 0;font-size:13.5px;word-break:break-word}
-.ic-empty{padding:44px 16px;text-align:center;color:var(--muted);font-size:14px}
+.ic-warn{background:var(--warn-bg);border-left:4px solid var(--warn-line);color:var(--warn);padding:11px 14px;margin-bottom:14px;font-size:13.5px;line-height:1.5}
+.ic-error{background:var(--bad-bg);border-left:4px solid var(--red);color:var(--bad);padding:11px 14px;margin:12px 0;font-size:13.5px;word-break:break-word}
+.ic-empty{padding:48px 16px;text-align:center;color:var(--muted);font-size:14px}
 .ic-progress{padding:18px;text-align:center;color:var(--muted);font-size:14px}
 
 /* ---------------------------------------------------------------- search -- */
-.ic-search{position:relative;margin-bottom:12px}
-.ic-search input{width:100%;padding:12px 44px 12px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--card);font-size:15.5px;min-height:48px;box-shadow:var(--shadow)}
-.ic-search input::placeholder{color:var(--faint)}
-.ic-search input:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
-.ic-search .ic-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:0;font-size:20px;color:var(--faint);width:36px;height:36px;border-radius:18px;line-height:1}
-.ic-search .ic-clear:hover{color:var(--ink);background:var(--line-2)}
-.ic-hint{font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.55;max-width:78ch}
+.ic-search{position:relative;margin-bottom:4px}
+.ic-search input{width:100%;padding:11px 46px 11px 12px;border:1px solid var(--line);border-radius:0;background:var(--surface);font-size:15px;min-height:46px;caret-color:var(--red)}
+.ic-search input::placeholder{color:var(--muted)}
+.ic-search input:focus{border-color:var(--red)}
+.ic-search .ic-clear{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:0;border-radius:0;font-size:20px;color:var(--muted);width:38px;height:38px;line-height:1}
+.ic-search .ic-clear:hover{color:var(--red);background:var(--wash)}
+.ic-hint{font-size:13px;color:var(--muted);margin:12px 0 16px;line-height:1.55;max-width:96ch}
 
-.ic-listhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px;flex-wrap:wrap}
+.ic-listhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap}
 .ic-count{font-size:13px;color:var(--muted);min-height:20px;font-variant-numeric:tabular-nums}
-.ic-seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card);box-shadow:var(--shadow)}
-.ic-segbtn{border:0;background:transparent;padding:7px 14px;min-height:38px;font-weight:600;font-size:13.5px;color:var(--muted)}
-.ic-segbtn:hover{background:var(--line-2);color:var(--ink)}
+.ic-seg{display:inline-flex;border:1px solid var(--line)}
+.ic-segbtn{border:0;border-radius:0;background:transparent;padding:7px 16px;min-height:38px;font-weight:600;font-size:13px;color:var(--ink)}
+.ic-segbtn+.ic-segbtn{border-left:1px solid var(--line)}
+.ic-segbtn:hover{background:var(--wash)}
 .ic-segbtn.is-on{background:var(--red);color:#fff}
-.ic-segbtn.is-on:hover{background:var(--red-deep)}
+.ic-segbtn.is-on:hover{background:var(--red-600)}
 
-/* ------------------------------------------------------------------ rows -- */
-.ic-list{display:flex;flex-direction:column;gap:8px}
-.ic-row{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;gap:14px;align-items:center;box-shadow:var(--shadow);transition:border-color .12s,box-shadow .12s}
-.ic-row:hover{border-color:#d2d5dc}
-.ic-row.is-onsheet{border-color:#a8d7bf;background:var(--ok-bg)}
-.ic-row.is-blocked{opacity:.68}
-.ic-row.has-error{border-color:#f0b9b9;background:#fffafa}
-.ic-info{flex:1 1 auto;min-width:0}
-.ic-name{font-weight:600;font-size:14.5px;letter-spacing:-.005em;word-break:break-word}
-.ic-desc{font-size:13px;color:var(--ink-2);word-break:break-word;margin-top:1px}
+/* ----------------------------------------------------------------- table -- */
+/* The header strip and every row share one grid template, so the numbers sit
+   in true columns without a <table> swallowing the expandable orders panel. */
+.ic-table{margin:0}
+.ic-thead,.ic-row{display:grid;align-items:center;column-gap:16px}
+.ic-table.is-items .ic-thead,.ic-table.is-items .ic-row{grid-template-columns:minmax(200px,3fr) minmax(110px,1.2fr) 74px 74px 92px 84px 296px}
+.ic-table.is-sheet .ic-thead,.ic-table.is-sheet .ic-row{grid-template-columns:minmax(200px,3fr) 74px 74px 92px 84px 156px 74px 44px}
+.ic-thead{padding:0 8px 8px;border-bottom:2px solid var(--line);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:400}
+.ic-row{padding:11px 8px;border-bottom:1px solid var(--line);row-gap:6px}
+.ic-row:hover{background:var(--wash)}
+.ic-row.is-onsheet{background:var(--ok-bg);box-shadow:inset 3px 0 0 var(--ok)}
+.ic-row.is-onsheet:hover{background:#d9e8e0}
+.ic-row.is-blocked{opacity:.62}
+.ic-row.has-error{background:var(--bad-bg);box-shadow:inset 3px 0 0 var(--red)}
+.ic-num{text-align:right;font-variant-numeric:tabular-nums;font-size:14px;min-width:0}
+.ic-th-num{text-align:right}
+.ic-vendor{font-size:13px;color:var(--muted);min-width:0;word-break:break-word}
+.ic-rowpanel{grid-column:1/-1;min-width:0}
+.ic-rowpanel:empty{display:none}
+
+.ic-info{min-width:0}
+.ic-name{font-weight:600;font-size:14px;letter-spacing:-.005em;word-break:break-word}
+.ic-desc{font-size:13px;color:var(--muted);word-break:break-word;margin-top:2px}
 .ic-meta{font-size:12.5px;color:var(--muted);margin-top:4px;word-break:break-word;font-variant-numeric:tabular-nums}
 .ic-meta b{color:var(--ink);font-weight:600}
-.ic-flag{display:inline-block;font-size:11.5px;font-weight:600;color:var(--warn);background:var(--warn-bg);border:1px solid #f0dcb4;border-radius:5px;padding:1px 7px;margin-top:6px}
-.ic-onsheet{display:inline-block;font-size:11.5px;font-weight:600;color:var(--ok);background:var(--ok-bg);border:1px solid #bfe3d0;border-radius:5px;padding:1px 7px;margin-top:6px}
+.ic-flag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--warn);background:var(--warn-bg);padding:2px 8px;margin-top:6px}
+.ic-onsheet{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--ok);background:var(--ok-bg);border:1px solid var(--ok-line);padding:2px 8px;margin-top:6px}
 
 /* --------------------------------------------------------------- controls -- */
-.ic-ctl{display:flex;align-items:center;gap:8px;flex:0 0 auto}
-.ic-ok{display:inline-flex;align-items:center;gap:6px;padding:0 10px 0 8px;min-height:44px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
-.ic-ok:hover{background:var(--line-2);color:var(--ink-2)}
+.ic-ctl{display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.ic-ctl .ic-btn{min-width:88px}
+.ic-ok{display:inline-flex;align-items:center;gap:7px;padding:0 11px;min-height:44px;border:1px solid var(--line);background:transparent;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
+.ic-ok:hover{background:var(--wash);color:var(--ink)}
 .ic-ok input{width:17px;height:17px;margin:0;accent-color:var(--ok);cursor:pointer}
-.ic-ok.is-on,.ic-ok:has(input:checked){border-color:#a8d7bf;background:var(--ok-bg);color:var(--ok)}
-.ic-ok.is-on:hover,.ic-ok:has(input:checked):hover{background:#dcefe4}
-.ic-qty{width:80px;min-height:44px;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:18px;font-weight:600;text-align:center;background:var(--card);font-variant-numeric:tabular-nums}
-.ic-qty::placeholder{font-weight:400;font-size:15px;color:var(--faint)}
-.ic-qty:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
-.ic-btn{min-height:44px;padding:0 16px;border-radius:8px;border:1px solid transparent;background:var(--red);color:#fff;font-weight:600;font-size:14.5px;white-space:nowrap;transition:background .12s,box-shadow .12s}
-.ic-btn:hover{background:var(--red-deep)}
+.ic-ok.is-on,.ic-ok:has(input:checked){border-color:var(--ok);background:var(--ok-bg);color:var(--ok)}
+.ic-ok.is-on:hover,.ic-ok:has(input:checked):hover{background:#d9e8e0}
+.ic-qty{width:74px;min-height:44px;padding:8px;border:1px solid var(--line);border-radius:0;font-size:17px;font-weight:600;text-align:center;background:var(--surface);font-variant-numeric:tabular-nums;caret-color:var(--red)}
+.ic-qty::placeholder{font-weight:400;font-size:14px;color:var(--muted)}
+.ic-qty:focus{border-color:var(--red)}
+.ic-qty.is-bad{border-color:var(--red);background:var(--bad-bg)}
+.ic-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 18px;border-radius:0;border:1px solid transparent;background:var(--red);color:#fff;font-weight:800;font-size:14px;line-height:1.2;white-space:nowrap}
+.ic-btn:hover{background:var(--red-600)}
+.ic-btn:active{background:var(--red-700)}
 .ic-btn:disabled{opacity:.45;cursor:default;background:var(--red)}
-.ic-btn.is-ghost{background:var(--card);color:var(--ink);border-color:var(--line);box-shadow:var(--shadow)}
-.ic-btn.is-ghost:hover{background:var(--line-2);border-color:#d2d5dc}
-.ic-btn.is-ok{background:var(--ok)}
-.ic-btn.is-ok:hover{background:#12613d}
-.ic-btn.is-sm{min-height:36px;padding:0 12px;font-size:13.5px}
-.ic-step{width:38px;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--card);font-size:19px;font-weight:500;line-height:1;color:var(--ink-2)}
-.ic-step:hover{background:var(--line-2);color:var(--ink)}
-.ic-x{width:34px;height:34px;border-radius:17px;border:0;background:transparent;color:var(--faint);font-size:19px;line-height:1}
-.ic-x:hover{color:var(--bad);background:var(--bad-bg)}
-.ic-more{margin:16px 0;text-align:center}
-.ic-link{background:none;border:0;color:var(--focus);font-weight:600;padding:5px 0;font-size:13px;cursor:pointer}
-.ic-link:hover{text-decoration:underline}
-.ic-commit-link{background:none;border:0;padding:0 1px;font:inherit;font-weight:700;color:var(--focus);text-decoration:underline;text-underline-offset:2px;cursor:pointer;min-height:26px;font-variant-numeric:tabular-nums}
-.ic-commit-link:hover{color:#1d4ed8}
+.ic-btn.is-ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+.ic-btn.is-ghost:hover{background:var(--wash)}
+.ic-btn.is-ok{background:var(--ok);border-color:var(--ok)}
+.ic-btn.is-ok:hover{background:#155634}
+.ic-btn.is-sm{min-height:36px;padding:0 13px;font-size:12.5px}
+.ic-step{width:34px;height:42px;border-radius:0;border:1px solid var(--line);background:transparent;font-size:18px;font-weight:500;line-height:1;color:var(--ink)}
+.ic-step:hover{background:var(--wash)}
+.ic-x{width:36px;height:36px;border-radius:0;border:0;background:transparent;color:var(--red);font-size:18px;line-height:1}
+.ic-x:hover{background:var(--red-tint)}
+.ic-more{margin:20px 0;text-align:center}
+.ic-link{background:none;border:0;border-radius:0;color:var(--red-700);font-weight:600;padding:4px 0;font-size:12px;text-decoration:underline;text-underline-offset:3px}
+.ic-link:hover{color:var(--red)}
+.ic-commit-link{background:none;border:0;padding:0;font:inherit;font-weight:700;color:var(--red-700);text-decoration:underline;text-underline-offset:3px;font-variant-numeric:tabular-nums}
+.ic-commit-link:hover{color:var(--red)}
 
 /* ----------------------------------------------------------------- sheet -- */
-.ic-sum{display:flex;gap:8px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-bottom:12px;font-size:12.5px;color:var(--muted);box-shadow:var(--shadow)}
-.ic-sum div{flex:1 1 auto;min-width:110px;text-transform:uppercase;letter-spacing:.05em;font-size:11px}
-.ic-sum b{font-size:21px;display:block;color:var(--ink);font-weight:650;letter-spacing:-.015em;margin-bottom:2px;text-transform:none;font-variant-numeric:tabular-nums}
-.ic-delta{font-weight:700;min-width:54px;text-align:center;padding:6px 8px;border-radius:7px;font-size:14px;font-variant-numeric:tabular-nums}
+.ic-sum{display:flex;gap:32px;flex-wrap:wrap;padding:0 4px 16px;border-bottom:2px solid var(--line);margin-bottom:20px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.ic-sum div{flex:0 0 auto;min-width:76px}
+.ic-sum div:last-child{margin-left:auto;text-align:right}
+.ic-sum b{font-size:24px;display:block;color:var(--ink);font-weight:800;letter-spacing:-.02em;margin-bottom:1px;text-transform:none;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ic-sum b#icTotNeg{color:var(--red-700)}
+.ic-deltacell{text-align:right;min-width:0}
+.ic-xcell{text-align:right;min-width:0}
+.ic-delta{display:inline-block;font-weight:700;min-width:52px;text-align:center;padding:4px 8px;font-size:13px;font-variant-numeric:tabular-nums}
 .ic-delta.is-pos{background:var(--ok-bg);color:var(--ok)}
-.ic-delta.is-neg{background:var(--bad-bg);color:var(--bad)}
-.ic-delta.is-zero{background:var(--line-2);color:var(--faint)}
-.ic-line-ctl{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:0 0 auto}
-.ic-line-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.ic-commit-warn{font-size:12.5px;color:var(--warn);background:var(--warn-bg);border:1px solid #f0dcb4;border-radius:7px;padding:6px 10px;margin-top:8px;line-height:1.45}
-.ic-incl{font-size:12.5px;color:var(--ok);background:var(--ok-bg);border:1px solid #bfe3d0;border-radius:7px;padding:6px 10px;margin-top:8px}
-.ic-form{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-top:14px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow)}
+.ic-delta.is-neg{background:var(--red-tint);color:var(--red-700)}
+.ic-delta.is-zero{background:var(--surface);color:var(--muted)}
+.ic-line-ctl{display:flex;align-items:center;gap:6px}
+.ic-line-top{display:flex;align-items:center;gap:6px}
+.ic-commit-warn{font-size:12.5px;color:var(--warn);background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:8px 12px;margin-top:8px;line-height:1.45}
+.ic-incl{font-size:12.5px;color:var(--ok);background:var(--ok-bg);border-left:4px solid var(--ok);padding:8px 12px;margin-top:8px}
+.ic-form{background:var(--surface);border:1px solid var(--line);padding:18px;margin-top:22px;display:flex;flex-direction:column;gap:16px}
 /* Sentence case, not uppercase: these labels carry a parenthetical
    ("Memo (goes on the Inventory Adjustment)") that shouts in all caps. */
-.ic-form label{font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600}
-.ic-form input,.ic-form select{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:14.5px}
-.ic-form input:focus,.ic-form select:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
-.ic-actions{display:flex;gap:10px;flex-wrap:wrap}
+.ic-form label{font-size:12px;color:var(--muted);display:block;margin-bottom:5px}
+.ic-form input,.ic-form select{width:100%;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:0;background:var(--bg);font-size:14px}
+.ic-form input:focus,.ic-form select:focus{border-color:var(--red)}
+.ic-actions{display:flex;gap:12px;flex-wrap:wrap}
 .ic-actions .ic-btn{flex:1 1 auto;min-height:48px;font-size:15px}
 /* A toolbar of small buttons (Expand all / Collapse all / Reload) keeps its
    own size inside an .ic-actions row rather than stretching like a CTA. */
-.ic-actions .ic-btn.is-sm{flex:0 0 auto;min-height:36px;font-size:13.5px}
-.ic-confirm{background:var(--warn-bg);border:1px solid #eed9ab;border-radius:var(--r);padding:16px;margin-top:12px}
+.ic-actions .ic-btn.is-sm{flex:0 0 auto;min-height:36px;font-size:12.5px}
+.ic-confirm{background:var(--bg);border-left:4px solid var(--red);padding:16px}
 .ic-confirm p{margin:0 0 10px;font-size:14px;line-height:1.55;color:var(--ink-2)}
-.ic-confirm p b{color:var(--ink)}
-.ic-done{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:14px;box-shadow:var(--shadow)}
-.ic-done h2{margin:0 0 10px;font-size:19px;color:var(--ok);letter-spacing:-.01em}
-.ic-done a{color:var(--focus);font-weight:600;font-size:16px}
+.ic-confirm p b{color:var(--ink);font-weight:800}
+.ic-done{background:var(--surface);border:1px solid var(--line);padding:22px;margin-bottom:16px}
+.ic-done h2{margin:0 0 10px;font-size:22px;font-weight:800;letter-spacing:-.015em;color:var(--ink)}
+.ic-done a{color:var(--red-700);font-weight:600;font-size:16px}
 .ic-done ul{margin:10px 0 0 18px;padding:0;font-size:13.5px;color:var(--ink-2);line-height:1.7}
-.ic-export{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:14px 0 0;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
-.ic-export .ic-btn{min-height:34px;padding:0 13px;font-size:13px;text-transform:none;letter-spacing:normal}
+.ic-export{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:20px 0 0;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.ic-export .ic-btn{min-height:34px;padding:0 14px;font-size:12.5px;text-transform:none;letter-spacing:normal}
 
 /* ----------------------------------------------------------- open orders -- */
-.ic-repgrp{border:1px solid var(--line);border-radius:var(--r);background:var(--card);padding:6px;box-shadow:var(--shadow)}
-.ic-rephead{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;cursor:pointer;user-select:none;padding:10px 12px;border-radius:8px}
-.ic-rephead:hover{background:var(--line-2)}
-.ic-repname{font-weight:650;font-size:15px;color:var(--ink);letter-spacing:-.01em}
+.ic-list{display:block}
+.ic-repgrp{border-bottom:2px solid var(--line)}
+.ic-rephead{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;cursor:pointer;user-select:none;padding:13px 6px}
+.ic-rephead:hover{background:var(--wash)}
+.ic-repname{font-weight:800;font-size:16px;letter-spacing:-.01em}
 .ic-repsum{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ic-repsum.is-ticked{color:var(--ok);font-weight:600}
-.ic-repbody{display:flex;flex-direction:column;gap:8px;margin:2px 6px 6px}
-.ic-ordgrp{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:4px 10px 8px}
-.ic-ordhead{display:flex;flex-wrap:wrap;gap:3px 10px;align-items:baseline;cursor:pointer;user-select:none;padding:8px 4px;border-radius:6px}
-.ic-ordhead:hover{background:#ebedf1}
-.ic-caret{display:inline-block;width:16px;color:var(--faint);font-size:11px}
-.ic-ordhead a{color:var(--ink);font-weight:650;font-size:14.5px;text-decoration:none;border-bottom:1px solid var(--line)}
-.ic-ordhead a:hover{color:var(--focus);border-bottom-color:currentColor}
+.ic-repbody{padding-left:24px;border-top:2px solid var(--line)}
+.ic-ordgrp{border-bottom:1px solid var(--line)}
+.ic-ordgrp:last-child{border-bottom:0}
+.ic-ordhead{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;cursor:pointer;user-select:none;padding:11px 6px}
+.ic-ordhead:hover{background:var(--wash)}
+.ic-caret{display:inline-block;width:14px;color:var(--muted);font-size:10px}
+.ic-ordhead a{color:var(--ink);font-weight:700;font-size:14.5px;text-decoration:underline;text-underline-offset:3px}
+.ic-ordhead a:hover{color:var(--red)}
 .ic-ordhead small{color:var(--muted);font-size:12px}
 .ic-ordsum{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ic-ordsum.is-ticked{color:var(--ok);font-weight:600}
-.ic-ordline{display:flex;align-items:flex-start;gap:11px;padding:9px 4px;border-top:1px solid var(--line-2);cursor:pointer}
-.ic-ordline:hover{background:#ebedf1;border-radius:6px}
-.ic-ordline input{width:19px;height:19px;margin:2px 0 0;flex:0 0 auto;accent-color:var(--red);cursor:pointer}
-.ic-ordline .ic-name{font-size:14px}
+.ic-ordline{display:flex;align-items:flex-start;gap:12px;padding:9px 6px 9px 10px;border-top:1px solid var(--line-2);cursor:pointer;min-width:0}
+.ic-ordline:hover{background:var(--wash)}
+.ic-ordline input{width:18px;height:18px;margin:1px 0 0;flex:0 0 auto;accent-color:var(--red);cursor:pointer}
+.ic-ordline .ic-name{font-size:13.5px}
 .ic-ordline .ic-meta{margin-top:2px}
-.ic-ordline.is-off{opacity:.5;cursor:default}
-.ic-ordall-row{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:9px 10px;margin-top:6px;border-top:1px solid var(--line)}
-.ic-ordall-row:hover{background:var(--card)}
-.ic-ordall-row .ic-name{font-size:13.5px;color:var(--ink-2)}
-.ic-orders{margin-top:8px;border-top:1px solid var(--line-2);padding-top:6px;font-size:13px}
-.ic-order{display:flex;align-items:flex-start;gap:10px;padding:6px 0;cursor:pointer}
-.ic-order input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-color:var(--red);cursor:pointer}
-.ic-order a{color:var(--focus);font-weight:600}
+.ic-ordline.is-off{opacity:.45;cursor:default}
+.ic-ordall-row{background:var(--surface);border-top:1px solid var(--line)}
+.ic-ordall-row:hover{background:#e1e0e0}
+.ic-ordall-row .ic-name{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.ic-orders{margin-top:8px;border-top:2px solid var(--line);padding-top:6px;font-size:13px}
+.ic-order{display:flex;align-items:flex-start;gap:11px;padding:7px 0;cursor:pointer;border-bottom:1px solid var(--line-2);min-width:0}
+.ic-order:last-child{border-bottom:0}
+.ic-order input{width:18px;height:18px;margin:1px 0 0;flex:0 0 auto;accent-color:var(--red);cursor:pointer}
+.ic-order a{color:var(--red-700);font-weight:700;text-decoration:underline;text-underline-offset:3px}
 .ic-order small{color:var(--muted);font-variant-numeric:tabular-nums}
-.ic-order.is-off{opacity:.5;cursor:default}
+.ic-order.is-off{opacity:.45;cursor:default}
 
-.ic-footer{text-align:center;color:var(--faint);font-size:12px;padding:28px 16px 20px;line-height:1.6;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))}
+.ic-footer{text-align:center;color:var(--muted);font-size:12px;padding:32px 16px 20px;line-height:1.6;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))}
 
+/* Under a tablet the columns fold: the item keeps a full row, the four
+   quantities pair off two by two, and the controls span the width. */
+@media (max-width:980px){
+  .ic-table .ic-thead{display:none}
+  .ic-table.is-items .ic-row,.ic-table.is-sheet .ic-row{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:10px;column-gap:14px;padding:14px 8px}
+  .ic-info,.ic-vendor,.ic-ctl,.ic-rowpanel{grid-column:1/-1}
+  .ic-ctl{justify-content:flex-start}
+  .ic-ctl .ic-qty{flex:0 1 104px;width:104px}
+  .ic-num,.ic-vendor,.ic-deltacell{display:flex;align-items:baseline;justify-content:space-between;gap:8px;text-align:left;border-bottom:1px solid var(--line-2);padding-bottom:3px}
+  .ic-num{font-size:14px;font-weight:600}
+  .ic-num::before,.ic-vendor::before,.ic-deltacell::before{color:var(--muted);font-size:10px;font-weight:400;letter-spacing:.08em;text-transform:uppercase;flex:0 0 auto}
+  .ic-num::before{content:attr(data-label)}
+  .ic-vendor::before{content:'Vendor'}
+  .ic-vendor{font-size:13px;text-align:right}
+  .ic-deltacell::before{content:'Adjust by'}
+  .ic-xcell{text-align:right}
+  .ic-line-ctl{grid-column:1/-1;justify-content:flex-start}
+}
 @media (max-width:640px){
-  .ic-main{padding:14px}
-  .ic-head-row{padding:11px 14px;padding-top:calc(11px + env(safe-area-inset-top,0px));gap:10px}
-  .ic-tabs{padding:0 8px}
-  .ic-tab{max-width:none;font-size:13.5px;padding:12px 6px 10px}
+  .ic-main{padding:16px}
+  .ic-head-row{gap:10px;padding-left:16px;padding-right:16px;padding-bottom:10px;padding-top:10px;padding-top:calc(10px + env(safe-area-inset-top,0px))}
+  .ic-tabs{padding:14px 16px 0}
+  .ic-tabseg{width:100%}
+  .ic-tab{flex:1 1 0;justify-content:center;font-size:14px;padding:12px 8px;min-height:48px}
   .ic-user{display:none}
-  .ic-loc{flex:1 1 100%;font-size:11px}
+  .ic-loc{flex:1 1 100%;font-size:10px}
   .ic-loc select{max-width:100%;flex:1 1 auto}
-  .ic-row{flex-wrap:wrap;gap:10px}
-  .ic-ctl,.ic-line-ctl{width:100%;justify-content:flex-end;align-items:center;flex-direction:row}
-  .ic-ctl .ic-qty{flex:1 1 auto}
-  .ic-sum div{min-width:72px}
-  .ic-sum b{font-size:18px}
+  .ic-sum{gap:20px}
+  .ic-sum div{min-width:66px}
+  .ic-sum b{font-size:20px}
+  .ic-sum div:last-child{margin-left:0;text-align:left;flex:1 1 100%}
   .ic-repsum,.ic-ordsum{margin-left:0;flex:1 1 100%;white-space:normal}
+  .ic-repbody{padding-left:10px}
 }
 `;
 
@@ -1779,18 +1829,22 @@ b,strong{font-weight:600}
         var line = lineFor(item);
         var panel = ordersPanel(item, function () { refreshResultRow(item.id); });
         var row = el('div', { class: 'ic-row' + (line ? ' is-onsheet' : '') + (item.blocked ? ' is-blocked' : ''), 'data-row-for': item.id });
-        var meta = [];
-        if (item.vendor) { meta.push(item.vendor); }
-        if (item.upc) { meta.push('UPC ' + item.upc); }
         var info = el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: item.name }),
             (item.display || item.desc) ? el('div', { class: 'ic-desc', text: item.display && item.desc && item.display !== item.desc ? item.display + ' - ' + item.desc : (item.display || item.desc) }) : null,
-            el('div', { class: 'ic-meta' }, [meta.length ? meta.join(' · ') + ' · ' : '', 'On hand: ', el('b', { text: fmt(item.onhand) }), ' · Avail: ', el('b', { text: fmt(item.available) }), ' · Committed: ', committedEl(item.committed, panel), ' · On order: ', el('b', { text: fmt(item.onorder) })]),
+            item.upc ? el('div', { class: 'ic-meta', text: 'UPC ' + item.upc }) : null,
             item.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + item.blocked + ') - adjust manually' }) : null,
-            line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: onSheetText(line) }) : null,
-            panel.box
+            line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: onSheetText(line) }) : null
         ]);
         row.appendChild(info);
+        row.appendChild(el('div', { class: 'ic-vendor', text: item.vendor || '' }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'On hand', 'data-cell': 'onhand', text: fmt(item.onhand) }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'Avail', 'data-cell': 'available', text: fmt(item.available) }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'Committed', 'data-cell': 'committed' }, [committedEl(item.committed, panel)]));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'On order', 'data-cell': 'onorder', text: fmt(item.onorder) }));
+        var ctl = el('div', { class: 'ic-ctl' });
+        row.appendChild(ctl);
+        row.appendChild(el('div', { class: 'ic-rowpanel' }, [panel.box]));
         if (!item.blocked) {
             var input = el('input', {
                 class: 'ic-qty', type: 'text', inputmode: 'decimal', enterkeyhint: 'next', autocomplete: 'off', placeholder: 'Qty',
@@ -1833,7 +1887,7 @@ b,strong{font-weight:600}
                 if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
             });
             btn.addEventListener('click', function () { commit(false); });
-            row.appendChild(el('div', { class: 'ic-ctl' }, [input, btn, okWrap]));
+            ctl.appendChild(input); ctl.appendChild(btn); ctl.appendChild(okWrap);
         }
         return row;
     }
@@ -1856,7 +1910,7 @@ b,strong{font-weight:600}
             row.classList.add('is-onsheet');
             if (btn) { btn.textContent = 'Update'; }
             if (tag) { tag.textContent = onSheetText(line); }
-            else if (info) { info.insertBefore(el('div', { class: 'ic-onsheet', 'data-onsheet-for': itemId, text: onSheetText(line) }), info.querySelector('.ic-orders')); }
+            else if (info) { info.appendChild(el('div', { class: 'ic-onsheet', 'data-onsheet-for': itemId, text: onSheetText(line) })); }
         } else {
             row.classList.remove('is-onsheet');
             if (btn) { btn.textContent = 'Add'; }
@@ -1886,7 +1940,20 @@ b,strong{font-weight:600}
         ]));
         var list = el('div', { class: 'ic-list' });
         state.results.forEach(function (it) { list.appendChild(resultRow(it)); });
-        box.appendChild(list);
+        var table = el('div', { class: 'ic-table is-items' });
+        if (state.results.length) {
+            table.appendChild(el('div', { class: 'ic-thead' }, [
+                el('div', { text: 'Item' }),
+                el('div', { text: 'Vendor' }),
+                el('div', { class: 'ic-th-num', text: 'On hand' }),
+                el('div', { class: 'ic-th-num', text: 'Avail' }),
+                el('div', { class: 'ic-th-num', text: 'Committed' }),
+                el('div', { class: 'ic-th-num', text: 'On order' }),
+                el('div', { class: 'ic-th-num', text: 'Count' })
+            ]));
+        }
+        table.appendChild(list);
+        box.appendChild(table);
         if (state.searching) {
             box.appendChild(el('div', { class: 'ic-progress', text: state.results.length ? 'Loading…' : 'Loading inventory…' }));
         } else if (!state.results.length) {
@@ -1977,16 +2044,22 @@ b,strong{font-weight:600}
         row.appendChild(el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name', text: line.name }),
             (line.display || line.desc) ? el('div', { class: 'ic-desc', text: line.display || line.desc }) : null,
-            el('div', { class: 'ic-meta' }, ['On hand: ', el('b', { text: fmt(line.onhand) }), ' · Avail: ', el('b', { text: fmt(line.available) }), ' · Committed: ', committedEl(line.committed, panel), ' · On order: ', el('b', { text: fmt(line.onorder) }), line.vendor ? ' · ' + line.vendor : '']),
+            line.vendor ? el('div', { class: 'ic-meta', text: line.vendor }) : null,
             line.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + line.blocked + ') - will be skipped' }) : null,
+            line.blocked ? null : ordersBtn
+        ]));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'On hand', text: fmt(line.onhand) }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'Avail', text: fmt(line.available) }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'Committed' }, [committedEl(line.committed, panel)]));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'On order', text: fmt(line.onorder) }));
+        row.appendChild(el('div', { class: 'ic-line-ctl' }, [minus, input, plus]));
+        row.appendChild(el('div', { class: 'ic-deltacell' }, [delta]));
+        row.appendChild(el('div', { class: 'ic-xcell' }, [remove]));
+        row.appendChild(el('div', { class: 'ic-rowpanel' }, [
             line.error ? el('div', { class: 'ic-error', text: line.error }) : null,
             incl,
             warn,
-            line.blocked ? null : ordersBtn,
             panel.box
-        ]));
-        row.appendChild(el('div', { class: 'ic-line-ctl' }, [
-            el('div', { class: 'ic-line-top' }, [minus, input, plus, delta, remove])
         ]));
         paint();
         return row;
@@ -2021,7 +2094,19 @@ b,strong{font-weight:600}
             var line = state.sheet[id];
             if (line) { list.appendChild(sheetRow(line)); }
         });
-        main.appendChild(list);
+        main.appendChild(el('div', { class: 'ic-table is-sheet' }, [
+            el('div', { class: 'ic-thead' }, [
+                el('div', { text: 'Item' }),
+                el('div', { class: 'ic-th-num', text: 'On hand' }),
+                el('div', { class: 'ic-th-num', text: 'Avail' }),
+                el('div', { class: 'ic-th-num', text: 'Committed' }),
+                el('div', { class: 'ic-th-num', text: 'On order' }),
+                el('div', { text: 'Counted' }),
+                el('div', { class: 'ic-th-num', text: 'Adjust' }),
+                el('div', {})
+            ]),
+            list
+        ]));
 
         var form = el('div', { class: 'ic-form' });
         form.appendChild(el('div', {}, [
@@ -2432,10 +2517,12 @@ b,strong{font-weight:600}
         }
         head.appendChild(row);
         head.appendChild(el('div', { class: 'ic-tabs' }, [
-            el('button', { class: 'ic-tab' + (state.view === 'search' ? ' is-on' : ''), type: 'button', text: 'Count', onclick: function () { state.view = 'search'; state.done = null; render(); } }),
-            el('button', { class: 'ic-tab' + (state.view === 'orders' ? ' is-on' : ''), type: 'button', text: 'Open orders', onclick: function () { state.view = 'orders'; state.done = null; render(); } }),
-            el('button', { class: 'ic-tab' + (state.view === 'sheet' ? ' is-on' : ''), type: 'button', onclick: function () { state.view = 'sheet'; state.done = null; state.submitError = ''; state.confirm = false; render(); } }, [
-                'Sheet', el('span', { id: 'icSheetBadge', class: 'ic-badge', text: String(state.order.length) })
+            el('div', { class: 'ic-tabseg', role: 'tablist' }, [
+                el('button', { class: 'ic-tab' + (state.view === 'search' ? ' is-on' : ''), type: 'button', text: 'Count', onclick: function () { state.view = 'search'; state.done = null; render(); } }),
+                el('button', { class: 'ic-tab' + (state.view === 'orders' ? ' is-on' : ''), type: 'button', text: 'Open orders', onclick: function () { state.view = 'orders'; state.done = null; render(); } }),
+                el('button', { class: 'ic-tab' + (state.view === 'sheet' ? ' is-on' : ''), type: 'button', onclick: function () { state.view = 'sheet'; state.done = null; state.submitError = ''; state.confirm = false; render(); } }, [
+                    'Sheet', el('span', { id: 'icSheetBadge', class: 'ic-badge', text: String(state.order.length) })
+                ])
             ])
         ]));
         root.appendChild(head);
