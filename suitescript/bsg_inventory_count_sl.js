@@ -572,7 +572,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
             if (locId && !isDead('transaction', 'filter', 'location')) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
             var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item'];
-            ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted'].forEach(function (c) {
+            ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted', 'salesrep'].forEach(function (c) {
                 if (!isDead('transaction', 'column', c)) { cols.push(c); }
             });
             return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
@@ -590,6 +590,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     id: String(r.id),
                     ref: orderRef(tval(r, 'tranid'), r.id),
                     customer: ttxt(r, 'entity') || '',
+                    rep: ttxt(r, 'salesrep') || '',
                     date: String(tval(r, 'trandate')),
                     item: String(tval(r, 'item')),
                     itemName: ttxt(r, 'item') || '',
@@ -926,6 +927,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     }
 
     var ORDER_COLS = [
+        { key: 'rep', label: 'Sales rep' },
         { key: 'ref', label: 'Order' }, { key: 'customer', label: 'Customer' }, { key: 'date', label: 'Date' }, { key: 'status', label: 'Status' },
         { key: 'itemName', label: 'Item' }, { key: 'qty', label: 'Ordered', num: true }, { key: 'shipped', label: 'Shipped', num: true },
         { key: 'committed', label: 'To count', num: true }, { key: 'pulled', label: 'Pulled', num: true }, { key: 'ticked', label: 'Ticked' }
@@ -936,10 +938,15 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         (Array.isArray(payload.ticked) ? payload.ticked : []).forEach(function (t) { ticked[String(t)] = true; });
         var rows = openOrders(null, locId).orders.map(function (o) {
             return {
-                ref: o.ref, customer: o.customer, date: o.date, status: o.status,
+                rep: o.rep || NO_REP, ref: o.ref, customer: o.customer, date: o.date, status: o.status,
                 itemName: o.itemName, qty: o.qty, shipped: o.shipped, committed: o.committed, pulled: o.pulled || 0,
                 ticked: ticked[o.ref + '|' + o.item] ? 'Yes' : ''
             };
+        });
+        // Same order as the page: sales rep, then oldest order first.
+        rows.sort(function (x, y) {
+            if (x.rep !== y.rep) { return repRank(x.rep) - repRank(y.rep) || (x.rep < y.rep ? -1 : 1); }
+            return dateKey(x.date) - dateKey(y.date) || (x.ref < y.ref ? -1 : x.ref > y.ref ? 1 : 0);
         });
         return {
             title: 'Open orders to count' + (where ? ' - ' + where : ''),
@@ -949,7 +956,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     }
 
     var SHEET_COLS = [
-        { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'onhand', label: 'On hand', num: true },
+        { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'vendor', label: 'Pref. vendor' }, { key: 'onhand', label: 'On hand', num: true },
         { key: 'count', label: 'Count', num: true }, { key: 'delta', label: 'Adjust by', num: true }, { key: 'orders', label: 'On open orders' }
     ];
 
@@ -957,7 +964,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         var rows = (Array.isArray(payload.lines) ? payload.lines : []).slice(0, CONFIG.EXPORT_MAX_ROWS).map(function (l) {
             var onhand = parseFloat(l.onhand) || 0, count = parseFloat(l.count) || 0;
             return {
-                name: String(l.name || ''), display: String(l.display || l.desc || ''), onhand: onhand, count: count,
+                name: String(l.name || ''), display: String(l.display || l.desc || ''), vendor: String(l.vendor || ''), onhand: onhand, count: count,
                 delta: round4(count - onhand),
                 orders: (Array.isArray(l.orders) ? l.orders : []).map(function (o) { return cleanRef(o && o.ref) + (o && o.qty ? ' (' + o.qty + ')' : ''); }).filter(Boolean).join(', ')
             };
@@ -967,6 +974,19 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             subtitle: rows.length + ' lines · not yet submitted' + (payload.memo ? ' · ' + String(payload.memo).slice(0, 200) : ''),
             columns: SHEET_COLS, rows: rows
         };
+    }
+
+    // "No sales rep" sorts last; everyone else alphabetically.
+    var NO_REP = 'No sales rep';
+    function repRank(name) { return name === NO_REP ? 1 : 0; }
+    // NetSuite hands dates back as the user's display format (M/D/YYYY here).
+    // Anything unparseable sorts first so it is never hidden at the bottom.
+    function dateKey(v) {
+        var m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/.exec(String(v || '').trim());
+        if (!m) { return 0; }
+        var y = parseInt(m[3], 10);
+        if (y < 100) { y += 2000; }
+        return y * 10000 + parseInt(m[1], 10) * 100 + parseInt(m[2], 10);
     }
 
     function cell(v) { return v == null ? '' : String(v); }
@@ -1207,6 +1227,13 @@ button{cursor:pointer}
 .ic-line-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .ic-commit-warn{font-size:12px;color:var(--warn);background:#fff3df;border-radius:6px;padding:4px 8px;margin-top:6px}
 .ic-incl{font-size:12px;color:var(--ok);background:#e0f3e6;border-radius:6px;padding:4px 8px;margin-top:6px}
+.ic-repgrp{border:1px solid var(--line);border-radius:12px;background:#f7f7f9;padding:8px}
+.ic-rephead{display:flex;align-items:baseline;gap:4px 10px;flex-wrap:wrap;cursor:pointer;user-select:none;padding:4px 6px}
+.ic-rephead:hover{background:#eeeef2;border-radius:8px}
+.ic-repname{font-weight:800;font-size:16px;color:var(--ink)}
+.ic-repsum{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap}
+.ic-repsum.is-ticked{color:var(--ok);font-weight:700}
+.ic-repbody{display:flex;flex-direction:column;gap:8px;margin-top:6px}
 .ic-ordgrp{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .ic-ordhead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;cursor:pointer;user-select:none;padding:4px 0}
 .ic-ordhead:hover{background:#fafafc}
@@ -1278,6 +1305,7 @@ button{cursor:pointer}
         allOrders: null,           // Open orders tab: { entries, loc } | { error }
         ordersFilter: '',
         ordersOpen: {},            // Open orders tab: order refs expanded by the user
+        repsClosed: {},            // Open orders tab: sales reps collapsed by the user
         loc: '', account: '',
         q: '', results: [], more: false, page: 0, total: 0, loaded: false, searching: false, searchError: '', stockApplied: true,
         instock: true,             // list only items with qty on hand, available or on order
@@ -1984,6 +2012,16 @@ button{cursor:pointer}
 
     // Downloads go through a hidden form POST to the same Suitelet (action=export)
     // in a new tab, so the browser handles the file and the page keeps its state.
+    var NO_REP = 'No sales rep';
+    function repRank(name) { return name === NO_REP ? 1 : 0; }
+    function dateKey(v) {
+        var m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/.exec(String(v || '').trim());
+        if (!m) { return 0; }
+        var y = parseInt(m[3], 10);
+        if (y < 100) { y += 2000; }
+        return y * 10000 + parseInt(m[1], 10) * 100 + parseInt(m[2], 10);
+    }
+
     function exportBar(what) {
         function go(format) {
             var fields = { action: 'export', what: what, format: format, loc: state.loc || '', instock: state.instock ? 'T' : 'F', q: state.q || '' };
@@ -1998,7 +2036,7 @@ button{cursor:pointer}
                 fields.payload = JSON.stringify({
                     memo: state.memo || '',
                     lines: state.order.map(function (id) { return state.sheet[id]; }).filter(Boolean).map(function (l) {
-                        return { name: l.name, display: l.display || l.desc || '', onhand: l.onhand, count: l.count, orders: l.orders || [] };
+                        return { name: l.name, display: l.display || l.desc || '', vendor: l.vendor || '', onhand: l.onhand, count: l.count, orders: l.orders || [] };
                     })
                 });
             }
@@ -2055,6 +2093,7 @@ button{cursor:pointer}
         ]);
         function setAllOpen(open) {
             state.ordersOpen = {};
+            state.repsClosed = {};
             if (open && a.entries) { a.entries.forEach(function (o) { state.ordersOpen[o.ref] = true; }); }
             paintGroups();
         }
@@ -2072,21 +2111,35 @@ button{cursor:pointer}
             var q = state.ordersFilter.trim().toLowerCase();
             var groups = {}, order = [];
             a.entries.forEach(function (o) {
-                var hay = (o.ref + ' ' + o.customer + ' ' + o.itemName).toLowerCase();
+                var hay = (o.ref + ' ' + o.customer + ' ' + (o.rep || '') + ' ' + o.itemName).toLowerCase();
                 if (q && hay.indexOf(q) === -1) { return; }
-                if (!groups[o.ref]) { groups[o.ref] = { ref: o.ref, customer: o.customer, date: o.date, status: o.status, url: o.url, lines: [] }; order.push(o.ref); }
+                if (!groups[o.ref]) { groups[o.ref] = { ref: o.ref, customer: o.customer, rep: o.rep || NO_REP, date: o.date, status: o.status, url: o.url, lines: [] }; order.push(o.ref); }
                 groups[o.ref].lines.push(o);
+            });
+            // Sales rep first, their orders oldest first.
+            var reps = {}, repNames = [];
+            order.forEach(function (ref) {
+                var r = groups[ref].rep;
+                if (!reps[r]) { reps[r] = []; repNames.push(r); }
+                reps[r].push(ref);
+            });
+            repNames.sort(function (x, y) { return repRank(x) - repRank(y) || (x < y ? -1 : x > y ? 1 : 0); });
+            repNames.forEach(function (r) {
+                reps[r].sort(function (x, y) {
+                    return dateKey(groups[x].date) - dateKey(groups[y].date) || (x < y ? -1 : x > y ? 1 : 0);
+                });
             });
             var lineCount = 0, ticked = 0;
             order.forEach(function (ref) { groups[ref].lines.forEach(function (o) { lineCount++; if (isTicked(o.item, o.ref)) { ticked++; } }); });
             if (cnt) {
-                cnt.textContent = order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · list capped at 1000 lines' : '');
+                cnt.textContent = repNames.length + ' sales rep' + (repNames.length === 1 ? '' : 's') + ' · ' + order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · list capped' : '');
             }
             if (!order.length) {
                 box.appendChild(el('div', { class: 'ic-empty', text: q ? 'Nothing matches "' + state.ordersFilter.trim() + '".' : 'No received-but-unshipped sales order lines at this location.' }));
                 return;
             }
-            order.forEach(function (ref) {
+
+            function orderGroupEl(ref) {
                 var g = groups[ref];
                 var grp = el('div', { class: 'ic-ordgrp' });
                 // Collapsed unless the user opened it; a filter opens what it matched.
@@ -2105,7 +2158,7 @@ button{cursor:pointer}
                     el('span', { class: 'ic-ordsum' + (gTicked === g.lines.length ? ' is-ticked' : ''), text: g.lines.length + ' line' + (g.lines.length === 1 ? '' : 's') + ' · ' + fmt(gToCount) + ' to count · ' + gTicked + ' ticked' })
                 ]);
                 grp.appendChild(headEl);
-                if (!open) { box.appendChild(grp); return; }
+                if (!open) { return grp; }
                 // "Select all" first: large team orders have dozens of lines.
                 var tickable = g.lines.filter(function (o) { return o.committed > 0; });
                 if (tickable.length > 1) {
@@ -2135,8 +2188,7 @@ button{cursor:pointer}
                     cb.disabled = off;
                     cb.addEventListener('change', function () {
                         tickOrder(item, o, cb.checked);
-                        var c = document.getElementById('icOrdCount');
-                        if (c) { paintGroups(); }
+                        paintGroups();
                     });
                     var detail = orderDetail(o);
                     var line = state.sheet[o.item];
@@ -2148,7 +2200,34 @@ button{cursor:pointer}
                         ])
                     ]));
                 });
-                box.appendChild(grp);
+                return grp;
+            }
+
+            repNames.forEach(function (repName) {
+                var refs = reps[repName];
+                var repOpen = !state.repsClosed[repName];
+                var rTicked = 0, rLines = 0, rToCount = 0;
+                refs.forEach(function (ref) {
+                    groups[ref].lines.forEach(function (o) {
+                        rLines++; rToCount += Number(o.committed) || 0;
+                        if (isTicked(o.item, o.ref)) { rTicked++; }
+                    });
+                });
+                var sec = el('div', { class: 'ic-repgrp', 'data-rep': repName });
+                sec.appendChild(el('div', { class: 'ic-rephead', role: 'button', 'aria-expanded': repOpen ? 'true' : 'false', onclick: function () {
+                    if (state.repsClosed[repName]) { delete state.repsClosed[repName]; } else { state.repsClosed[repName] = true; }
+                    paintGroups();
+                } }, [
+                    el('span', { class: 'ic-caret', text: repOpen ? '▾' : '▸' }),
+                    el('span', { class: 'ic-repname', text: repName }),
+                    el('span', { class: 'ic-repsum' + (rLines && rTicked === rLines ? ' is-ticked' : ''), text: refs.length + ' order' + (refs.length === 1 ? '' : 's') + ' · ' + rLines + ' line' + (rLines === 1 ? '' : 's') + ' · ' + fmt(rToCount) + ' to count · ' + rTicked + ' ticked' })
+                ]));
+                if (repOpen) {
+                    var body = el('div', { class: 'ic-repbody' });
+                    refs.forEach(function (ref) { body.appendChild(orderGroupEl(ref)); });
+                    sec.appendChild(body);
+                }
+                box.appendChild(sec);
             });
         }
         paintGroups();

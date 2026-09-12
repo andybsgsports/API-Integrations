@@ -32,11 +32,13 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    that has not been marked shipped, sitting staged, at the decoration
    facility, or waiting for customer pickup. Instead of printing every open
    order, the **Open orders** tab lists every such line at the location,
-   grouped by order with customer, date and status, as `0 shipped of 5 · 5 to
-   count`. Orders start collapsed; the header shows how many lines, units to
-   count and ticks each has, and clicking it (or **Expand all**) opens it.
-   The filter box narrows by order number, customer or item and opens what it
-   matches. Tick a line once its units are found and those units are added to
+   grouped by **sales rep** and, inside each rep, by order (oldest first) with
+   customer, date and status, as `0 shipped of 5 · 5 to count`. Each rep
+   header totals its orders, lines, units to count and ticks, and collapses
+   the whole section; the orders themselves start collapsed and open on a
+   click (or **Expand all**), each with its own totals. The filter box
+   narrows by order number, customer, sales rep or item and opens what it
+   matches. Orders carrying no sales rep group under *No sales rep*, last. Tick a line once its units are found and those units are added to
    the item's count on the sheet (the line is created if needed); untick to
    take them back out, and a line that only existed because of a tick leaves
    the sheet again. An order with several lines has a **Select all** row
@@ -63,9 +65,11 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    case, which should be fixed by shipping the fulfillment, not by adjusting.
 4. **Export** — each tab has CSV, Excel and PDF buttons. The Count tab
    exports the whole list as filtered on screen (In stock / All items and any
-   search), with a blank Count column to fill in by hand; the Open orders tab
-   exports every line with a Ticked column; the Sheet tab exports the lines
-   you have keyed with their on-hand, count and adjust-by. CSV and Excel
+   search), with Pref. vendor and a blank Count column to fill in by hand;
+   the Open orders tab exports every line led by Sales rep (sorted rep, then
+   date, like the screen) with a Ticked column; the Sheet tab exports the
+   lines you have keyed with their Pref. vendor, on-hand, count and
+   adjust-by. CSV and Excel
    cover the whole list; the PDF stops at `PDF_MAX_ROWS` (2,000) and says so.
    Excel needs `N/compress`; if an account lacks it the page says to use CSV,
    which Excel opens.
