@@ -11,10 +11,11 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    Physical Inventory Worksheet and the *Custom Current Inventory Snapshot 2*
    report, sorted by item name, 100 per page with a **Load more** button. An
    **In stock / All items** toggle switches between items that have quantity
-   **on hand** (positive or negative), **available** to sell, or **on order**
-   and not yet received, and the whole catalog at that location (the default,
-   zeros included, matching the report's Show Zeros). Each row shows On hand,
-   Avail, Committed and On order. Only active inventory items (and
+   **on hand** (positive or negative) and the whole catalog at that location
+   (the default, zeros included, matching the report's Show Zeros). Stock that
+   is only **on order** has not been received, so it is not in stock and is
+   not listed under that filter. Each row shows On hand, Avail, Committed and
+   On order; the item name opens the item record in a new tab. Only active inventory items (and
    assemblies) show; matrix *parents* never do, because stock lives on the
    color/size children.
    **Search** narrows the list by style #, display name, sales description,
@@ -37,8 +38,12 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    and the total lands back on on-hand with a zero delta.
    Nothing is posted yet either way: every line lands on the **Sheet** tab
    with the current on-hand at the chosen location, an editable count with
-   `−`/`+` buttons and its delta. The sheet is saved in the browser, per
-   location, so a refresh or a dead battery does not lose the count.
+   `−`/`+` buttons and its delta. Each line also records **who** keyed or
+   ticked it and when — the NetSuite user signed in on that device — shown on
+   the row, carried on the sheet export, and written to the adjustment line
+   memo, so a doubtful count can be traced to a person. The sheet is saved in
+   the browser, per location, so a refresh or a dead battery does not lose the
+   count.
    A line whose count equals its on-hand is a *counted, no change* record: it
    proves the item was checked, and submit leaves it off the adjustment. When
    **every** line on the sheet matches, submit says "Nothing to adjust", the
@@ -86,7 +91,7 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    the Open orders tab exports every line led by Sales rep (sorted rep, then
    date, like the screen) with a Ticked column; the Sheet tab exports the
    lines you have keyed with their Pref. vendor, on-hand, count and
-   adjust-by. CSV and Excel
+   adjust-by, plus who counted each line and when. CSV and Excel
    cover the whole list; the PDF stops at `PDF_MAX_ROWS` (2,000) and says so.
    Excel needs `N/compress`; if an account lacks it the page says to use CSV,
    which Excel opens.
@@ -100,9 +105,10 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
 
 The adjustment is created **as the logged-in user** — that is the audit trail
 you want on a count — and the transaction memo records who counted and when
-(editable on the sheet). Each line's memo reads `Counted 20 (on hand 25)`, or
-with ticked orders `Counted 20 (incl. 5 on open orders: JH-SO625); on hand
-25`, so an auditor can see which orders the units belonged to.
+(editable on the sheet). Each line's memo reads `Counted 20; on hand 25;
+counted by Andrew Murray`, or with ticked orders `Counted 20 (incl. 5 on open
+orders: JH-SO625); on hand 25; counted by Andrew Murray`, so an auditor can
+see which orders the units belonged to and who took the count.
 
 **Serialized, lot-numbered and bin-tracked items** need Inventory Detail, which
 this tool does not collect. They are flagged in search results (no count box)
@@ -140,7 +146,7 @@ rest of the sheet still posts. Adjust those the normal way.
 | `SUBSIDIARY_ID` | `null` | OneWorld: force the subsidiary. `null` = the chosen location's subsidiary, else the logged-in user's. |
 | `ITEM_TYPES` | `['InvtPart', 'Assembly']` | Item types that can be counted. |
 | `SEARCH_PAGE_SIZE` | `100` | Rows per page of the list (a **Load more** button pages on). |
-| `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand, available, or on order. The toggle on the page overrides it and is remembered per browser. |
+| `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand (on-order-only items are not in stock). The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 | `SUBMIT_ROLE_IDS` | `[3]` | Internal ids of the roles allowed to post the adjustment. `3` is NetSuite's Administrator. Every other role counts, ticks open orders and exports, but sees no **Refresh on-hand** / **Clear sheet** / **Submit count** buttons, and the submit endpoint refuses them — a hidden button is not a permission. Find a role's id in the `id=` of its URL under Setup > Users/Roles > Manage Roles. `null` lets any role in the deployment's audience submit. |
@@ -217,7 +223,8 @@ should equal what was keyed. Then repeat the same count — it should report
 - **"You do not have permission…"** — the counter's role lacks Inventory
   Adjustment (Create) or view access on Items / Locations / Accounts.
 - **An item is missing from the list** — with **In stock** on, it has nothing
-  on hand, available, or on order at this location: switch to **All items**.
+  on hand at this location (on order does not count until it is received):
+  switch to **All items**.
   Otherwise it is inactive, a matrix parent (count its children), a
   non-inventory item, or not set up at the chosen location.
 - **"This account does not support the In stock filter"** — NetSuite rejected

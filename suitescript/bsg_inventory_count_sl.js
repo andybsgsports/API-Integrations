@@ -36,7 +36,7 @@
  *                           item or all
  *   POST ?action=onhand   { ids:[], loc }                -> fresh on-hand per item
  *   POST ?action=submit   { loc, account, memo,
- *                           lines:[{ item, count, orders:[{ ref, qty }] }] }
+ *                           lines:[{ item, count, by, orders:[{ ref, qty }] }] }
  *   POST ?action=export   form fields what=items|orders|sheet, format=csv|xlsx|pdf,
  *                         loc, instock, q, payload (JSON)  -> file download
  *                                                       -> creates the adjustment
@@ -316,16 +316,17 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         return (locId ? 'locationquantity' : 'quantity') + which;
     }
 
-    // "In stock" = anything a counter should see: on hand (positive or negative),
-    // available to sell, or on order and not yet received. Values are strings on
-    // purpose -- a bare numeric 0 is dropped as "no value" by the filter parser,
-    // which silently turns the condition into "any", zeros and all.
+    // "In stock" = quantity on hand, positive or negative: something is (or is
+    // supposed to be) on a shelf. On order is not in stock -- nothing has been
+    // received, so there is nothing to count. Available never exceeds on hand,
+    // so its clause only matters where the account rejects the on-hand field.
+    // Values are strings on purpose -- a bare numeric 0 is dropped as "no value"
+    // by the filter parser, which silently turns the condition into "any".
     function stockFilter(locId) {
-        var oh = qtyField(locId, 'onhand'), av = qtyField(locId, 'available'), oo = qtyField(locId, 'onorder');
+        var oh = qtyField(locId, 'onhand'), av = qtyField(locId, 'available');
         var parts = [];
         if (!isDead('item', 'filter', oh)) { parts.push([oh, 'greaterthan', '0']); parts.push([oh, 'lessthan', '0']); }
         if (!isDead('item', 'filter', av)) { parts.push([av, 'greaterthan', '0']); }
-        if (!isDead('item', 'filter', oo)) { parts.push([oo, 'greaterthan', '0']); }
         var expr = [];
         parts.forEach(function (p, i) { if (i) { expr.push('or'); } expr.push(p); });
         return expr.length ? expr : null;
@@ -444,7 +445,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     // One search serves both modes. With no words it is the full list of items at
     // the location (the current inventory snapshot, sorted like the Physical
     // Inventory Worksheet); with words it narrows that list. inStock keeps only
-    // rows with quantity on hand, available, or on order (see stockFilter).
+    // rows with quantity on hand (see stockFilter).
     function searchItems(q, locId, page, inStock) {
         var words = tokenize(q);
         if (!multiLocation()) { locId = null; }
@@ -699,10 +700,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     function cleanRef(v) {
         return String(v == null ? '' : v).replace(/[^A-Za-z0-9#_\-. ]/g, '').trim().slice(0, 30);
     }
+    // A person's name (or a display time) as the page reports it: control
+    // characters out, whitespace collapsed, capped so a memo cannot be flooded.
+    function cleanName(v) {
+        return String(v == null ? '' : v).replace(/[\x00-\x1f\x7f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    }
 
-    // A line is { item, count } plus, optionally, the open orders the counter
-    // ticked to account for units that are pulled, packed, at the decorator or
-    // waiting for pickup: orders:[{ ref, qty }]. They go on the line memo.
+    // A line is { item, count } plus, optionally, who keyed it (by) and the open
+    // orders the counter ticked to account for units that are pulled, packed, at
+    // the decorator or waiting for pickup: orders:[{ ref, qty }]. Both go on the
+    // line memo, so a doubtful count can be traced back to a person.
     function normalizeLines(raw) {
         var seen = {}, out = [];
         (Array.isArray(raw) ? raw : []).forEach(function (l) {
@@ -716,8 +723,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 var qty = parseFloat(o && o.qty);
                 if (ref && isFinite(qty) && qty > 0) { orders.push({ ref: ref, qty: round4(qty) }); }
             });
-            var line = { item: String(id), count: round4(count), orders: orders };
-            if (seen[id]) { seen[id].count = line.count; seen[id].orders = orders; return; } // same item twice: last wins
+            var line = { item: String(id), count: round4(count), orders: orders, by: cleanName(l.by) };
+            if (seen[id]) { seen[id].count = line.count; seen[id].orders = orders; seen[id].by = line.by; return; } // same item twice: last wins
             seen[id] = line;
             out.push(line);
         });
@@ -731,7 +738,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             l.orders.forEach(function (o) { total += o.qty; });
             memo += ' (incl. ' + round4(total) + ' on open orders: ' + l.orders.map(function (o) { return o.ref; }).join(', ') + ')';
         }
-        return memo + '; on hand ' + l.onhand;
+        return memo + '; on hand ' + l.onhand + (l.by ? '; counted by ' + l.by : '');
     }
 
     function defaultMemo() {
@@ -785,7 +792,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 blocked.push({ item: l.item, name: it.name, count: l.count, reason: 'Needs inventory detail (' + it.blocked + ') -- adjust this one manually.' });
                 return;
             }
-            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand, orders: l.orders });
+            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand, orders: l.orders, by: l.by });
         });
         if (!candidates.length) {
             return { ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Nothing on this sheet could be adjusted.' };
@@ -921,7 +928,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         });
         return {
             title: 'Inventory count list' + (where ? ' - ' + where : ''),
-            subtitle: (inStock && stockApplied ? 'Items in stock (on hand, available or on order)' : 'All items') + (words.length ? ' matching "' + words.join(' ') + '"' : '') + ' · ' + rows.length + ' items · blank Count column to fill in',
+            subtitle: (inStock && stockApplied ? 'Items in stock (quantity on hand)' : 'All items') + (words.length ? ' matching "' + words.join(' ') + '"' : '') + ' · ' + rows.length + ' items · blank Count column to fill in',
             columns: ITEM_COLS, rows: rows
         };
     }
@@ -957,7 +964,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     var SHEET_COLS = [
         { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'vendor', label: 'Pref. vendor' }, { key: 'onhand', label: 'On hand', num: true },
-        { key: 'count', label: 'Count', num: true }, { key: 'delta', label: 'Adjust by', num: true }, { key: 'orders', label: 'On open orders' }
+        { key: 'count', label: 'Count', num: true }, { key: 'delta', label: 'Adjust by', num: true }, { key: 'orders', label: 'On open orders' },
+        { key: 'by', label: 'Counted by' }, { key: 'when', label: 'When' }
     ];
 
     function exportSheet(where, payload) {
@@ -966,7 +974,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             return {
                 name: String(l.name || ''), display: String(l.display || l.desc || ''), vendor: String(l.vendor || ''), onhand: onhand, count: count,
                 delta: round4(count - onhand),
-                orders: (Array.isArray(l.orders) ? l.orders : []).map(function (o) { return cleanRef(o && o.ref) + (o && o.qty ? ' (' + o.qty + ')' : ''); }).filter(Boolean).join(', ')
+                orders: (Array.isArray(l.orders) ? l.orders : []).map(function (o) { return cleanRef(o && o.ref) + (o && o.qty ? ' (' + o.qty + ')' : ''); }).filter(Boolean).join(', '),
+                by: cleanName(l.by), when: cleanName(l.when)
             };
         });
         return {
@@ -1261,6 +1270,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 
 .ic-info{min-width:0}
 .ic-name{font-weight:600;font-size:14px;letter-spacing:-.005em;word-break:break-word}
+.ic-name a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
+.ic-name a:hover{color:var(--red);border-bottom-color:currentColor}
 .ic-desc{font-size:13px;color:var(--muted);word-break:break-word;margin-top:2px}
 .ic-meta{font-size:12.5px;color:var(--muted);margin-top:4px;word-break:break-word;font-variant-numeric:tabular-nums}
 .ic-meta b{color:var(--ink);font-weight:600}
@@ -1437,7 +1448,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         repsClosed: {},            // Open orders tab: sales reps collapsed by the user
         loc: '', account: '',
         q: '', results: [], more: false, page: 0, total: 0, loaded: false, searching: false, searchError: '', stockApplied: true,
-        instock: true,             // list only items with qty on hand, available or on order
+        instock: true,             // list only items with quantity on hand
         sheet: {}, order: [],      // itemId -> line; ids in the order added
         memo: '',
         submitting: false, progress: '', submitError: '',
@@ -1527,6 +1538,21 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // -------------------------------------------------------------- sheet --
 
     function round4(n) { return Math.round((Number(n) || 0) * 10000) / 10000; }
+    // Who keyed this line, and when: the NetSuite user signed in on this device.
+    // It rides on the sheet, the exports and the adjustment line memo, so a
+    // doubtful count can be traced back to the person who took it.
+    function stamp(line) { line.by = BOOT.user || ''; line.at = Date.now(); return line; }
+    function fmtWhen(ms) {
+        if (!ms) { return ''; }
+        try { return new Date(ms).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+        catch (e) { return new Date(ms).toLocaleString(); }
+    }
+    // The item name opens its record in a new tab. The generic item page takes
+    // any item type, so no record-type lookup is needed.
+    function itemLink(id, name) {
+        if (!id) { return el('span', { text: name }); }
+        return el('a', { href: '/app/common/item/item.nl?id=' + encodeURIComponent(id), target: '_blank', rel: 'noopener', title: 'Open the item record in a new tab', text: name });
+    }
     function ordersTotal(line) {
         var t = 0;
         (line.orders || []).forEach(function (o) { t += Number(o.qty) || 0; });
@@ -1602,6 +1628,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         line.viaTick = false;
         line.error = '';
         line.addedAt = Date.now();
+        stamp(line);
         saveSheet();
         updateBadge();
         return line;
@@ -1624,6 +1651,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 return null;
             }
         }
+        stamp(line);
         line.error = '';
         saveSheet();
         updateBadge();
@@ -1830,7 +1858,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var panel = ordersPanel(item, function () { refreshResultRow(item.id); });
         var row = el('div', { class: 'ic-row' + (line ? ' is-onsheet' : '') + (item.blocked ? ' is-blocked' : ''), 'data-row-for': item.id });
         var info = el('div', { class: 'ic-info' }, [
-            el('div', { class: 'ic-name', text: item.name }),
+            el('div', { class: 'ic-name' }, [itemLink(item.id, item.name)]),
             (item.display || item.desc) ? el('div', { class: 'ic-desc', text: item.display && item.desc && item.display !== item.desc ? item.display + ' - ' + item.desc : (item.display || item.desc) }) : null,
             item.upc ? el('div', { class: 'ic-meta', text: 'UPC ' + item.upc }) : null,
             item.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + item.blocked + ') - adjust manually' }) : null,
@@ -1983,7 +2011,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             } })
         ]);
         main.appendChild(wrap);
-        main.appendChild(el('p', { class: 'ic-hint', text: 'Every item at this location is listed below; In stock keeps those with quantity on hand, available, or on order. Search to jump to one, key what is on the shelf and press Add (Enter jumps to the next item), or tick Correct when the shelf holds the expected quantity. Units pulled for open orders are added on the Open orders tab. Counts wait on the Sheet tab until you submit.' }));
+        main.appendChild(el('p', { class: 'ic-hint', text: 'Every item at this location is listed below; In stock keeps those with quantity on hand; what is only on order has not been received and is not listed. Search to jump to one, key what is on the shelf and press Add (Enter jumps to the next item), or tick Correct when the shelf holds the expected quantity. Units pulled for open orders are added on the Open orders tab. Counts wait on the Sheet tab until you submit.' }));
         main.appendChild(el('div', { id: 'icResults' }));
         renderResults();
         if (!(BOOT.multiLoc && !state.loc)) { main.appendChild(exportBar('items')); }
@@ -1997,6 +2025,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var delta = el('div', { class: 'ic-delta' });
         var warn = el('div', { class: 'ic-commit-warn' });
         var incl = el('div', { class: 'ic-incl' });
+        var who = el('div', { class: 'ic-meta ic-who' });
         var input = el('input', { class: 'ic-qty', type: 'text', inputmode: 'decimal', autocomplete: 'off', value: fmt(line.count), 'aria-label': 'Counted quantity for ' + line.name });
         function paintDelta() {
             if (line.blocked) { delta.className = 'ic-delta is-zero'; delta.textContent = 'n/a'; return; }
@@ -2015,18 +2044,20 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             paintDelta();
             var t = inclText(line);
             incl.textContent = t; incl.hidden = !t;
+            who.textContent = line.by ? 'Counted by ' + line.by + (line.at ? ' · ' + fmtWhen(line.at) : '') : '';
+            who.hidden = !line.by;
             paintWarn();
             saveSheet(); paintTotals();
         }
         function apply(v) {
             var c = parseCount(v);
             if (c === null) { return; }
-            line.count = c; line.error = ''; row.classList.remove('has-error'); paint();
+            line.count = c; line.error = ''; row.classList.remove('has-error'); stamp(line); paint();
         }
         input.addEventListener('input', function () {
             var c = parseCount(input.value);
             if (c === null) { return; }
-            line.count = c; line.error = ''; row.classList.remove('has-error');
+            line.count = c; line.error = ''; row.classList.remove('has-error'); stamp(line);
             // no input.value rewrite while typing (keeps the caret); update the rest
             paintDelta(); paintWarn();
             saveSheet(); paintTotals();
@@ -2042,9 +2073,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var ordersBtn = el('button', { class: 'ic-link', type: 'button', text: 'Open orders' + (Number(line.committed) > 0 ? ' (' + fmt(line.committed) + ' committed)' : ''), onclick: function () { panel.toggle(); } });
 
         row.appendChild(el('div', { class: 'ic-info' }, [
-            el('div', { class: 'ic-name', text: line.name }),
+            el('div', { class: 'ic-name' }, [itemLink(line.id, line.name)]),
             (line.display || line.desc) ? el('div', { class: 'ic-desc', text: line.display || line.desc }) : null,
             line.vendor ? el('div', { class: 'ic-meta', text: line.vendor }) : null,
+            who,
             line.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + line.blocked + ') - will be skipped' }) : null,
             line.blocked ? null : ordersBtn
         ]));
@@ -2212,7 +2244,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 loc: state.loc || '', account: state.account || '', memo: state.memo || '',
                 lines: batch.map(function (id) {
                     var l = state.sheet[id];
-                    return { item: id, count: l.count, orders: l.orders || [] };
+                    return { item: id, count: l.count, orders: l.orders || [], by: l.by || '' };
                 })
             }).then(function (res) {
                 if (!res || !res.ok) {
@@ -2264,7 +2296,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 fields.payload = JSON.stringify({
                     memo: state.memo || '',
                     lines: state.order.map(function (id) { return state.sheet[id]; }).filter(Boolean).map(function (l) {
-                        return { name: l.name, display: l.display || l.desc || '', vendor: l.vendor || '', onhand: l.onhand, count: l.count, orders: l.orders || [] };
+                        return { name: l.name, display: l.display || l.desc || '', vendor: l.vendor || '', onhand: l.onhand, count: l.count, orders: l.orders || [], by: l.by || '', when: fmtWhen(l.at) };
                     })
                 });
             }
