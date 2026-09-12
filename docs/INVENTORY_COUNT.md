@@ -23,10 +23,16 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    children). Clearing the search box brings the full list back.
 2. **Count** — key the quantity found on the shelf next to a hit and press
    **Add** (Enter jumps to the next hit, so a keyboard or barcode scanner flows
-   down a shelf). Nothing is posted yet: every line lands on the **Sheet** tab
-   with the current on-hand at the chosen location, an editable count with
+   down a shelf). When the shelf matches what NetSuite already says, tick
+   **Correct** to the right of Add instead of retyping the number: the item
+   joins the sheet at its current on-hand, the row turns green like any other
+   count, and its tag reads `On sheet: 3 · no change`. Untick to take it back
+   off. Either way nothing is posted yet: every line lands on the **Sheet**
+   tab with the current on-hand at the chosen location, an editable count with
    `−`/`+` buttons and its delta. The sheet is saved in the browser, per
    location, so a refresh or a dead battery does not lose the count.
+   A line whose count equals its on-hand is a *counted, no change* record: it
+   proves the item was checked, and submit leaves it off the adjustment.
 3. **Open orders** — the units that are yours and still on hand in NetSuite
    but not on the shelf: received (or pulled and packed) for a sales order
    that has not been marked shipped, sitting staged, at the decoration

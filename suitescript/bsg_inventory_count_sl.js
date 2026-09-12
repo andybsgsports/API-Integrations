@@ -1248,6 +1248,11 @@ b,strong{font-weight:600}
 
 /* --------------------------------------------------------------- controls -- */
 .ic-ctl{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.ic-ok{display:inline-flex;align-items:center;gap:6px;padding:0 10px 0 8px;min-height:44px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
+.ic-ok:hover{background:var(--line-2);color:var(--ink-2)}
+.ic-ok input{width:17px;height:17px;margin:0;accent-color:var(--ok);cursor:pointer}
+.ic-ok.is-on,.ic-ok:has(input:checked){border-color:#a8d7bf;background:var(--ok-bg);color:var(--ok)}
+.ic-ok.is-on:hover,.ic-ok:has(input:checked):hover{background:#dcefe4}
 .ic-qty{width:80px;min-height:44px;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:18px;font-weight:600;text-align:center;background:var(--card);font-variant-numeric:tabular-nums}
 .ic-qty::placeholder{font-weight:400;font-size:15px;color:var(--faint)}
 .ic-qty:focus{outline:none;border-color:var(--focus);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
@@ -1513,6 +1518,25 @@ b,strong{font-weight:600}
             if (state.view === 'sheet') { render(); }
         });
     }
+    // "Correct" on a result row: the counter looked, and what NetSuite already
+    // says is right. The item joins the sheet at its current on-hand so the
+    // count is on the record, with a zero delta -- submit leaves it off the
+    // adjustment as "already matched" rather than adjusting it to anything.
+    function confirmOnHand(item) {
+        var line = ensureLine(item);
+        line.count = round4(Number(item.onhand) || 0);
+        line.viaTick = false;
+        line.error = '';
+        line.addedAt = Date.now();
+        saveSheet();
+        updateBadge();
+        return line;
+    }
+    // A line whose count already equals its on-hand: nothing to adjust.
+    function matchesOnHand(line) {
+        return !!line && !line.blocked && round4(Number(line.count) || 0) === round4(Number(line.onhand) || 0);
+    }
+
     // The Qty box on a result row is what was found on the shelf; units ticked
     // on open orders sit on top of it.
     function setCount(item, count) {
@@ -1738,7 +1762,9 @@ b,strong{font-weight:600}
 
     function onSheetText(line) {
         var t = ordersTotal(line);
-        return 'On sheet: ' + fmt(line.count) + (t ? ' (incl. ' + fmt(t) + ' on open orders)' : '');
+        return 'On sheet: ' + fmt(line.count)
+            + (t ? ' (incl. ' + fmt(t) + ' on open orders)' : '')
+            + (matchesOnHand(line) ? ' · no change' : '');
     }
 
     function resultRow(item) {
@@ -1763,6 +1789,25 @@ b,strong{font-weight:600}
                 'data-qty-for': item.id, value: line ? fmt(line.count) : '', 'aria-label': 'Counted quantity for ' + item.name
             });
             var btn = el('button', { class: 'ic-btn', type: 'button', text: line ? 'Update' : 'Add' });
+            // Right of Add: "counted it, the book is right". Ticking it puts the
+            // item on the sheet at its current on-hand (zero delta); unticking
+            // takes it back off.
+            var ok = el('input', { type: 'checkbox', 'data-ok-for': item.id,
+                'aria-label': 'Counted ' + (item.name || 'this item') + ' and the on-hand of ' + fmt(item.onhand) + ' is correct' });
+            ok.checked = matchesOnHand(line);
+            ok.addEventListener('change', function () {
+                if (ok.checked) {
+                    confirmOnHand(item);
+                    input.value = fmt(item.onhand);
+                } else {
+                    removeLine(item.id);
+                    input.value = '';
+                }
+                refreshResultRow(item.id);
+            });
+            var okWrap = el('label', { class: 'ic-ok' + (ok.checked ? ' is-on' : ''), title: 'Counted, and the on-hand shown is correct' }, [
+                ok, el('span', { text: 'Correct' })
+            ]);
             function commit(advance) {
                 var c = parseCount(input.value);
                 if (c === null) { input.focus(); input.classList.add('is-bad'); return; }
@@ -1780,7 +1825,7 @@ b,strong{font-weight:600}
                 if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
             });
             btn.addEventListener('click', function () { commit(false); });
-            row.appendChild(el('div', { class: 'ic-ctl' }, [input, btn]));
+            row.appendChild(el('div', { class: 'ic-ctl' }, [input, btn, okWrap]));
         }
         return row;
     }
@@ -1793,6 +1838,12 @@ b,strong{font-weight:600}
         var info = row.querySelector('.ic-info');
         var tag = info && info.querySelector('[data-onsheet-for]');
         var btn = row.querySelector('.ic-ctl .ic-btn');
+        var ok = row.querySelector('[data-ok-for]');
+        if (ok) {
+            ok.checked = matchesOnHand(line);
+            // :has() is not everywhere yet, so the green state is a class too.
+            if (ok.parentNode) { ok.parentNode.className = 'ic-ok' + (ok.checked ? ' is-on' : ''); }
+        }
         if (line) {
             row.classList.add('is-onsheet');
             if (btn) { btn.textContent = 'Update'; }
