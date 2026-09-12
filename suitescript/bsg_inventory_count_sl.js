@@ -1518,22 +1518,29 @@ b,strong{font-weight:600}
             if (state.view === 'sheet') { render(); }
         });
     }
-    // "Correct" on a result row: the counter looked, and what NetSuite already
-    // says is right. The item joins the sheet at its current on-hand so the
-    // count is on the record, with a zero delta -- submit leaves it off the
-    // adjustment as "already matched" rather than adjusting it to anything.
-    function confirmOnHand(item) {
-        var line = ensureLine(item);
-        line.count = round4(Number(item.onhand) || 0);
-        line.viaTick = false;
-        line.error = '';
-        line.addedAt = Date.now();
-        saveSheet();
-        updateBadge();
-        return line;
+    // The Qty box holds what is ON THE SHELF. Units committed to open orders
+    // that have been pulled are not on the shelf; they come back in by ticking
+    // those orders, which add on top. So the shelf NetSuite expects is
+    // Available (on hand - committed), and the total it expects is on hand.
+    function shelfOf(line) {
+        return round4((Number(line.count) || 0) - ordersTotal(line));
     }
-    // A line whose count already equals its on-hand: nothing to adjust.
-    function matchesOnHand(line) {
+    // "Correct" on a result row: the counter looked, and the shelf holds what
+    // NetSuite expects -- Available. Committed units are accounted for on the
+    // Open orders tab, not here, so ticking this alone leaves the line short by
+    // the committed quantity until those orders are ticked too (the sheet says
+    // so). With nothing committed, Available is on hand and the delta is zero.
+    function confirmExpected(item) {
+        return setCount(item, Number(item.available) || 0);
+    }
+    // Drives the Correct box: the shelf matches Available.
+    function matchesExpected(line) {
+        if (!line || line.blocked || line.available == null) { return false; }
+        return shelfOf(line) === round4(Number(line.available) || 0);
+    }
+    // Drives "· no change" and the confirm panel: the total matches on hand, so
+    // this line produces no adjustment at all.
+    function noChange(line) {
         return !!line && !line.blocked && round4(Number(line.count) || 0) === round4(Number(line.onhand) || 0);
     }
 
@@ -1595,17 +1602,18 @@ b,strong{font-weight:600}
         return Math.round(n * 10000) / 10000;
     }
     function totals() {
-        var lines = 0, pos = 0, neg = 0, blocked = 0, below = 0;
+        var lines = 0, pos = 0, neg = 0, blocked = 0, below = 0, changed = 0;
         state.order.forEach(function (id) {
             var l = state.sheet[id];
             if (!l) { return; }
             lines++;
             if (l.blocked) { blocked++; return; }
             if (belowCommitted(l)) { below++; }
+            if (!noChange(l)) { changed++; }
             var d = (Number(l.count) || 0) - (Number(l.onhand) || 0);
             if (d > 0) { pos += d; } else { neg += -d; }
         });
-        return { lines: lines, pos: pos, neg: neg, blocked: blocked, below: below };
+        return { lines: lines, pos: pos, neg: neg, blocked: blocked, below: below, changed: changed };
     }
     function updateBadge() {
         var b = document.getElementById('icSheetBadge');
@@ -1764,7 +1772,7 @@ b,strong{font-weight:600}
         var t = ordersTotal(line);
         return 'On sheet: ' + fmt(line.count)
             + (t ? ' (incl. ' + fmt(t) + ' on open orders)' : '')
-            + (matchesOnHand(line) ? ' · no change' : '');
+            + (noChange(line) ? ' · no change' : '');
     }
 
     function resultRow(item) {
@@ -1793,19 +1801,19 @@ b,strong{font-weight:600}
             // item on the sheet at its current on-hand (zero delta); unticking
             // takes it back off.
             var ok = el('input', { type: 'checkbox', 'data-ok-for': item.id,
-                'aria-label': 'Counted ' + (item.name || 'this item') + ' and the on-hand of ' + fmt(item.onhand) + ' is correct' });
-            ok.checked = matchesOnHand(line);
+                'aria-label': 'Counted ' + (item.name || 'this item') + ' and the shelf holds the expected ' + fmt(item.available) });
+            ok.checked = matchesExpected(line);
             ok.addEventListener('change', function () {
                 if (ok.checked) {
-                    confirmOnHand(item);
-                    input.value = fmt(item.onhand);
+                    confirmExpected(item);
+                    input.value = fmt(item.available);
                 } else {
                     removeLine(item.id);
                     input.value = '';
                 }
                 refreshResultRow(item.id);
             });
-            var okWrap = el('label', { class: 'ic-ok' + (ok.checked ? ' is-on' : ''), title: 'Counted, and the on-hand shown is correct' }, [
+            var okWrap = el('label', { class: 'ic-ok' + (ok.checked ? ' is-on' : ''), title: 'Counted, and the shelf holds the expected ' + fmt(item.available) + (Number(item.committed) > 0 ? ' (the ' + fmt(item.committed) + ' committed are accounted for on Open orders)' : '') }, [
                 ok, el('span', { text: 'Correct' })
             ]);
             function commit(advance) {
@@ -1840,7 +1848,7 @@ b,strong{font-weight:600}
         var btn = row.querySelector('.ic-ctl .ic-btn');
         var ok = row.querySelector('[data-ok-for]');
         if (ok) {
-            ok.checked = matchesOnHand(line);
+            ok.checked = matchesExpected(line);
             // :has() is not everywhere yet, so the green state is a class too.
             if (ok.parentNode) { ok.parentNode.className = 'ic-ok' + (ok.checked ? ' is-on' : ''); }
         }
@@ -1908,7 +1916,7 @@ b,strong{font-weight:600}
             } })
         ]);
         main.appendChild(wrap);
-        main.appendChild(el('p', { class: 'ic-hint', text: 'Every item at this location is listed below; In stock keeps those with quantity on hand, available, or on order. Search to jump to one, key the counted quantity and press Add (Enter jumps to the next item). Counts wait on the Sheet tab until you submit.' }));
+        main.appendChild(el('p', { class: 'ic-hint', text: 'Every item at this location is listed below; In stock keeps those with quantity on hand, available, or on order. Search to jump to one, key what is on the shelf and press Add (Enter jumps to the next item), or tick Correct when the shelf holds the expected quantity. Units pulled for open orders are added on the Open orders tab. Counts wait on the Sheet tab until you submit.' }));
         main.appendChild(el('div', { id: 'icResults' }));
         renderResults();
         if (!(BOOT.multiLoc && !state.loc)) { main.appendChild(exportBar('items')); }
@@ -1931,7 +1939,7 @@ b,strong{font-weight:600}
         }
         function paintWarn() {
             if (belowCommitted(line)) {
-                warn.textContent = fmt(line.committed) + ' committed to open sales orders but only ' + fmt(line.count) + ' counted. Open the orders below and tick the ones whose units you found, or ship what has left.';
+                warn.textContent = fmt(line.committed) + ' units are committed to open sales orders and are not counted here yet. Tick those orders (below, or on the Open orders tab) to bring them in, or ship what has already left. Otherwise this line adjusts down by ' + fmt(round4((Number(line.onhand) || 0) - (Number(line.count) || 0))) + '.';
                 warn.hidden = false;
             } else { warn.hidden = true; }
         }
@@ -2037,12 +2045,22 @@ b,strong{font-weight:600}
             form.appendChild(el('div', { class: 'ic-progress', text: state.progress || 'Submitting…' }));
         } else if (state.confirm) {
             var live = t.lines - t.blocked;
+            // Every line matching on-hand is the good case, not a no-op to
+            // apologise for: say so plainly instead of asking them to confirm
+            // an adjustment that will not exist.
+            var nothingToAdjust = t.changed === 0;
             form.appendChild(el('div', { class: 'ic-confirm' }, [
-                el('p', {}, [el('b', { text: 'Create an Inventory Adjustment for ' + live + ' line' + (live === 1 ? '' : 's') + (state.loc ? ' at ' + locName(state.loc) : '') + '?' })]),
-                el('p', { text: 'Each item’s on-hand becomes the count you entered (' + '+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). Items whose count already matches are left out.' + (t.blocked ? ' ' + t.blocked + ' flagged line' + (t.blocked === 1 ? ' is' : 's are') + ' skipped.' : '') + (t.below ? ' ' + t.below + ' line' + (t.below === 1 ? ' is' : 's are') + ' below the quantity committed to open sales orders.' : '') }),
+                el('p', {}, [el('b', { text: nothingToAdjust
+                    ? 'Nothing to adjust — every counted line already matches.'
+                    : 'Create an Inventory Adjustment for ' + t.changed + ' line' + (t.changed === 1 ? '' : 's') + (state.loc ? ' at ' + locName(state.loc) : '') + '?' })]),
+                el('p', { text: nothingToAdjust
+                    ? 'All ' + live + ' line' + (live === 1 ? '' : 's') + ' on this sheet equal the on-hand NetSuite already holds, so submitting records the count and creates no Inventory Adjustment. Nothing about your inventory changes.'
+                    : 'Those ' + t.changed + ' item' + (t.changed === 1 ? '' : 's') + ' move to the count you entered (' + '+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). The other ' + (live - t.changed) + ' already match and are left off the adjustment entirely.' }
+                    ),
+                (t.blocked || t.below) ? el('p', { text: (t.blocked ? t.blocked + ' flagged line' + (t.blocked === 1 ? ' is' : 's are') + ' skipped. ' : '') + (t.below ? t.below + ' line' + (t.below === 1 ? ' is' : 's are') + ' below the quantity committed to open sales orders — check the Open orders tab before posting.' : '') }) : null,
                 el('div', { class: 'ic-actions' }, [
                     el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Cancel', onclick: function () { state.confirm = false; render(); } }),
-                    el('button', { class: 'ic-btn is-ok', type: 'button', text: 'Yes, submit count', onclick: submitSheet })
+                    el('button', { class: 'ic-btn is-ok', type: 'button', text: nothingToAdjust ? 'Yes, record the count' : 'Yes, submit count', onclick: submitSheet })
                 ])
             ]));
         } else if (!BOOT.canSubmit) {

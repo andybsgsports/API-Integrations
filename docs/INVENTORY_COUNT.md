@@ -21,18 +21,29 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    UPC or vendor code — any words, in any order (`royale 5` finds "Royale NFHS
    V25 Soccer Ball - Size 5"; `0125666912 white` narrows a style to its white
    children). Clearing the search box brings the full list back.
-2. **Count** — key the quantity found on the shelf next to a hit and press
+2. **Count** — the Qty box holds **what is on the shelf**. Key it and press
    **Add** (Enter jumps to the next hit, so a keyboard or barcode scanner flows
-   down a shelf). When the shelf matches what NetSuite already says, tick
-   **Correct** to the right of Add instead of retyping the number: the item
-   joins the sheet at its current on-hand, the row turns green like any other
-   count, and its tag reads `On sheet: 3 · no change`. Untick to take it back
-   off. Either way nothing is posted yet: every line lands on the **Sheet**
-   tab with the current on-hand at the chosen location, an editable count with
+   down a shelf). Units pulled for open orders are not on the shelf; they come
+   back in by ticking those orders, which add on top of the Qty (see step 3).
+   So the shelf NetSuite expects is **Available** (on hand − committed), and
+   the total it expects is on hand.
+   Tick **Correct** to the right of Add when the shelf holds exactly the
+   Available quantity: the item joins the sheet at that number, the row turns
+   green like any other count, and untick takes it back off. For an item with
+   nothing committed, Available *is* on hand, so Correct is a straight
+   zero-delta count and the tag reads `On sheet: 3 · no change`. For an item
+   with committed units, ticking Correct alone leaves the line short by that
+   quantity and the sheet says so — tick those orders to bring the units in,
+   and the total lands back on on-hand with a zero delta.
+   Nothing is posted yet either way: every line lands on the **Sheet** tab
+   with the current on-hand at the chosen location, an editable count with
    `−`/`+` buttons and its delta. The sheet is saved in the browser, per
    location, so a refresh or a dead battery does not lose the count.
    A line whose count equals its on-hand is a *counted, no change* record: it
-   proves the item was checked, and submit leaves it off the adjustment.
+   proves the item was checked, and submit leaves it off the adjustment. When
+   **every** line on the sheet matches, submit says "Nothing to adjust", the
+   button reads *Yes, record the count*, and no Inventory Adjustment record is
+   created at all.
 3. **Open orders** — the units that are yours and still on hand in NetSuite
    but not on the shelf: received (or pulled and packed) for a sales order
    that has not been marked shipped, sitting staged, at the decoration
