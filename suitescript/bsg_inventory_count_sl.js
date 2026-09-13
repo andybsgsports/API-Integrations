@@ -80,6 +80,29 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // Lines per Inventory Adjustment. Bigger sheets are submitted by the page
         // as several adjustments, one after another.
         MAX_LINES_PER_ADJUSTMENT: 200,
+        // Shared count. Every device's lines are kept in this custom record so
+        // one administrator can review and post everyone's count at once
+        // (docs/INVENTORY_COUNT.md, "Shared count" -- a one-time record type to
+        // create). Set SHARED_RECORD to null for device-only sheets.
+        SHARED_RECORD: 'customrecord_bsg_count_line',
+        SHARED_FIELDS: {
+            item: 'custrecord_bcl_item',            // List/Record: Item
+            location: 'custrecord_bcl_location',    // List/Record: Location
+            shelf: 'custrecord_bcl_shelf',          // Decimal: units physically counted
+            orders: 'custrecord_bcl_orders',        // Long Text: ticked open orders, JSON
+            onhand: 'custrecord_bcl_onhand',        // Decimal: on hand shown when counted
+            counter: 'custrecord_bcl_counter',      // List/Record: Employee
+            device: 'custrecord_bcl_device',        // Free-Form Text: the browser's id
+            label: 'custrecord_bcl_device_label',   // Free-Form Text: "Warehouse tablet 1"
+            posted: 'custrecord_bcl_posted',        // Check Box
+            adjustment: 'custrecord_bcl_adjustment' // List/Record: Transaction
+        },
+        // Lines per Inventory Adjustment when posting the shared count: each line
+        // is also marked posted in the same request, so this stays well inside
+        // the request's governance.
+        SHARED_BATCH: 100,
+        // Lines a device may push in one sync request.
+        SYNC_MAX_LINES: 50,
         MEMO_PREFIX: 'Physical count',
         // Export caps. CSV / Excel page through the whole list; the PDF renderer
         // is slow on big tables, so it stops at PDF_MAX_ROWS and says so.
@@ -174,6 +197,18 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 out = openOrders(posInt(request.parameters.item) || null, posInt(request.parameters.loc));
             } else if (action === 'submit') {
                 out = isPost ? submitCount(body) : { ok: false, error: 'POST required.' };
+            } else if (action === 'sync') {
+                out = isPost ? syncLines(body) : { ok: false, error: 'POST required.' };
+            } else if (action === 'mine') {
+                out = mineLines(request.parameters);
+            } else if (action === 'session') {
+                out = sessionLines(request.parameters);
+            } else if (action === 'mark') {
+                out = isPost ? markPosted(body) : { ok: false, error: 'POST required.' };
+            } else if (action === 'discard') {
+                out = isPost ? discardShared(body) : { ok: false, error: 'POST required.' };
+            } else if (action === 'precheck') {
+                out = isPost ? precheckAdjusted(body) : { ok: false, error: 'POST required.' };
             } else {
                 out = { ok: false, error: 'Unknown action.' };
             }
@@ -702,8 +737,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     }
     // A person's name (or a display time) as the page reports it: control
     // characters out, whitespace collapsed, capped so a memo cannot be flooded.
-    function cleanName(v) {
-        return String(v == null ? '' : v).replace(/[\x00-\x1f\x7f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    function cleanName(v, max) {
+        return String(v == null ? '' : v).replace(/[\x00-\x1f\x7f]/g, '').replace(/\s+/g, ' ').trim().slice(0, max || 60);
     }
 
     // A line is { item, count } plus, optionally, who keyed it (by) and the open
@@ -717,14 +752,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             var id = posInt(l.item);
             var count = parseFloat(l.count);
             if (!id || !isFinite(count) || count < 0) { return; }
-            var orders = [];
-            (Array.isArray(l.orders) ? l.orders : []).slice(0, 30).forEach(function (o) {
-                var ref = cleanRef(o && o.ref);
-                var qty = parseFloat(o && o.qty);
-                if (ref && isFinite(qty) && qty > 0) { orders.push({ ref: ref, qty: round4(qty) }); }
-            });
-            var line = { item: String(id), count: round4(count), orders: orders, by: cleanName(l.by) };
-            if (seen[id]) { seen[id].count = line.count; seen[id].orders = orders; seen[id].by = line.by; return; } // same item twice: last wins
+            var orders = cleanOrders(l.orders);
+            // seen: the shared count lines behind this total as the administrator
+            // saw them (id, shelf, ticked orders); they are marked posted afterwards,
+            // and a line that has changed since makes the submit stale.
+            var seenLines = (Array.isArray(l.seen) ? l.seen : []).slice(0, 50).map(function (x) {
+                return { id: posInt(x && x.id), shelf: round4(parseFloat(x && x.shelf) || 0), orders: cleanOrders(x && x.orders) };
+            }).filter(function (x) { return !!x.id; });
+            var ids = seenLines.length ? seenLines.map(function (x) { return String(x.id); }) : idList(l.ids, 50);
+            var line = { item: String(id), count: round4(count), orders: orders, by: cleanName(l.by, 160), ids: ids, seen: seenLines };
+            if (seen[id]) { seen[id].count = line.count; seen[id].orders = orders; seen[id].by = line.by; seen[id].ids = ids; seen[id].seen = seenLines; return; } // same item twice: last wins
             seen[id] = line;
             out.push(line);
         });
@@ -779,6 +816,33 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         if (!accountId) { return { ok: false, error: 'Pick an adjustment account first.' }; }
         var memo = String(body.memo || '').trim().slice(0, 999) || defaultMemo();
 
+        // Shared count: every open line for these items must be in this submit,
+        // holding the value the administrator saw. A line that is missing, or
+        // has changed since (a counter re-keyed it), makes the total stale --
+        // reload rather than post it.
+        var shared = lines.some(function (l) { return l.ids.length > 0; });
+        if (shared) {
+            requireShared();
+            var carried = {};
+            lines.forEach(function (l) {
+                l.ids.forEach(function (id) { carried[id] = true; });
+                l.seen.forEach(function (x) { carried[String(x.id)] = x; });
+            });
+            var SF = CONFIG.SHARED_FIELDS, stale = {};
+            sharedRows(sharedLocFilter([[SF.posted, 'is', 'F'], 'and', [SF.item, 'anyof', lines.map(function (l) { return l.item; })]], locId))
+                .forEach(function (r) {
+                    var sv = carried[r.id];
+                    var changed = sv && typeof sv === 'object' && (round4(r.shelf) !== sv.shelf || JSON.stringify(r.orders) !== JSON.stringify(sv.orders));
+                    if (!sv || changed) { stale[r.item] = r.name || ('item ' + r.item); }
+                });
+            var staleItems = Object.keys(stale);
+            if (staleItems.length) {
+                return { ok: false, stale: staleItems.map(function (i) { return { item: i, name: stale[i] }; }),
+                    error: 'New counts arrived for ' + staleItems.length + ' item' + (staleItems.length === 1 ? '' : 's') + ' after the sheet was loaded ('
+                        + staleItems.slice(0, 3).map(function (i) { return stale[i]; }).join(', ') + (staleItems.length > 3 ? ', …' : '') + '). The sheet has been reloaded -- check them and submit again.' };
+            }
+        }
+
         // Fresh on-hand, right now, server side -- the page's numbers may be hours old.
         var current = lookupOnHand(lines.map(function (l) { return l.item; }), locId);
         var candidates = [], skipped = [], blocked = [];
@@ -792,10 +856,23 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 blocked.push({ item: l.item, name: it.name, count: l.count, reason: 'Needs inventory detail (' + it.blocked + ') -- adjust this one manually.' });
                 return;
             }
-            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand, orders: l.orders, by: l.by });
+            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand, orders: l.orders, by: l.by, ids: l.ids });
         });
+        // Shared lines behind the counts that went through (posted or already
+        // matching) are marked posted so they leave everyone's open sheet;
+        // blocked ones stay open, with the reason on the page.
+        function finish(out) {
+            if (shared) {
+                var toMark = [];
+                out.applied.concat(out.skipped).forEach(function (l) { toMark = toMark.concat(l.ids || []); });
+                var m = markLines(toMark, out.adjustment ? posInt(out.adjustment.id) : null);
+                out.marked = m.marked.length;
+                out.unmarked = m.unmarked;
+            }
+            return out;
+        }
         if (!candidates.length) {
-            return { ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Nothing on this sheet could be adjusted.' };
+            return finish({ ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Nothing on this sheet could be adjusted.' });
         }
 
         var rec = record.create({ type: record.Type.INVENTORY_ADJUSTMENT, isDynamic: true });
@@ -828,7 +905,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         });
 
         if (!applied.length) {
-            return { ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Every count already matches on-hand -- no adjustment needed.' };
+            return finish({ ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Every count already matches on-hand -- no adjustment needed.' });
         }
 
         var id = rec.save({ enableSourcing: true, ignoreMandatoryFields: false });
@@ -844,12 +921,261 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             title: 'invcount: adjustment ' + id + (tranid ? ' (#' + tranid + ')' : ''),
             details: applied.length + ' lines, ' + skipped.length + ' unchanged, ' + blocked.length + ' blocked; location ' + (locId || 'n/a') + '; account ' + accountId
         });
-        return {
+        return finish({
             ok: true,
             adjustment: { id: String(id), tranid: String(tranid), url: recUrl },
             applied: applied, skipped: skipped, blocked: blocked
-        };
+        });
     }
+
+    // ---------------------------------------------------------------- shared --
+    // The shared count. Every device's lines are kept in a custom record so
+    // one administrator can review and post everyone's count at once. A line
+    // is one (item, counter, device) at a location and stays open until it is
+    // posted; two counters on the same item are two lines, which the
+    // administrator's sheet adds up. Without the record type the page runs as
+    // it always did: one sheet per device, submitted from that device.
+
+    function sharedOn() { return !!CONFIG.SHARED_RECORD; }
+
+    // Can the record be searched with every field we need? Anything missing
+    // comes back by name so the setup notice can say exactly what to add.
+    function sharedStatus() {
+        if (!sharedOn()) { return { ready: false, off: true }; }
+        var F = CONFIG.SHARED_FIELDS;
+        var cols = Object.keys(F).map(function (k) { return F[k]; });
+        try {
+            search.create({ type: CONFIG.SHARED_RECORD, filters: [[F.posted, 'is', 'F']], columns: cols }).run().getRange({ start: 0, end: 1 });
+            return { ready: true };
+        } catch (e) {
+            var rf = rejectedField(e);
+            return { ready: false, missing: rf ? rf.name : '', error: userErr(e) };
+        }
+    }
+    function requireShared() {
+        var st = sharedStatus();
+        if (!st.ready) { throw new Error(st.off ? 'The shared count is switched off.' : 'The shared count is not set up: ' + (st.error || 'record type missing')); }
+    }
+
+    function sharedUser() {
+        try { return posInt(runtime.getCurrentUser().id); } catch (e) { return null; }
+    }
+    // A browser's id for its own lines: letters and digits, long enough not to
+    // collide with another tablet's.
+    function cleanDevice(v) {
+        var s = String(v == null ? '' : v).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+        return s.length >= 8 ? s : '';
+    }
+    function cleanOrders(raw) {
+        var out = [];
+        (Array.isArray(raw) ? raw : []).slice(0, 30).forEach(function (o) {
+            var ref = cleanRef(o && o.ref), qty = parseFloat(o && o.qty);
+            if (ref && isFinite(qty) && qty > 0) { out.push({ ref: ref, qty: round4(qty) }); }
+        });
+        return out;
+    }
+    function parseOrdersJson(s) {
+        try { return cleanOrders(JSON.parse(String(s || '[]'))); } catch (e) { return []; }
+    }
+    function sharedLocFilter(filters, locId) {
+        if (locId) { filters.push('and'); filters.push([CONFIG.SHARED_FIELDS.location, 'anyof', [String(locId)]]); }
+        return filters;
+    }
+    function remainingUsage() {
+        try { return runtime.getCurrentScript().getRemainingUsage(); } catch (e) { return 1000; }
+    }
+    // Who this device is and where it is counting, or why the request cannot go on.
+    function deviceGuard(body) {
+        var uid = sharedUser();
+        if (!uid) { return { error: 'No signed-in user.' }; }
+        var device = cleanDevice(body.device);
+        if (!device) { return { error: 'This device has no id yet; reload the page.' }; }
+        var locId = multiLocation() ? posInt(body.loc) : null;
+        if (multiLocation() && !locId) { return { error: 'Pick a location first.' }; }
+        return { uid: uid, device: device, locId: locId };
+    }
+
+    // Count lines matching the filters, as plain objects. Paged in 1,000s up to
+    // 5,000 -- more than a full physical count of BSG's catalog.
+    function sharedRows(filters) {
+        var F = CONFIG.SHARED_FIELDS;
+        var cols = [F.item, F.shelf, F.orders, F.onhand, F.counter, F.device, F.label, F.posted, F.adjustment, 'lastmodified'];
+        var rs = search.create({ type: CONFIG.SHARED_RECORD, filters: filters, columns: cols }).run();
+        var rows = [], start = 0, MAX = 5000;
+        function num(v) { return v === '' || v == null ? null : parseFloat(v); }
+        while (start < MAX) {
+            var chunk = rs.getRange({ start: start, end: Math.min(start + 1000, MAX) });
+            chunk.forEach(function (r) {
+                var posted = r.getValue(F.posted);
+                rows.push({
+                    id: String(r.id),
+                    item: String(r.getValue(F.item) || ''),
+                    name: String(r.getText(F.item) || ''),
+                    shelf: num(r.getValue(F.shelf)) || 0,
+                    orders: parseOrdersJson(r.getValue(F.orders)),
+                    onhand: num(r.getValue(F.onhand)),
+                    counter: String(r.getValue(F.counter) || ''),
+                    counterName: String(r.getText(F.counter) || ''),
+                    device: String(r.getValue(F.device) || ''),
+                    label: String(r.getValue(F.label) || ''),
+                    posted: posted === true || posted === 'T',
+                    adjustment: String(r.getValue(F.adjustment) || ''),
+                    at: String(r.getValue('lastmodified') || '')
+                });
+            });
+            if (chunk.length < 1000) { break; }
+            start += 1000;
+        }
+        return rows;
+    }
+
+    // A device pushes the lines it changed and the items it removed. One
+    // search finds what it already has open, then each line is updated or
+    // created; the device's label rides along so the administrator can tell
+    // "Warehouse tablet 1" from "Retail iPad".
+    function syncLines(body) {
+        requireShared();
+        var g = deviceGuard(body);
+        if (g.error) { return { ok: false, error: g.error }; }
+        var F = CONFIG.SHARED_FIELDS, label = cleanName(body.label, 40);
+        var ups = (Array.isArray(body.upserts) ? body.upserts : []).slice(0, CONFIG.SYNC_MAX_LINES);
+        var dels = idList(body.deletes, CONFIG.SYNC_MAX_LINES);
+        var items = {};
+        ups.forEach(function (u) { var id = posInt(u && u.item); if (id) { items[id] = true; } });
+        dels.forEach(function (d) { items[d] = true; });
+        var itemIds = Object.keys(items);
+        if (!itemIds.length) { return { ok: true, synced: 0, deleted: 0, errors: [] }; }
+        var existing = {};
+        sharedRows(sharedLocFilter([[F.counter, 'anyof', [String(g.uid)]], 'and', [F.device, 'is', g.device], 'and', [F.posted, 'is', 'F'], 'and', [F.item, 'anyof', itemIds]], g.locId))
+            .forEach(function (r) { existing[r.item] = r.id; });
+        var synced = 0, deleted = 0, errors = [];
+        ups.forEach(function (u) {
+            var id = posInt(u && u.item);
+            if (!id) { return; }
+            var shelf = parseFloat(u.shelf);
+            if (!isFinite(shelf) || shelf < 0) { errors.push({ item: String(id), error: 'Bad count.' }); return; }
+            var vals = {};
+            vals[F.shelf] = round4(shelf);
+            vals[F.orders] = JSON.stringify(cleanOrders(u.orders));
+            vals[F.label] = label;
+            var oh = parseFloat(u.onhand);
+            if (isFinite(oh)) { vals[F.onhand] = oh; }
+            try {
+                if (existing[id]) {
+                    record.submitFields({ type: CONFIG.SHARED_RECORD, id: existing[id], values: vals });
+                } else {
+                    var rec = record.create({ type: CONFIG.SHARED_RECORD });
+                    rec.setValue({ fieldId: F.item, value: id });
+                    if (g.locId) { rec.setValue({ fieldId: F.location, value: g.locId }); }
+                    rec.setValue({ fieldId: F.counter, value: g.uid });
+                    rec.setValue({ fieldId: F.device, value: g.device });
+                    rec.setValue({ fieldId: F.posted, value: false });
+                    Object.keys(vals).forEach(function (k) { rec.setValue({ fieldId: k, value: vals[k] }); });
+                    existing[id] = String(rec.save());
+                }
+                synced++;
+            } catch (e) { errors.push({ item: String(id), error: userErr(e) }); }
+        });
+        dels.forEach(function (d) {
+            if (!existing[d]) { return; }
+            try { record.delete({ type: CONFIG.SHARED_RECORD, id: existing[d] }); deleted++; }
+            catch (e) { errors.push({ item: String(d), error: userErr(e) }); }
+        });
+        return { ok: true, synced: synced, deleted: deleted, errors: errors };
+    }
+
+    // This device's own open lines, so a reloaded or wiped browser gets them back.
+    function mineLines(params) {
+        requireShared();
+        var g = deviceGuard(params);
+        if (g.error) { return { ok: false, error: g.error }; }
+        var F = CONFIG.SHARED_FIELDS;
+        var rows = sharedRows(sharedLocFilter([[F.counter, 'anyof', [String(g.uid)]], 'and', [F.device, 'is', g.device], 'and', [F.posted, 'is', 'F']], g.locId));
+        return { ok: true, lines: rows.map(function (r) { return { id: r.id, item: r.item, name: r.name, shelf: r.shelf, orders: r.orders, onhand: r.onhand, at: r.at }; }) };
+    }
+
+    // Every open line at the location, for the administrator's merged sheet.
+    function sessionLines(params) {
+        requireShared();
+        if (!canSubmit()) { return { ok: false, error: 'Your role cannot review the shared count.' }; }
+        var locId = multiLocation() ? posInt(params.loc) : null;
+        if (multiLocation() && !locId) { return { ok: false, error: 'Pick a location first.' }; }
+        var F = CONFIG.SHARED_FIELDS;
+        var rows = sharedRows(sharedLocFilter([[F.posted, 'is', 'F']], locId));
+        return { ok: true, lines: rows, truncated: rows.length >= 5000 };
+    }
+
+    // Marks lines posted, with the adjustment that took them. Stops short of the
+    // governance limit and hands back what is left for the page to retry.
+    function markLines(ids, adjustmentId) {
+        var F = CONFIG.SHARED_FIELDS, marked = [], unmarked = [];
+        var vals = {};
+        vals[F.posted] = true;
+        if (adjustmentId) { vals[F.adjustment] = adjustmentId; }
+        ids.forEach(function (id) {
+            if (unmarked.length || remainingUsage() < 40) { unmarked.push(id); return; }
+            try { record.submitFields({ type: CONFIG.SHARED_RECORD, id: id, values: vals }); marked.push(id); }
+            catch (e) { unmarked.push(id); log.error({ title: 'invcount: could not mark count line ' + id + ' posted', details: safeErr(e) }); }
+        });
+        return { marked: marked, unmarked: unmarked };
+    }
+    function markPosted(body) {
+        requireShared();
+        if (!canSubmit()) { return { ok: false, error: 'Your role cannot post the shared count.' }; }
+        var r = markLines(idList(body.ids, 200), posInt(body.adjustment) || null);
+        return { ok: true, marked: r.marked.length, unmarked: r.unmarked };
+    }
+
+    // Removes open lines: this user's own (scope "mine", every device of theirs)
+    // or, for an administrator, everyone's at the location. 100 per call; the
+    // page keeps calling while "remaining" is above zero.
+    function discardShared(body) {
+        requireShared();
+        var F = CONFIG.SHARED_FIELDS;
+        var locId = multiLocation() ? posInt(body.loc) : null;
+        if (multiLocation() && !locId) { return { ok: false, error: 'Pick a location first.' }; }
+        var all = body.scope === 'all';
+        if (all && !canSubmit()) { return { ok: false, error: 'Your role cannot discard other people\'s counts.' }; }
+        var filters = [[F.posted, 'is', 'F']];
+        if (!all) {
+            var uid = sharedUser();
+            if (!uid) { return { ok: false, error: 'No signed-in user.' }; }
+            filters.push('and');
+            filters.push([F.counter, 'anyof', [String(uid)]]);
+        }
+        var rows = sharedRows(sharedLocFilter(filters, locId));
+        var deleted = 0;
+        rows.slice(0, 100).forEach(function (r) {
+            if (remainingUsage() < 40) { return; }
+            try { record.delete({ type: CONFIG.SHARED_RECORD, id: r.id }); deleted++; } catch (e) { /* stays in remaining */ }
+        });
+        return { ok: true, deleted: deleted, remaining: Math.max(0, rows.length - deleted) };
+    }
+
+    // Items a count already adjusted today, so a second submit is a decision
+    // rather than an accident. Best effort: if the search is refused the page
+    // just does not get the warning.
+    function precheckAdjusted(body) {
+        var ids = idList(body.items, 500);
+        var locId = multiLocation() ? posInt(body.loc) : null;
+        if (!ids.length) { return { ok: true, adjusted: [] }; }
+        var out = [];
+        try {
+            var filters = [['type', 'anyof', ['InvAdjst']], 'and', ['mainline', 'is', 'F'], 'and', ['trandate', 'on', 'today'], 'and', ['item', 'anyof', ids], 'and', ['memo', 'startswith', 'Counted']];
+            if (locId) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
+            search.create({ type: search.Type.TRANSACTION, filters: filters, columns: ['tranid', 'item', 'quantity', 'memo', 'internalid'] }).run().each(function (r) {
+                var tid = r.getValue('internalid'), link = '';
+                try { link = tid ? url.resolveRecord({ recordType: 'inventoryadjustment', recordId: tid, isEditMode: false }) : ''; } catch (e) { /* cosmetic */ }
+                out.push({ item: String(r.getValue('item')), tranid: String(r.getValue('tranid') || ''), qty: parseFloat(r.getValue('quantity')) || 0, memo: String(r.getValue('memo') || ''), url: link });
+                return out.length < 500;
+            });
+        } catch (e) {
+            log.audit({ title: 'invcount: already-adjusted check skipped', details: userErr(e) });
+            return { ok: true, adjusted: [], skipped: userErr(e) };
+        }
+        return { ok: true, adjusted: out };
+    }
+
 
     // ---------------------------------------------------------------- export --
     // One dataset shape { title, subtitle, columns:[{ key, label, num }], rows:[{}] }
@@ -1131,7 +1457,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             user: '',
             warnings: []
         };
-        try { boot.user = runtime.getCurrentUser().name || ''; } catch (e) { /* ignore */ }
+        try { boot.user = runtime.getCurrentUser().name || ''; boot.userId = String(runtime.getCurrentUser().id || ''); } catch (e) { /* ignore */ }
+        // Shared count: ready, not set up (with what is missing), or switched off.
+        try { boot.shared = sharedStatus(); } catch (e3) { boot.shared = { ready: false, error: userErr(e3) }; }
+        boot.sharedBatch = CONFIG.SHARED_BATCH;
+        boot.sharedSetup = { record: CONFIG.SHARED_RECORD, fields: CONFIG.SHARED_FIELDS };
         if (boot.multiLoc) {
             try { boot.locations = listLocations(); } catch (e1) { boot.warnings.push('Could not list locations: ' + userErr(e1)); }
         }
@@ -1382,6 +1712,32 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .ic-order small{color:var(--muted);font-variant-numeric:tabular-nums}
 .ic-order.is-off{opacity:.45;cursor:default}
 
+.ic-sync{font-size:12px;color:var(--muted);white-space:nowrap}
+.ic-sync.is-busy{color:var(--ink)}
+.ic-sync.is-bad{color:var(--red-700);font-weight:600}
+.ic-devlabel{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin:0 0 18px}
+.ic-devlabel label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ic-devlabel input{min-height:38px;padding:7px 10px;border:1px solid var(--line);border-radius:0;background:var(--surface);font-size:14px;width:240px;max-width:100%}
+.ic-devlabel .ic-meta{margin:0;flex:1 1 260px}
+.ic-subs{margin-top:6px;display:flex;flex-direction:column;gap:3px}
+.ic-sub{display:flex;align-items:baseline;gap:8px;font-size:12.5px;color:var(--ink-2);cursor:pointer;font-variant-numeric:tabular-nums}
+.ic-sub input{width:15px;height:15px;margin:0;flex:0 0 auto;accent-color:var(--red);position:relative;top:2px;cursor:pointer}
+.ic-sub-dot{display:inline-block;width:15px;text-align:center;color:var(--faint);flex:0 0 auto}
+.ic-sub.is-off{opacity:.45;text-decoration:line-through}
+.ic-sub b{color:var(--ink)}
+.ic-drift{color:var(--warn)}
+.ic-flag.is-review{color:var(--red-700);background:var(--red-100)}
+.ic-row.is-review{box-shadow:inset 3px 0 0 var(--red)}
+.ic-qty.is-override{border-color:var(--red);background:var(--red-100)}
+.ic-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+.ic-chip{border:1px solid var(--line);padding:6px 10px;font-size:12.5px;color:var(--ink-2);display:inline-flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.ic-chip b{color:var(--ink)}
+.ic-chip .ic-meta{margin:0}
+.ic-setup{background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:14px 16px;margin:0 0 18px;font-size:13.5px;line-height:1.55;color:var(--ink)}
+.ic-setup p{margin:6px 0 8px;color:var(--warn)}
+.ic-setup ul{margin:0 0 0 18px;padding:0}
+.ic-setup li{margin:2px 0}
+.ic-setup code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;background:rgba(32,30,29,.07);padding:1px 5px}
 .ic-footer{text-align:center;color:var(--muted);font-size:12px;padding:32px 16px 20px;line-height:1.6;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))}
 
 /* Under a tablet the columns fold: the item keeps a full row, the four
@@ -1453,7 +1809,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         memo: '',
         submitting: false, progress: '', submitError: '',
         confirm: false,
-        done: null
+        done: null,
+        device: '', deviceLabel: '', // this browser's id and the name shown to the administrator
+        session: null              // administrator, shared count: everyone's open lines
     };
     var searchTimer = null, reqSeq = 0;
 
@@ -1464,7 +1822,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function lsDel(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
 
     function loadPrefs() { try { return JSON.parse(lsGet(PREF_KEY) || '{}') || {}; } catch (e) { return {}; } }
-    function savePrefs() { lsSet(PREF_KEY, JSON.stringify({ loc: state.loc, account: state.account, instock: state.instock })); }
+    function savePrefs() { lsSet(PREF_KEY, JSON.stringify({ loc: state.loc, account: state.account, instock: state.instock, device: state.device, deviceLabel: state.deviceLabel })); }
+    function newDeviceId() {
+        var s = 'd', chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        for (var i = 0; i < 20; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
+        return s;
+    }
 
     function sheetKey() { return SHEET_KEY + (state.loc || 'all'); }
     function loadSheet() {
@@ -1541,7 +1904,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // Who keyed this line, and when: the NetSuite user signed in on this device.
     // It rides on the sheet, the exports and the adjustment line memo, so a
     // doubtful count can be traced back to the person who took it.
-    function stamp(line) { line.by = BOOT.user || ''; line.at = Date.now(); return line; }
+    function stamp(line) { line.by = BOOT.user || ''; line.at = Date.now(); markDirty(line.id); return line; }
     function fmtWhen(ms) {
         if (!ms) { return ''; }
         try { return new Date(ms).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
@@ -1553,6 +1916,140 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (!id) { return el('span', { text: name }); }
         return el('a', { href: '/app/common/item/item.nl?id=' + encodeURIComponent(id), target: '_blank', rel: 'noopener', title: 'Open the item record in a new tab', text: name });
     }
+    // ------------------------------------------------------------- shared --
+    // Every line this device keys is pushed to NetSuite (action=sync) so the
+    // administrator's sheet shows everyone's count. The local sheet stays the
+    // working copy: changes are batched, retried on failure, and reconciled
+    // with the server on load and every minute. Once a line has been saved,
+    // NetSuite owns it -- if it is gone from the server (posted, or discarded
+    // by the administrator) it leaves this sheet too.
+    var SHARED = !!(BOOT.shared && BOOT.shared.ready);
+    var sync = { dirty: {}, removed: {}, timer: null, inflight: false, status: SHARED ? 'idle' : 'off', error: '', backoff: 0, lastOk: 0, pulling: false };
+    function markDirty(id) { if (!SHARED) { return; } sync.dirty[id] = Date.now(); delete sync.removed[id]; scheduleSync(); }
+    function markRemoved(id) { if (!SHARED) { return; } sync.removed[id] = true; delete sync.dirty[id]; scheduleSync(); }
+    function pendingCount() { return Object.keys(sync.dirty).length + Object.keys(sync.removed).length; }
+    function scheduleSync(ms) {
+        if (!SHARED) { return; }
+        clearTimeout(sync.timer);
+        sync.timer = setTimeout(pushSync, ms == null ? 1200 : ms);
+        if (pendingCount() && sync.status !== 'offline') { sync.status = 'pending'; }
+        paintSync();
+    }
+    function pushSync() {
+        if (!SHARED || sync.inflight) { return; }
+        if (BOOT.multiLoc && !state.loc) { return; }
+        var ids = Object.keys(sync.dirty).slice(0, 50), dels = Object.keys(sync.removed).slice(0, 50);
+        if (!ids.length && !dels.length) { sync.status = 'saved'; paintSync(); return; }
+        var sentAt = {}, upserts = [];
+        ids.forEach(function (id) {
+            sentAt[id] = sync.dirty[id];
+            var l = state.sheet[id];
+            if (l) { upserts.push({ item: id, shelf: shelfOf(l), orders: l.orders || [], onhand: l.onhand }); }
+        });
+        sync.inflight = true; sync.status = 'saving'; paintSync();
+        apiPost('sync', { loc: state.loc || '', device: state.device, label: state.deviceLabel || '', upserts: upserts, deletes: dels }).then(function (res) {
+            sync.inflight = false;
+            if (!res || !res.ok) {
+                sync.status = 'offline'; sync.error = (res && res.error) || 'Could not reach NetSuite.';
+                sync.backoff = Math.min(60000, sync.backoff ? sync.backoff * 2 : 5000);
+                scheduleSync(sync.backoff);
+                return;
+            }
+            sync.backoff = 0; sync.error = ''; sync.lastOk = Date.now();
+            var failed = {};
+            (res.errors || []).forEach(function (e) { failed[e.item] = e.error; });
+            ids.forEach(function (id) {
+                if (sync.dirty[id] !== sentAt[id]) { return; }      // changed again while in flight: goes next time
+                delete sync.dirty[id];
+                var l = state.sheet[id];
+                if (l) { if (failed[id]) { l.error = 'Not saved to NetSuite: ' + failed[id]; } else { l.synced = true; } }
+            });
+            dels.forEach(function (id) { delete sync.removed[id]; });
+            saveSheet();
+            if (pendingCount()) { scheduleSync(50); } else { sync.status = 'saved'; paintSync(); }
+        });
+    }
+    function syncText() {
+        if (!SHARED) { return ''; }
+        var n = pendingCount();
+        if (sync.status === 'saving') { return 'Saving to NetSuite…'; }
+        if (sync.status === 'offline') { return 'Not saved (' + n + ' line' + (n === 1 ? '' : 's') + ') — retrying'; }
+        if (sync.status === 'pending') { return n + ' line' + (n === 1 ? '' : 's') + ' to save'; }
+        if (sync.lastOk) { return 'Saved to NetSuite · ' + fmtWhen(sync.lastOk); }
+        return 'Shared count';
+    }
+    function paintSync() {
+        var e = document.getElementById('icSync');
+        if (!e) { return; }
+        e.textContent = syncText();
+        e.className = 'ic-sync' + (sync.status === 'offline' ? ' is-bad' : (sync.status === 'saving' || sync.status === 'pending') ? ' is-busy' : '');
+        e.title = sync.error || '';
+    }
+    // What the server holds for this device against what the browser holds.
+    // Lines never saved are pushed; lines saved before and now gone from the
+    // server were posted or discarded, so they leave here too; lines on both
+    // sides are pushed only when they differ (the browser is the working copy).
+    function reconcile() {
+        if (!SHARED || sync.pulling) { return; }
+        if (BOOT.multiLoc && !state.loc) { return; }
+        sync.pulling = true;
+        apiGet('mine', { loc: state.loc || '', device: state.device }).then(function (res) {
+            sync.pulling = false;
+            if (!res || !res.ok) { sync.status = 'offline'; sync.error = (res && res.error) || 'Could not reach NetSuite.'; paintSync(); scheduleSync(15000); return; }
+            var server = {}, changed = false;
+            (res.lines || []).forEach(function (s) { server[s.item] = s; });
+            state.order.slice().forEach(function (id) {
+                var l = state.sheet[id], s = server[id];
+                if (!l) { return; }
+                if (!s) {
+                    if (l.synced && !sync.dirty[id]) { removeLocal(id); changed = true; }
+                    else { sync.dirty[id] = sync.dirty[id] || Date.now(); }
+                    return;
+                }
+                var same = round4(s.shelf) === round4(shelfOf(l)) && JSON.stringify((s.orders || []).map(function (o) { return [o.ref, o.qty]; })) === JSON.stringify((l.orders || []).map(function (o) { return [o.ref, o.qty]; }));
+                if (!same) { sync.dirty[id] = sync.dirty[id] || Date.now(); }
+                else { l.synced = true; }
+            });
+            (res.lines || []).forEach(function (s) {
+                if (state.sheet[s.item] || sync.removed[s.item]) { return; }
+                var line = ensureLine({ id: s.item, name: s.name || ('item ' + s.item), onhand: s.onhand });
+                line.orders = (s.orders || []).slice();
+                line.count = round4((Number(s.shelf) || 0) + ordersTotal(line));
+                line.by = BOOT.user || ''; line.at = Date.now(); line.synced = true;
+                changed = true;
+            });
+            saveSheet(); updateBadge();
+            if (pendingCount()) { scheduleSync(100); } else { sync.status = sync.lastOk ? 'saved' : 'idle'; if (!sync.lastOk) { sync.lastOk = Date.now(); } paintSync(); }
+            if (changed && state.view !== 'done') { render(); }
+        });
+    }
+    // Who is holding this device, as the administrator will see it.
+    function deviceLabelField() {
+        if (!SHARED) { return null; }
+        return el('div', { class: 'ic-devlabel' }, [
+            el('label', { for: 'icDevLabel', text: 'This device' }),
+            el('input', { id: 'icDevLabel', type: 'text', maxlength: '40', placeholder: 'e.g. Warehouse tablet 1', value: state.deviceLabel || '', autocomplete: 'off',
+                onchange: function (ev) { state.deviceLabel = String(ev.target.value || '').trim().slice(0, 40); savePrefs(); state.order.forEach(function (id) { markDirty(id); }); } }),
+            el('span', { class: 'ic-meta', text: 'Shown with your name on the administrator\'s sheet, so a count can be traced to a place as well as a person.' })
+        ]);
+    }
+    // Shown to administrators until the custom record exists.
+    function setupNotice() {
+        var sh = BOOT.shared || {}, su = BOOT.sharedSetup || {}, F = su.fields || {};
+        var spec = { item: 'List/Record → Item (mandatory)', location: 'List/Record → Location', shelf: 'Decimal Number', orders: 'Long Text', onhand: 'Decimal Number',
+            counter: 'List/Record → Employee', device: 'Free-Form Text', label: 'Free-Form Text', posted: 'Check Box', adjustment: 'List/Record → Transaction' };
+        var list = el('ul', {}, [el('li', {}, ['Record type, ID ', el('code', { text: su.record || '' }), ' — Access Type: No Permission Required'])]);
+        Object.keys(spec).forEach(function (k) {
+            if (!F[k]) { return; }
+            list.appendChild(el('li', {}, [el('code', { text: F[k] }), ' — ' + spec[k] + (sh.missing && sh.missing === F[k] ? '  ← missing' : '')]));
+        });
+        return el('div', { class: 'ic-setup' }, [
+            el('b', { text: 'Shared count is not set up yet' }),
+            el('p', { text: 'Until the custom record below exists, each device keeps its own sheet and only this one can be submitted from here. Create it once (Customization › Lists, Records & Fields › Record Types › New, then its Fields subtab), then reload this page. NetSuite said: ' + (sh.error || 'record type missing') + '.' }),
+            list
+        ]);
+    }
+
     function ordersTotal(line) {
         var t = 0;
         (line.orders || []).forEach(function (o) { t += Number(o.qty) || 0; });
@@ -1591,6 +2088,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             line.name = fresh.name || line.name; line.display = fresh.display; line.desc = fresh.desc; line.upc = fresh.upc; line.vendor = fresh.vendor;
             line.onhand = fresh.onhand; line.available = fresh.available; line.committed = fresh.committed; line.onorder = fresh.onorder; line.blocked = fresh.blocked || '';
             saveSheet();
+            markDirty(id);
             if (state.view === 'sheet') { render(); }
         });
     }
@@ -1666,11 +2164,15 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return t ? 'Includes ' + fmt(t) + ' on open orders: ' + line.orders.map(function (o) { return o.ref; }).join(', ') : '';
     }
 
-    function removeLine(id) {
+    function removeLocal(id) {
         delete state.sheet[id];
         state.order = state.order.filter(function (x) { return x !== id; });
         saveSheet();
         updateBadge();
+    }
+    function removeLine(id) {
+        removeLocal(id);
+        markRemoved(id);
     }
     function parseCount(v) {
         var s = String(v == null ? '' : v).trim();
@@ -1693,9 +2195,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         });
         return { lines: lines, pos: pos, neg: neg, blocked: blocked, below: below, changed: changed };
     }
+    function sheetSize() {
+        if (SHARED && BOOT.canSubmit && state.session && state.session.items) { return state.session.items.length; }
+        return state.order.length;
+    }
     function updateBadge() {
         var b = document.getElementById('icSheetBadge');
-        if (b) { b.textContent = String(state.order.length); }
+        if (b) { b.textContent = String(sheetSize()); }
     }
 
     // ------------------------------------------------------------- search --
@@ -2097,6 +2603,378 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return row;
     }
 
+    // ------------------------------------------------------- shared sheet --
+    // The administrator's sheet in a shared count: everyone's open lines,
+    // merged per item. Two counters on one item are two sub-lines that add up
+    // -- a warehouse count and a retail-floor count of the same SKU -- and
+    // either can be left out, or the total set by hand, before posting.
+
+    function loadSession(after) {
+        var prev = state.session || {};
+        state.session = { loc: state.loc, loading: true, error: '', lines: [], items: [], byItem: {}, fresh: {}, freshDone: false, loadedAt: 0, truncated: false,
+            excluded: prev.excluded || {}, overrides: prev.overrides || {}, filter: prev.filter || 'all', precheck: null };
+        var s = state.session;
+        apiGet('session', { loc: state.loc || '' }).then(function (res) {
+            if (state.session !== s) { return; }   // superseded (location change, discard)
+            s.loading = false;
+            if (!res || !res.ok) { s.error = (res && res.error) || 'Could not load the shared count.'; render(); return; }
+            s.lines = res.lines || []; s.truncated = !!res.truncated; s.loadedAt = Date.now();
+            mergeSession(s);
+            updateBadge();
+            if (state.view === 'sheet') { render(); loadFresh(s, after); }
+            else if (after) { after(); }
+        });
+    }
+    function mergeSession(s) {
+        var byItem = {}, items = [];
+        s.lines.forEach(function (l) {
+            var m = byItem[l.item];
+            if (!m) { m = byItem[l.item] = { id: l.item, name: l.name || ('item ' + l.item), subs: [] }; items.push(m); }
+            m.subs.push(l);
+        });
+        items.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+        s.items = items; s.byItem = byItem;
+    }
+    // Fresh on-hand for every merged item, 200 at a time; the deltas the
+    // administrator sees are against NetSuite right now, not the counters' screens.
+    function loadFresh(s, after) {
+        if (s.freshLoading || s.freshDone) { if (after) { after(); } return; }
+        var ids = s.items.map(function (m) { return m.id; }), i = 0;
+        s.freshLoading = true;
+        function next() {
+            if (state.session !== s) { return; }
+            if (i >= ids.length) { s.freshLoading = false; s.freshDone = true; render(); if (after) { after(); } return; }
+            var batch = ids.slice(i, i + 200); i += 200;
+            apiPost('onhand', { ids: batch, loc: state.loc || '' }).then(function (res) {
+                if (res && res.ok && res.items) { Object.keys(res.items).forEach(function (k) { s.fresh[k] = res.items[k]; }); }
+                batch.forEach(function (id) { if (!s.fresh[id]) { s.fresh[id] = { missing: true }; } });
+                next();
+            });
+        }
+        next();
+    }
+    // The merged count for an item: the shelf units of every counter not left
+    // out, plus each ticked open order once (two people ticking the same order
+    // are agreeing, not doubling it), unless the administrator set a total.
+    function mergedFor(m) {
+        var s = state.session, shelf = 0, orders = {}, refs = [], names = [], ids = [], live = 0, latest = 0;
+        m.subs.forEach(function (l) {
+            ids.push(l.id);
+            if (s.excluded[l.id]) { return; }
+            live++;
+            shelf += Number(l.shelf) || 0;
+            (l.orders || []).forEach(function (o) { if (!orders[o.ref]) { orders[o.ref] = Number(o.qty) || 0; refs.push(o.ref); } });
+            if (l.counterName && names.indexOf(l.counterName) === -1) { names.push(l.counterName); }
+            if (l.at > latest) { latest = l.at; }
+        });
+        var onOrders = 0;
+        refs.forEach(function (r) { onOrders += orders[r]; });
+        var computed = round4(shelf + onOrders);
+        var ov = s.overrides[m.id];
+        var total = ov != null ? round4(ov) : computed;
+        var f = s.fresh[m.id] || {};
+        var onhand = f.onhand == null ? null : Number(f.onhand);
+        var drift = m.subs.some(function (l) { return !s.excluded[l.id] && l.onhand != null && onhand != null && round4(l.onhand) !== round4(onhand); });
+        var usable = !f.missing && !f.blocked && live > 0;
+        return { computed: computed, total: total, overridden: ov != null, orders: refs.map(function (r) { return { ref: r, qty: orders[r] }; }), onOrders: onOrders,
+            names: names, ids: ids, seen: m.subs.map(function (l) { return { id: l.id, shelf: l.shelf, orders: l.orders || [] }; }),
+            live: live, latest: latest, fresh: f, onhand: onhand, drift: drift, usable: usable,
+            delta: onhand == null || !usable ? null : round4(total - onhand),
+            review: m.subs.length > 1 || drift || !!f.missing || !!f.blocked };
+    }
+    function sharedTotals(s) {
+        var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0 };
+        s.items.forEach(function (m) {
+            var g = mergedFor(m);
+            t.items++; t.lines += m.subs.length;
+            if (g.review) { t.review++; }
+            if (!g.usable) { t.blocked++; return; }
+            if (g.delta == null) { return; }
+            if (g.delta !== 0) { t.changed++; }
+            if (g.delta > 0) { t.pos += g.delta; } else { t.neg += -g.delta; }
+        });
+        s.lines.forEach(function (l) {
+            var k = (l.counterName || 'Unknown') + '|' + (l.label || '');
+            var c = t.counters[k] || (t.counters[k] = { name: l.counterName || 'Unknown', label: l.label || '', lines: 0, at: '' });
+            c.lines++;
+            if (l.at > c.at) { c.at = l.at; }
+        });
+        return t;
+    }
+
+    function sharedRow(m) {
+        var s = state.session, g = mergedFor(m), f = g.fresh;
+        var row = el('div', { class: 'ic-row' + (g.review ? ' is-review' : '') + (f.missing ? ' has-error' : ''), 'data-row-for': m.id });
+        var subs = el('div', { class: 'ic-subs' });
+        m.subs.forEach(function (l) {
+            var off = !!s.excluded[l.id];
+            var cb = el('input', { type: 'checkbox', 'aria-label': 'Include the count from ' + (l.counterName || 'this counter') });
+            cb.checked = !off;
+            cb.addEventListener('change', function () { if (cb.checked) { delete s.excluded[l.id]; } else { s.excluded[l.id] = true; } render(); });
+            var extra = (l.orders || []).length ? ' + ' + (l.orders || []).map(function (o) { return fmt(o.qty) + ' on ' + o.ref; }).join(', ') : '';
+            var stale = l.onhand != null && g.onhand != null && round4(l.onhand) !== round4(g.onhand);
+            subs.appendChild(el('label', { class: 'ic-sub' + (off ? ' is-off' : ''), 'data-sub-for': l.id }, [
+                m.subs.length > 1 ? cb : el('span', { class: 'ic-sub-dot', text: '·' }),
+                el('span', {}, [
+                    el('b', { text: fmt(l.shelf) + extra }),
+                    ' · ' + (l.counterName || 'unknown') + (l.label ? ' · ' + l.label : '') + (l.at ? ' · ' + l.at : ''),
+                    stale ? el('span', { class: 'ic-drift', text: ' · on hand was ' + fmt(l.onhand) + ' when counted' }) : null
+                ])
+            ]));
+        });
+        var input = el('input', { class: 'ic-qty' + (g.overridden ? ' is-override' : ''), type: 'text', inputmode: 'decimal', autocomplete: 'off', value: fmt(g.total), 'aria-label': 'Counted quantity for ' + m.name });
+        input.addEventListener('change', function () {
+            var c = parseCount(input.value);
+            if (c === null) { input.value = fmt(g.total); return; }
+            if (c === g.computed) { delete s.overrides[m.id]; } else { s.overrides[m.id] = c; }
+            render();
+        });
+        var reset = el('button', { class: 'ic-x', type: 'button', text: '↺', title: 'Back to the counted total (' + fmt(g.computed) + ')', 'aria-label': 'Use the counted total', onclick: function () { delete s.overrides[m.id]; render(); } });
+        if (!g.overridden) { reset.style.visibility = 'hidden'; }
+        var delta = el('div', { class: 'ic-delta ' + (g.delta == null ? 'is-zero' : g.delta > 0 ? 'is-pos' : g.delta < 0 ? 'is-neg' : 'is-zero'), text: g.delta == null ? (f.missing || f.blocked ? 'n/a' : '…') : signed(g.delta) });
+        row.appendChild(el('div', { class: 'ic-info' }, [
+            el('div', { class: 'ic-name' }, [itemLink(m.id, f.name || m.name)]),
+            (f.display || f.desc) ? el('div', { class: 'ic-desc', text: f.display || f.desc }) : null,
+            m.subs.length > 1 ? el('div', { class: 'ic-flag is-review', text: m.subs.length + ' counters' + (g.live < m.subs.length ? ' · ' + (m.subs.length - g.live) + ' left out' : ' · added together') }) : null,
+            g.drift ? el('div', { class: 'ic-flag', text: 'On hand changed since it was counted' }) : null,
+            f.missing ? el('div', { class: 'ic-flag', text: 'Not found at this location - will be skipped' }) : null,
+            f.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + f.blocked + ') - will be skipped' }) : null,
+            g.overridden ? el('div', { class: 'ic-onsheet', text: 'Total set by hand · counted ' + fmt(g.computed) }) : null,
+            subs
+        ]));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'On hand', text: g.onhand == null ? '…' : fmt(g.onhand) }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'Avail', text: f.available == null ? '…' : fmt(f.available) }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'Committed', text: f.committed == null ? '…' : fmt(f.committed) }));
+        row.appendChild(el('div', { class: 'ic-num', 'data-label': 'On order', text: f.onorder == null ? '…' : fmt(f.onorder) }));
+        row.appendChild(el('div', { class: 'ic-line-ctl' }, [input]));
+        row.appendChild(el('div', { class: 'ic-deltacell' }, [delta]));
+        row.appendChild(el('div', { class: 'ic-xcell' }, [reset]));
+        row.appendChild(el('div', { class: 'ic-rowpanel' }, [
+            g.orders.length ? el('div', { class: 'ic-incl', text: 'Includes ' + fmt(g.onOrders) + ' on open orders: ' + g.orders.map(function (o) { return o.ref; }).join(', ') }) : null
+        ]));
+        return row;
+    }
+
+    function sharedExportLines() {
+        var s = state.session;
+        return s.items.map(function (m) {
+            var g = mergedFor(m), f = g.fresh;
+            return { name: f.name || m.name, display: f.display || f.desc || '', vendor: f.vendor || '', onhand: g.onhand, count: g.total,
+                orders: g.orders, by: g.names.join(', '), when: g.latest || '' };
+        });
+    }
+
+    function renderSharedSheetView(main) {
+        if (BOOT.multiLoc && !state.loc) {
+            main.appendChild(el('div', { class: 'ic-empty', text: 'Pick a location at the top to load the shared count.' }));
+            return;
+        }
+        var s = state.session;
+        if (!s || s.loc !== state.loc) { loadSession(); s = state.session; }
+        main.appendChild(deviceLabelField());
+        if (s.loading) { main.appendChild(el('div', { class: 'ic-progress', text: 'Loading everyone\'s counts…' })); return; }
+        if (s.error) {
+            main.appendChild(el('div', { class: 'ic-error', text: s.error }));
+            main.appendChild(el('div', { class: 'ic-actions' }, [el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Try again', onclick: function () { loadSession(); render(); } })]));
+            return;
+        }
+        if (!s.freshDone) { loadFresh(s); }
+        var t = sharedTotals(s);
+        var counterKeys = Object.keys(t.counters).sort();
+        main.appendChild(el('div', { class: 'ic-sum' }, [
+            el('div', {}, [el('b', { id: 'icTotLines', text: String(t.items) }), 'items']),
+            el('div', {}, [el('b', { text: String(counterKeys.length) }), 'counters']),
+            el('div', {}, [el('b', { id: 'icTotPos', text: '+' + fmt(t.pos) }), 'units up']),
+            el('div', {}, [el('b', { id: 'icTotNeg', text: '−' + fmt(t.neg) }), 'units down']),
+            el('div', {}, [el('b', { text: state.loc ? locName(state.loc) : (BOOT.multiLoc ? 'No location' : 'All locations') }), 'location'])
+        ]));
+        if (counterKeys.length) {
+            main.appendChild(el('div', { class: 'ic-chips' }, counterKeys.map(function (k) {
+                var c = t.counters[k];
+                return el('span', { class: 'ic-chip' }, [el('b', { text: c.name }), c.label ? el('span', { text: c.label }) : null, el('span', { class: 'ic-meta', text: c.lines + ' line' + (c.lines === 1 ? '' : 's') + (c.at ? ' · ' + c.at : '') })]);
+            })));
+        }
+        if (s.truncated) { main.appendChild(el('div', { class: 'ic-warn', text: 'The shared count has more than 5,000 lines; only the first 5,000 are shown. Post these, then reload for the rest.' })); }
+        if (state.submitError) { main.appendChild(el('div', { class: 'ic-error', text: state.submitError })); }
+        if (!s.items.length) {
+            main.appendChild(el('div', { class: 'ic-empty', text: 'Nobody has counted anything yet at this location. Counts appear here as each device saves them.' }));
+            main.appendChild(el('div', { class: 'ic-actions' }, [
+                el('button', { class: 'ic-btn', type: 'button', text: 'Go to search', onclick: function () { state.view = 'search'; render(); } }),
+                el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Reload', onclick: function () { loadSession(); render(); } })
+            ]));
+            return;
+        }
+        main.appendChild(el('div', { class: 'ic-listhead' }, [
+            el('div', { class: 'ic-count', text: t.lines + ' line' + (t.lines === 1 ? '' : 's') + ' from ' + counterKeys.length + ' counter' + (counterKeys.length === 1 ? '' : 's') + ' · ' + t.review + ' to review · ' + t.changed + ' change' + (t.changed === 1 ? '' : 's') + (s.loadedAt ? ' · loaded ' + fmtWhen(s.loadedAt) : '') }),
+            el('div', { class: 'ic-actions' }, [
+                el('div', { class: 'ic-seg', role: 'group', 'aria-label': 'Which items to list' }, [
+                    el('button', { class: 'ic-segbtn' + (s.filter === 'all' ? ' is-on' : ''), type: 'button', text: 'All', onclick: function () { s.filter = 'all'; render(); } }),
+                    el('button', { class: 'ic-segbtn' + (s.filter === 'review' ? ' is-on' : ''), type: 'button', text: 'Needs review (' + t.review + ')', onclick: function () { s.filter = 'review'; render(); } })
+                ]),
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Reload', onclick: function () { state.submitError = ''; loadSession(); render(); } })
+            ])
+        ]));
+        var list = el('div', { class: 'ic-list' });
+        var shown = 0;
+        s.items.forEach(function (m) {
+            if (s.filter === 'review' && !mergedFor(m).review) { return; }
+            shown++;
+            list.appendChild(sharedRow(m));
+        });
+        main.appendChild(el('div', { class: 'ic-table is-sheet' }, [
+            el('div', { class: 'ic-thead' }, [
+                el('div', { text: 'Item' }), el('div', { class: 'ic-th-num', text: 'On hand' }), el('div', { class: 'ic-th-num', text: 'Avail' }),
+                el('div', { class: 'ic-th-num', text: 'Committed' }), el('div', { class: 'ic-th-num', text: 'On order' }), el('div', { text: 'Counted' }),
+                el('div', { class: 'ic-th-num', text: 'Adjust' }), el('div', {})
+            ]),
+            list
+        ]));
+        if (!shown) { main.appendChild(el('div', { class: 'ic-empty', text: 'Nothing needs review.' })); }
+
+        var form = el('div', { class: 'ic-form' });
+        form.appendChild(el('div', {}, [
+            el('label', { for: 'icMemo', text: 'Memo (goes on the Inventory Adjustment)' }),
+            el('input', { id: 'icMemo', type: 'text', maxlength: '200', placeholder: 'e.g. Q3 cycle count', value: state.memo,
+                oninput: function (ev) { state.memo = ev.target.value; saveSheet(); } })
+        ]));
+        if (!BOOT.accountLocked) {
+            var sel = el('select', { id: 'icAccount', onchange: function (ev) { state.account = ev.target.value; savePrefs(); } });
+            sel.appendChild(el('option', { value: '', text: '— pick the adjustment account —' }));
+            (BOOT.accounts || []).forEach(function (a) {
+                var o = el('option', { value: a.id, text: a.label });
+                if (a.id === state.account) { o.selected = true; }
+                sel.appendChild(o);
+            });
+            form.appendChild(el('div', {}, [el('label', { for: 'icAccount', text: 'Adjustment account' }), sel]));
+        }
+        form.appendChild(exportBar('sheet', sharedExportLines));
+        if (state.submitting) {
+            form.appendChild(el('div', { class: 'ic-progress', text: state.progress || 'Submitting…' }));
+        } else if (state.confirm) {
+            var live = t.items - t.blocked;
+            var nothing = t.changed === 0;
+            var pre = s.precheck;
+            form.appendChild(el('div', { class: 'ic-confirm' }, [
+                el('p', {}, [el('b', { text: nothing
+                    ? 'Nothing to adjust — every counted item already matches.'
+                    : 'Create an Inventory Adjustment for ' + t.changed + ' item' + (t.changed === 1 ? '' : 's') + (state.loc ? ' at ' + locName(state.loc) : '') + '?' })]),
+                el('p', { text: nothing
+                    ? 'All ' + live + ' item' + (live === 1 ? '' : 's') + ' equal the on-hand NetSuite already holds, so submitting records the count, clears everyone\'s sheets, and creates no Inventory Adjustment.'
+                    : 'Those ' + t.changed + ' item' + (t.changed === 1 ? '' : 's') + ' move to the merged count (+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). The other ' + (live - t.changed) + ' already match and are left off. Every counter\'s lines are then cleared from their sheets.' }),
+                t.review ? el('p', { text: t.review + ' item' + (t.review === 1 ? ' is' : 's are') + ' flagged for review (two counters, or on hand changed). Counts from two people are added together unless one is unticked.' }) : null,
+                t.blocked ? el('p', { text: t.blocked + ' item' + (t.blocked === 1 ? ' is' : 's are') + ' skipped and stay on the sheet.' }) : null,
+                pre === null ? el('p', { class: 'ic-meta', text: 'Checking today\'s adjustments…' }) : (pre && pre.length ? el('div', { class: 'ic-commit-warn' }, [
+                    el('b', { text: pre.length + ' item' + (pre.length === 1 ? ' was' : 's were') + ' already adjusted by a count today: ' }),
+                    pre.slice(0, 8).map(function (a) { var m = s.byItem[a.item]; return (m ? m.name : 'item ' + a.item) + ' (' + signed(a.qty) + (a.tranid ? ', #' + a.tranid : '') + ')'; }).join('; ') + (pre.length > 8 ? '; …' : ''),
+                    ' Submitting adjusts them again against the current on-hand.'
+                ]) : null),
+                el('div', { class: 'ic-actions' }, [
+                    el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Cancel', onclick: function () { state.confirm = false; render(); } }),
+                    el('button', { class: 'ic-btn is-ok', type: 'button', text: nothing ? 'Yes, record the count' : 'Yes, submit count', onclick: submitShared })
+                ])
+            ]));
+        } else {
+            form.appendChild(el('div', { class: 'ic-actions' }, [
+                el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Refresh on-hand', onclick: function () { s.fresh = {}; s.freshDone = false; s.freshLoading = false; render(); } }),
+                el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Discard all counts…', onclick: discardAll }),
+                el('button', { class: 'ic-btn', type: 'button', text: 'Submit count…', onclick: function () {
+                    state.submitError = '';
+                    if (BOOT.multiLoc && !state.loc) { state.submitError = 'Pick a location at the top first.'; render(); return; }
+                    if (!BOOT.accountLocked && !state.account) { state.submitError = 'Pick the adjustment account first.'; render(); return; }
+                    if (!s.freshDone) { state.submitError = 'Still loading on-hand — one moment.'; render(); return; }
+                    if (t.items - t.blocked <= 0) { state.submitError = 'No countable items on the shared sheet.'; render(); return; }
+                    state.confirm = true; s.precheck = null; render();
+                    apiPost('precheck', { loc: state.loc || '', items: s.items.map(function (m) { return m.id; }) }).then(function (r) {
+                        if (state.session !== s) { return; }
+                        s.precheck = (r && r.ok && r.adjusted) || [];
+                        if (state.confirm) { render(); }
+                    });
+                } })
+            ]));
+        }
+        main.appendChild(form);
+    }
+
+    function submitShared() {
+        var s = state.session, lines = [];
+        s.items.forEach(function (m) {
+            var g = mergedFor(m);
+            if (!g.usable) { return; }
+            lines.push({ item: m.id, count: g.total, orders: g.orders, by: g.names.join(', '), ids: g.ids, seen: g.seen });
+        });
+        var size = BOOT.sharedBatch || 100, batches = [];
+        for (var i = 0; i < lines.length; i += size) { batches.push(lines.slice(i, i + size)); }
+        var done = { adjustments: [], applied: 0, skipped: 0, blocked: [], unmarked: [], location: state.loc ? locName(state.loc) : '', shared: true };
+        state.confirm = false; state.submitting = true; state.submitError = '';
+        var n = 0;
+        function retryMark(unmarked, adj, cb) {
+            if (!unmarked || !unmarked.length) { cb(); return; }
+            apiPost('mark', { ids: unmarked, adjustment: adj ? adj.id : '' }).then(function (r) {
+                var left = (r && r.ok) ? (r.unmarked || []) : unmarked;
+                if (left.length && left.length < unmarked.length) { retryMark(left, adj, cb); return; }
+                done.unmarked = done.unmarked.concat(left);
+                cb();
+            });
+        }
+        function finish() {
+            state.submitting = false; state.progress = '';
+            state.session = null;    // whatever is left -- blocked, or arrived meanwhile -- reloads on the next visit
+            state.done = done; state.view = 'done';
+            render();
+            reconcile();             // this device's own posted lines leave its local sheet
+        }
+        function next() {
+            if (n >= batches.length) { finish(); return; }
+            var batch = batches[n++];
+            state.progress = batches.length > 1 ? 'Submitting batch ' + n + ' of ' + batches.length + '…' : 'Creating the Inventory Adjustment…';
+            render();
+            apiPost('submit', { loc: state.loc || '', account: state.account || '', memo: state.memo || '', lines: batch }).then(function (res) {
+                if (!res || !res.ok) {
+                    state.submitting = false; state.progress = '';
+                    state.submitError = ((res && res.error) || 'Submit failed.') + (n > 1 && !(res && res.stale) ? ' (Earlier batches posted; what is left is still on the shared sheet.)' : '');
+                    if (done.adjustments.length) { state.done = done; }
+                    // A stale item was decided on old numbers: forget that decision, keep the others.
+                    (res && res.stale || []).forEach(function (st) {
+                        delete s.overrides[st.item];
+                        var m = s.byItem[st.item];
+                        if (m) { m.subs.forEach(function (l) { delete s.excluded[l.id]; }); }
+                    });
+                    loadSession();
+                    render();
+                    return;
+                }
+                if (res.adjustment) { done.adjustments.push(res.adjustment); }
+                done.applied += (res.applied || []).length;
+                done.skipped += (res.skipped || []).length;
+                (res.blocked || []).forEach(function (b) { done.blocked.push({ name: b.name || ('item ' + b.item), reason: b.reason || '' }); });
+                retryMark(res.unmarked, res.adjustment, next);
+            });
+        }
+        next();
+    }
+
+    // Everyone's open lines at this location, gone. The counters' devices notice
+    // within a minute and empty their sheets too.
+    function discardAll() {
+        var s = state.session || { lines: [] };
+        var who = {};
+        s.lines.forEach(function (l) { who[l.counterName || '?'] = true; });
+        var n = s.lines.length, w = Object.keys(who).length;
+        if (!window.confirm('Discard all ' + n + ' count line' + (n === 1 ? '' : 's') + ' from ' + w + ' counter' + (w === 1 ? '' : 's') + (state.loc ? ' at ' + locName(state.loc) : '') + '? Their sheets empty out too. Nothing is posted to NetSuite.')) { return; }
+        state.submitting = true; state.progress = 'Discarding…'; state.submitError = ''; render();
+        function step() {
+            apiPost('discard', { loc: state.loc || '', scope: 'all' }).then(function (r) {
+                if (!r || !r.ok) { state.submitting = false; state.progress = ''; state.submitError = (r && r.error) || 'Discard failed.'; state.session = null; render(); return; }
+                if (r.remaining > 0 && r.deleted > 0) { step(); return; }
+                state.submitting = false; state.progress = ''; state.session = null;
+                state.order.slice().forEach(removeLocal);
+                sync.dirty = {}; sync.removed = {};
+                render();
+            });
+        }
+        step();
+    }
+
     function paintTotals() {
         var t = totals();
         var e;
@@ -2107,6 +2985,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 
     function renderSheetView(main) {
         var t = totals();
+        if (!SHARED && BOOT.canSubmit && BOOT.shared && !BOOT.shared.off) { main.appendChild(setupNotice()); }
+        if (SHARED) { main.appendChild(deviceLabelField()); }
         main.appendChild(el('div', { class: 'ic-sum' }, [
             el('div', {}, [el('b', { id: 'icTotLines', text: String(t.lines) }), 'lines']),
             el('div', {}, [el('b', { id: 'icTotPos', text: '+' + fmt(t.pos) }), 'units up']),
@@ -2181,7 +3061,18 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 ])
             ]));
         } else if (!BOOT.canSubmit) {
-            form.appendChild(el('div', { class: 'ic-warn', text: 'Your role cannot post inventory adjustments. Export the sheet above and hand it to an administrator, who can key or import the counts.' }));
+            form.appendChild(el('div', { class: 'ic-warn', text: SHARED
+                ? 'Your counts save to NetSuite as you go (see the status at the top). The administrator reviews everyone\'s lines together and posts the adjustment; these leave your sheet once that happens.'
+                : 'Your role cannot post inventory adjustments. Export the sheet above and hand it to an administrator, who can key or import the counts.' }));
+            if (SHARED) {
+                form.appendChild(el('div', { class: 'ic-actions' }, [
+                    el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Clear my lines on this device…', onclick: function () {
+                        if (window.confirm('Remove all ' + state.order.length + ' lines you counted on this device? They are removed from the shared count too. Nothing is posted to NetSuite.')) {
+                            state.order.slice().forEach(removeLine); state.memo = ''; saveSheet(); render();
+                        }
+                    } })
+                ]));
+            }
         } else {
             form.appendChild(el('div', { class: 'ic-actions' }, [
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Refresh on-hand', onclick: refreshOnHand }),
@@ -2282,7 +3173,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return y * 10000 + parseInt(m[1], 10) * 100 + parseInt(m[2], 10);
     }
 
-    function exportBar(what) {
+    function exportBar(what, linesFn) {
         function go(format) {
             var fields = { action: 'export', what: what, format: format, loc: state.loc || '', instock: state.instock ? 'T' : 'F', q: state.q || '' };
             if (what === 'orders') {
@@ -2295,7 +3186,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             } else if (what === 'sheet') {
                 fields.payload = JSON.stringify({
                     memo: state.memo || '',
-                    lines: state.order.map(function (id) { return state.sheet[id]; }).filter(Boolean).map(function (l) {
+                    lines: linesFn ? linesFn() : state.order.map(function (id) { return state.sheet[id]; }).filter(Boolean).map(function (l) {
                         return { name: l.name, display: l.display || l.desc || '', vendor: l.vendor || '', onhand: l.onhand, count: l.count, orders: l.orders || [], by: l.by || '', when: fmtWhen(l.at) };
                     })
                 });
@@ -2513,10 +3404,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (d.blocked.length) {
             box.appendChild(el('ul', {}, d.blocked.map(function (b) { return el('li', { text: b.name + ' - ' + b.reason }); })));
         }
+        if (d.unmarked && d.unmarked.length) {
+            box.appendChild(el('div', { class: 'ic-warn', text: d.unmarked.length + ' count line' + (d.unmarked.length === 1 ? '' : 's') + ' posted but could not be marked as posted in NetSuite, so ' + (d.unmarked.length === 1 ? 'it' : 'they') + ' will show on the shared sheet again. Check the adjustment above before submitting them a second time.' }));
+        }
         main.appendChild(box);
         main.appendChild(el('div', { class: 'ic-actions' }, [
             el('button', { class: 'ic-btn', type: 'button', text: 'Count more items', onclick: function () { state.done = null; state.q = ''; state.loaded = false; state.results = []; state.view = 'search'; render(); } }),
-            state.order.length ? el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Back to sheet (' + state.order.length + ')', onclick: function () { state.done = null; state.view = 'sheet'; render(); } }) : null
+            d.shared ? el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Back to the shared sheet', onclick: function () { state.done = null; state.view = 'sheet'; render(); } })
+                : (state.order.length ? el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Back to sheet (' + state.order.length + ')', onclick: function () { state.done = null; state.view = 'sheet'; render(); } }) : null)
         ]));
     }
 
@@ -2526,6 +3421,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var head = el('div', { class: 'ic-head' });
         var row = el('div', { class: 'ic-head-row' }, [
             el('div', { class: 'ic-title', text: BOOT.title || 'Inventory Count' }),
+            SHARED ? el('span', { id: 'icSync', class: 'ic-sync', text: syncText() }) : null,
             BOOT.user ? el('div', { class: 'ic-user', text: BOOT.user }) : null
         ]);
         if (BOOT.multiLoc) {
@@ -2536,8 +3432,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 }
                 state.loc = ev.target.value; savePrefs(); loadSheet();
                 state.results = []; state.total = 0; state.page = 0; state.loaded = false; state.searchError = '';
-                state.allOrders = null; ordersCache = {};
+                state.allOrders = null; ordersCache = {}; state.session = null;
+                sync.dirty = {}; sync.removed = {};
                 render(); // the search view reloads the list for the new location
+                reconcile();
             } });
             sel.appendChild(el('option', { value: '', text: (BOOT.locations || []).length ? '— pick location —' : 'No locations found' }));
             (BOOT.locations || []).forEach(function (l) {
@@ -2553,7 +3451,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 el('button', { class: 'ic-tab' + (state.view === 'search' ? ' is-on' : ''), type: 'button', text: 'Count', onclick: function () { state.view = 'search'; state.done = null; render(); } }),
                 el('button', { class: 'ic-tab' + (state.view === 'orders' ? ' is-on' : ''), type: 'button', text: 'Open orders', onclick: function () { state.view = 'orders'; state.done = null; render(); } }),
                 el('button', { class: 'ic-tab' + (state.view === 'sheet' ? ' is-on' : ''), type: 'button', onclick: function () { state.view = 'sheet'; state.done = null; state.submitError = ''; state.confirm = false; render(); } }, [
-                    'Sheet', el('span', { id: 'icSheetBadge', class: 'ic-badge', text: String(state.order.length) })
+                    'Sheet', el('span', { id: 'icSheetBadge', class: 'ic-badge', text: String(sheetSize()) })
                 ])
             ])
         ]));
@@ -2576,7 +3474,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         // by id, which only works once the section is in the document.
         root.appendChild(main);
         if (state.view === 'done') { renderDoneView(main); }
-        else if (state.view === 'sheet') { renderSheetView(main); }
+        else if (state.view === 'sheet') { if (SHARED && BOOT.canSubmit) { renderSharedSheetView(main); } else { renderSheetView(main); } }
         else if (state.view === 'orders') { renderOrdersView(main); }
         else { renderSearchView(main); }
         main.appendChild(el('div', { class: 'ic-footer', text: BOOT.canSubmit
@@ -2603,9 +3501,20 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var pick = accts.filter(function (a) { return a.id === prefs.account; })[0] || accts.filter(function (a) { return a.suggested; })[0];
             state.account = pick ? pick.id : '';
         }
+        state.device = prefs.device || newDeviceId();
+        state.deviceLabel = prefs.deviceLabel || '';
         loadSheet();
         savePrefs();
         render();
+        if (SHARED) {
+            reconcile();
+            if (BOOT.canSubmit && !(BOOT.multiLoc && !state.loc)) { loadSession(); }
+            // Pick up posts and discards while the page sits open, and never
+            // let a tab close with counts that have not reached NetSuite.
+            setInterval(function () { if (!document.hidden && !sync.inflight) { reconcile(); } }, 60000);
+            document.addEventListener('visibilitychange', function () { if (!document.hidden) { reconcile(); } });
+            window.addEventListener('beforeunload', function (ev) { if (pendingCount()) { ev.preventDefault(); ev.returnValue = ''; } });
+        }
     }
 
     if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); }

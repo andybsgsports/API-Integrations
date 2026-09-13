@@ -110,6 +110,11 @@ counted by Andrew Murray`, or with ticked orders `Counted 20 (incl. 5 on open
 orders: JH-SO625); on hand 25; counted by Andrew Murray`, so an auditor can
 see which orders the units belonged to and who took the count.
 
+**Several people at once.** With the shared count set up (see below), every
+device's lines save to NetSuite as they are keyed and one administrator posts
+the merged result; the same item counted in two places is added together and
+flagged for review.
+
 **Serialized, lot-numbered and bin-tracked items** need Inventory Detail, which
 this tool does not collect. They are flagged in search results (no count box)
 and, if they somehow reach a submit, refused server-side with a reason so the
@@ -148,6 +153,10 @@ rest of the sheet still posts. Adjust those the normal way.
 | `SEARCH_PAGE_SIZE` | `100` | Rows per page of the list (a **Load more** button pages on). |
 | `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand (on-order-only items are not in stock). The toggle on the page overrides it and is remembered per browser. |
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
+| `SHARED_RECORD` | `customrecord_bsg_count_line` | The custom record that holds every device's count lines (see *Shared count*). `null` switches the shared count off: one sheet per device, submitted from that device. |
+| `SHARED_FIELDS` | `custrecord_bcl_*` | The record's field IDs, if you named them differently. |
+| `SHARED_BATCH` | `100` | Items per Inventory Adjustment when posting the shared count (each line is also marked posted in the same request). |
+| `SYNC_MAX_LINES` | `50` | Lines a device sends per save; a burst is sent in several saves. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 | `SUBMIT_ROLE_IDS` | `[3]` | Internal ids of the roles allowed to post the adjustment. `3` is NetSuite's Administrator. Every other role counts, ticks open orders and exports, but sees no **Refresh on-hand** / **Clear sheet** / **Submit count** buttons, and the submit endpoint refuses them — a hidden button is not a permission. Find a role's id in the `id=` of its URL under Setup > Users/Roles > Manage Roles. `null` lets any role in the deployment's audience submit. |
 | `EXPORT_MAX_ROWS` | `20000` | Cap on rows in a CSV / Excel export. |
@@ -166,7 +175,7 @@ disappears and account-wide on-hand is used.
 2. Walk the list (or search to jump), key a count, **Add**. Repeat. Counts of
    **0** are valid (they zero the item out). Items you never key a count for
    are left exactly as they are — the tool never zeroes anything on its own. Switch to the **Sheet** tab any time to review or fix lines
-   (`×` removes one, **Clear sheet** removes all — nothing is posted until
+   (`×` removes one, **Clear** removes all of yours — nothing is posted until
    Submit).
 3. Open the **Open orders** tab and walk the staging area, the decorator log
    and the pickup rack: tick each line as its units are found. Use the filter
@@ -178,11 +187,79 @@ disappears and account-wide on-hand is used.
    5005 INVENTORY ADJUSTMENT; there is nothing to pick.
 
 **Counters who cannot submit.** Only `SUBMIT_ROLE_IDS` (Administrator by
-default) sees Refresh on-hand, Clear sheet and Submit count. Everyone else
-counts and ticks orders exactly the same way, then **exports the sheet** (CSV,
-Excel or PDF) and hands it over; an administrator keys or imports those counts
-and posts the adjustment. Their sheet lives in their own browser, so the export
-is the handoff — clearing their browser data loses it.
+default) sees Refresh on-hand, Discard and Submit count. Everyone else counts
+and ticks orders exactly the same way. With the **shared count** set up (next
+section) their lines save to NetSuite as they go and appear on the
+administrator's sheet — nothing to hand over. Without it, their sheet lives
+only in their own browser: they **export** it (CSV, Excel or PDF) and an
+administrator keys the counts.
+
+## Shared count (several people, one submit)
+
+Five people counting on five devices is the normal case, and one administrator
+should post the result once. The shared count does that: every line a device
+keys, ticks or edits is saved to NetSuite within a second or two (a status in
+the page header reads *Saved to NetSuite*, *Saving…*, or *Not saved — retrying*),
+and the administrator's **Sheet** tab shows everyone's lines merged per item.
+
+**One-time setup (~8 minutes, administrator).** Create a custom record type
+under Customization › Lists, Records & Fields › Record Types › **New**:
+
+| | Value |
+|---|---|
+| Record type ID | `customrecord_bsg_count_line` (name it *BSG Count Line*) |
+| Access Type | **No Permission Required** — counters' roles write to it through the page |
+| Field `custrecord_bcl_item` | List/Record → **Item**, mandatory |
+| Field `custrecord_bcl_location` | List/Record → **Location** |
+| Field `custrecord_bcl_shelf` | Decimal Number |
+| Field `custrecord_bcl_orders` | Long Text |
+| Field `custrecord_bcl_onhand` | Decimal Number |
+| Field `custrecord_bcl_counter` | List/Record → **Employee** |
+| Field `custrecord_bcl_device` | Free-Form Text |
+| Field `custrecord_bcl_device_label` | Free-Form Text |
+| Field `custrecord_bcl_posted` | Check Box |
+| Field `custrecord_bcl_adjustment` | List/Record → **Transaction** |
+
+Type the IDs exactly (NetSuite prefixes `custrecord_` for you on the field
+form — enter the part after it if the prefix is already shown). Until the
+record exists, administrators see a **Shared count is not set up yet** notice
+on the Sheet tab listing anything missing, and the page keeps working the old
+way — one sheet per device.
+
+**How it behaves.**
+
+- Each device names itself once on the Sheet tab (*This device* →
+  "Warehouse tablet 1"). The administrator sees `Jeff Howard · Warehouse
+  tablet 1 · 60 · 10:02` under each item, so a count traces to a place as well
+  as a person.
+- **The same item counted by two people shows as two sub-lines and is added
+  together** — a warehouse count of 60 and a retail-floor count of 30 post as
+  90. The row is flagged *2 counters* and listed under **Needs review**. Untick
+  a sub-line to leave it out (a true duplicate rather than a second area), or
+  type a total by hand; a hand-set total is marked and can be reset.
+- Open-order ticks merge per order: two people ticking `JH-SO625` count its
+  units once.
+- The administrator's deltas are against **fresh** on-hand. A sub-line whose
+  on-hand has moved since it was counted says so (*on hand was 100 when
+  counted*), and the item is flagged.
+- **Submit** posts one adjustment per 100 items from the merged totals, memo
+  `Counted 90 (…); on hand 100; counted by Jeff Howard, Amy Fox`, and marks
+  every line behind it posted. Within a minute (or as soon as they return to
+  the tab) the counters' own sheets clear those lines.
+- If a counter changes a line after the administrator loaded the sheet, the
+  submit is refused — *New counts arrived for N items* — and the sheet
+  reloads with the new numbers; the administrator's decision on that item is
+  forgotten, the others kept. New items simply appear on the next load.
+- Before the confirm, the page checks for items a count already adjusted
+  **today** and lists them, so a second adjustment of the same item is a choice.
+- **Discard all counts…** deletes every open line at the location; each
+  device's sheet empties on its next reconcile. A counter can **Clear my lines
+  on this device** at any time.
+- A wiped browser (cleared data, private mode ended) gets its lines back from
+  NetSuite on the next load, under the same device id.
+
+Posted lines stay in NetSuite (Lists › Custom › BSG Count Line) linked to the
+adjustment, so who counted what is searchable later.
 
 ## Count-day rules (what moves inventory)
 
@@ -200,9 +277,12 @@ is the handoff — clearing their browser data loses it.
 - Units at the decoration facility are still on hand: tick their orders from
   the decoration log.
 
-Several people can count at once from their own devices; each submit is its
-own adjustment. Do not have two people count the *same* item at the same time
-— the second submit would set the count to its own number, not add to the first.
+Several people count at once from their own devices. With the shared count
+set up, one administrator posts everyone's lines together and two counts of
+the same item are added — so split the work by **item** (vendor, item-number
+range) rather than by area where you can, and leave *Correct* for items you
+have seen all of. Without the shared count, each device's submit is its own
+adjustment and would overwrite another's, so only one person should submit.
 
 ## Verify in sandbox
 
@@ -233,6 +313,20 @@ should equal what was keyed. Then repeat the same count — it should report
   item filter …`); those are remembered for a day so pages stay fast.
 - **Non-JSON response** errors on the page mean NetSuite returned an HTML error
   page; the deployment's execution log has the stack.
+- **"Shared count is not set up yet"** (administrators, Sheet tab) — the custom
+  record or one of its fields is missing; the notice names what. Counters see
+  nothing and keep counting; their sheets just stay on their devices until it
+  exists.
+- **"Not saved — retrying"** in the header — the device cannot reach NetSuite
+  (session expired, no signal). Counts stay on the device and go up when it
+  can; do not close the tab while it says so (the browser warns).
+- **"New counts arrived for N items"** on submit — a counter changed one of
+  those items after the sheet loaded. Nothing posted; the sheet has reloaded
+  with their numbers. Look at the flagged items and submit again.
+- **Lines reappear after a submit** — the adjustment posted but marking those
+  lines took more than one request and the last one failed (the result page
+  says so). Open the adjustment; if those items are on it, use **Discard**
+  for the leftovers rather than submitting them again.
 - **The page looks right but the type is Helvetica/Arial** — the page asks
   Google Fonts for Archivo. If the warehouse network blocks
   `fonts.googleapis.com` it falls back to the system sans automatically;
