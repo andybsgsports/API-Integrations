@@ -9,7 +9,11 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
 1. **The list.** The page opens on every item at the chosen
    location — NetSuite's current inventory snapshot, the same rows as the
    Physical Inventory Worksheet and the *Custom Current Inventory Snapshot 2*
-   report, sorted by item name, 100 per page with a **Load more** button. An
+   report, sorted by item name, 100 per page with a **Load more** button.
+   Colour/size children of a matrix item list by colour and then by size in
+   the order people say them — X-Small, Small, Small-Tall, Medium, Large,
+   X-Large, 2X-Large, 3X-Large (youth, one-size and numeric sizes included) —
+   not alphabetically; the exports follow the same order. An
    **In stock / All items** toggle switches between items that have quantity
    **on hand** (positive or negative) and the whole catalog at that location
    (the default, zeros included, matching the report's Show Zeros). Stock that

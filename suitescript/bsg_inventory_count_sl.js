@@ -481,6 +481,69 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     // the location (the current inventory snapshot, sorted like the Physical
     // Inventory Worksheet); with words it narrows that list. inStock keeps only
     // rows with quantity on hand (see stockFilter).
+    // Matrix children in the order people say them. Alphabetically the sizes of
+    // 1379806-Black run 2X-Large, 3X-Large, Large, Medium, Small, Small-Tall,
+    // X-Large, X-Small; a counter walking a rack wants X-Small, Small,
+    // Small-Tall, Medium, Large, X-Large, 2X-Large, 3X-Large. The list is
+    // already alphabetical, so a parent's children sit together; only those
+    // runs are reordered, by color and then size. Self-contained on purpose:
+    // the same source is sent to the browser (see renderPage).
+    function naturalItemOrder(items) {
+        var SIZES = [
+            ['youth x-small', 10], ['yxs', 10], ['youth small', 11], ['ys', 11], ['youth medium', 12], ['ym', 12], ['youth large', 13], ['yl', 13], ['youth x-large', 14], ['yxl', 14],
+            ['xxs', 18], ['2xs', 18], ['2x-small', 18], ['xs', 20], ['x-small', 20], ['xs/s', 25], ['s', 30], ['small', 30], ['s/m', 35], ['sm', 35], ['small/medium', 35],
+            ['m', 40], ['medium', 40], ['m/l', 45], ['medium/large', 45], ['l', 50], ['large', 50], ['l/xl', 55], ['lxl', 55], ['large/x-large', 55],
+            ['xl', 60], ['x-large', 60], ['xl/2xl', 65], ['xxl', 70], ['2xl', 70], ['2x-large', 70], ['xxxl', 80], ['3xl', 80], ['3x-large', 80],
+            ['4xl', 90], ['4x-large', 90], ['5xl', 100], ['5x-large', 100], ['6xl', 110], ['6x-large', 110],
+            ['osfa', 200], ['osfm', 200], ['os', 200], ['o/s', 200], ['one size', 200], ['one size fits all', 200], ['one size fits most', 200]
+        ];
+        var MODS = { tall: 1, long: 1, 'x-tall': 2, short: -1, regular: 0, reg: 0 };
+        function sizeRank(s) {
+            var t = String(s || '').trim().toLowerCase(), mod = 0;
+            if (!t) { return null; }
+            var m = /^(.+?)[-\s\/]+(x-tall|tall|long|short|regular|reg)$/.exec(t);
+            if (m) { mod = MODS[m[2]]; t = m[1]; }
+            for (var i = 0; i < SIZES.length; i++) { if (SIZES[i][0] === t) { return SIZES[i][1] + mod; } }
+            var n = /^(\d+(?:\.\d+)?)(?:\s*[xX\/]\s*(\d+(?:\.\d+)?))?$/.exec(t);   // shoes 9.5, waist 32x30, youth 7/8
+            if (n) { return 1000 + parseFloat(n[1]) + (n[2] ? parseFloat(n[2]) / 1000 : 0) + mod; }
+            return null;
+        }
+        // "1379806 : 1379806-Black-2X-Large" -> parent 1379806, color Black, rank 70
+        function parts(name) {
+            var full = String(name || ''), i = full.indexOf(' : ');
+            if (i < 0) { return { parent: '', color: '', rank: null }; }
+            var parent = full.slice(0, i), child = full.slice(i + 3), variant = child;
+            if (child.toLowerCase().indexOf(parent.toLowerCase() + '-') === 0) { variant = child.slice(parent.length + 1); }
+            var segs = variant.split('-'), best = null;
+            // the longest tail that reads as a size is the size; what is left is the color
+            for (var k = 1; k <= Math.min(3, segs.length); k++) {
+                var r = sizeRank(segs.slice(segs.length - k).join('-'));
+                if (r != null) { best = { rank: r, color: segs.slice(0, segs.length - k).join('-') }; }
+            }
+            return best ? { parent: parent, color: best.color, rank: best.rank } : { parent: parent, color: variant, rank: null };
+        }
+        var out = items.slice(), i = 0;
+        while (i < out.length) {
+            var p = parts(out[i].name), j = i + 1;
+            if (!p.parent) { i++; continue; }
+            while (j < out.length && parts(out[j].name).parent === p.parent) { j++; }
+            if (j - i > 1) {
+                var run = out.slice(i, j).map(function (it) { return { it: it, p: parts(it.name) }; });
+                run.sort(function (a, b) {
+                    var ca = a.p.color.toLowerCase(), cb = b.p.color.toLowerCase();
+                    if (ca !== cb) { return ca < cb ? -1 : 1; }
+                    var ra = a.p.rank == null ? 500 : a.p.rank, rb = b.p.rank == null ? 500 : b.p.rank;
+                    if (ra !== rb) { return ra - rb; }
+                    var na = String(a.it.name).toLowerCase(), nb = String(b.it.name).toLowerCase();
+                    return na < nb ? -1 : na > nb ? 1 : 0;
+                });
+                for (var k2 = 0; k2 < run.length; k2++) { out[i + k2] = run[k2].it; }
+            }
+            i = j;
+        }
+        return out;
+    }
+
     function searchItems(q, locId, page, inStock) {
         var words = tokenize(q);
         if (!multiLocation()) { locId = null; }
@@ -1252,6 +1315,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 });
             }
         });
+        rows = naturalItemOrder(rows);
         return {
             title: 'Inventory count list' + (where ? ' - ' + where : ''),
             subtitle: (inStock && stockApplied ? 'Items in stock (quantity on hand)' : 'All items') + (words.length ? ' matching "' + words.join(' ') + '"' : '') + ' · ' + rows.length + ' items · blank Count column to fill in',
@@ -1496,6 +1560,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             '<style>' + PAGE_CSS + '</style></head>' +
             '<body><div id="app"><div class="ic-loading">Loading&hellip;</div></div>' +
             '<script>window.INVCOUNT_BOOT=' + jsonForHtml(boot) + ';</script>' +
+            '<script>var naturalItemOrder = ' + naturalItemOrder.toString() + ';</script>' +
             '<script>' + CLIENT_JS + '</script>' +
             '</body></html>'
         );
@@ -1909,6 +1974,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (!ms) { return ''; }
         try { return new Date(ms).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
         catch (e) { return new Date(ms).toLocaleString(); }
+    }
+    // A "last modified" from the server: NetSuite hands back the user's own
+    // display format, which is shown as is; an ISO string is made readable.
+    function fmtAt(v) {
+        var t = String(v || '');
+        if (!/^\d{4}-\d{2}-\d{2}T/.test(t)) { return t; }
+        var d = new Date(t);
+        return isNaN(d.getTime()) ? t : fmtWhen(d.getTime());
     }
     // The item name opens its record in a new tab. The generic item page takes
     // any item type, so no record-type lookup is needed.
@@ -2473,7 +2546,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             ])
         ]));
         var list = el('div', { class: 'ic-list' });
-        state.results.forEach(function (it) { list.appendChild(resultRow(it)); });
+        naturalItemOrder(state.results).forEach(function (it) { list.appendChild(resultRow(it)); });
         var table = el('div', { class: 'ic-table is-items' });
         if (state.results.length) {
             table.appendChild(el('div', { class: 'ic-thead' }, [
@@ -2633,7 +2706,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             m.subs.push(l);
         });
         items.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
-        s.items = items; s.byItem = byItem;
+        s.items = naturalItemOrder(items); s.byItem = byItem;
     }
     // Fresh on-hand for every merged item, 200 at a time; the deltas the
     // administrator sees are against NetSuite right now, not the counters' screens.
@@ -2717,7 +2790,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 m.subs.length > 1 ? cb : el('span', { class: 'ic-sub-dot', text: '·' }),
                 el('span', {}, [
                     el('b', { text: fmt(l.shelf) + extra }),
-                    ' · ' + (l.counterName || 'unknown') + (l.label ? ' · ' + l.label : '') + (l.at ? ' · ' + l.at : ''),
+                    ' · ' + (l.counterName || 'unknown') + (l.label ? ' · ' + l.label : '') + (l.at ? ' · ' + fmtAt(l.at) : ''),
                     stale ? el('span', { class: 'ic-drift', text: ' · on hand was ' + fmt(l.onhand) + ' when counted' }) : null
                 ])
             ]));
@@ -2760,7 +2833,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return s.items.map(function (m) {
             var g = mergedFor(m), f = g.fresh;
             return { name: f.name || m.name, display: f.display || f.desc || '', vendor: f.vendor || '', onhand: g.onhand, count: g.total,
-                orders: g.orders, by: g.names.join(', '), when: g.latest || '' };
+                orders: g.orders, by: g.names.join(', '), when: fmtAt(g.latest) };
         });
     }
 
@@ -2791,7 +2864,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (counterKeys.length) {
             main.appendChild(el('div', { class: 'ic-chips' }, counterKeys.map(function (k) {
                 var c = t.counters[k];
-                return el('span', { class: 'ic-chip' }, [el('b', { text: c.name }), c.label ? el('span', { text: c.label }) : null, el('span', { class: 'ic-meta', text: c.lines + ' line' + (c.lines === 1 ? '' : 's') + (c.at ? ' · ' + c.at : '') })]);
+                return el('span', { class: 'ic-chip' }, [el('b', { text: c.name }), c.label ? el('span', { text: c.label }) : null, el('span', { class: 'ic-meta', text: c.lines + ' line' + (c.lines === 1 ? '' : 's') + (c.at ? ' · ' + fmtAt(c.at) : '') })]);
             })));
         }
         if (s.truncated) { main.appendChild(el('div', { class: 'ic-warn', text: 'The shared count has more than 5,000 lines; only the first 5,000 are shown. Post these, then reload for the rest.' })); }
@@ -3477,9 +3550,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         else if (state.view === 'sheet') { if (SHARED && BOOT.canSubmit) { renderSharedSheetView(main); } else { renderSheetView(main); } }
         else if (state.view === 'orders') { renderOrdersView(main); }
         else { renderSearchView(main); }
-        main.appendChild(el('div', { class: 'ic-footer', text: BOOT.canSubmit
-            ? 'Counts are saved in this browser until you submit. Submitting creates an Inventory Adjustment in NetSuite as you.'
-            : 'Counts are saved in this browser. Your role cannot post adjustments, so export the sheet when you are done.' }));
+        main.appendChild(el('div', { class: 'ic-footer', text: SHARED
+            ? (BOOT.canSubmit
+                ? 'Counts save to NetSuite as they are keyed, from every device. Submitting posts everyone\'s merged sheet as an Inventory Adjustment, as you.'
+                : 'Counts save to NetSuite as you key them. An administrator reviews everyone\'s lines together and posts the adjustment.')
+            : (BOOT.canSubmit
+                ? 'Counts are saved in this browser until you submit. Submitting creates an Inventory Adjustment in NetSuite as you.'
+                : 'Counts are saved in this browser. Your role cannot post adjustments, so export the sheet when you are done.') }));
         if (state.view === 'search' && (keepSearchFocus || !state.q)) {
             var s = document.getElementById('icSearch');
             if (s && !('ontouchstart' in window && !keepSearchFocus)) { s.focus(); }
