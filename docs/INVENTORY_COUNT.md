@@ -89,7 +89,9 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    When a line's count is below the quantity committed to open sales orders,
    the sheet warns — that is the "physically gone but never marked shipped"
    case, which should be fixed by shipping the fulfillment, not by adjusting.
-4. **Export** — each tab has CSV, Excel and PDF buttons. The Count tab
+4. **Export** — each tab has CSV and PDF buttons, plus Excel where the account
+   has NetSuite's `N/compress` module (BSG's does not, so the button is not
+   shown there; CSV opens in Excel). The Count tab
    exports the whole list as filtered on screen (In stock / All items and any
    search), with Pref. vendor and a blank Count column to fill in by hand;
    the Open orders tab exports every line led by Sales rep (sorted rep, then

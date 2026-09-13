@@ -1528,6 +1528,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // Shared count: ready, not set up (with what is missing), or switched off.
         try { boot.shared = sharedStatus(); } catch (e3) { boot.shared = { ready: false, error: userErr(e3) }; }
         boot.sharedBatch = CONFIG.SHARED_BATCH;
+        // Excel needs N/compress, which not every account has; the page only
+        // offers the button where it does (CSV opens in Excel regardless).
+        try { require('N/compress'); boot.excel = true; } catch (e4) { boot.excel = false; }
         boot.sharedSetup = { record: CONFIG.SHARED_RECORD, fields: CONFIG.SHARED_FIELDS };
         if (boot.multiLoc) {
             try { boot.locations = listLocations(); } catch (e1) { boot.warnings.push('Could not list locations: ' + userErr(e1)); }
@@ -2032,16 +2035,26 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 return;
             }
             sync.backoff = 0; sync.error = ''; sync.lastOk = Date.now();
-            var failed = {};
-            (res.errors || []).forEach(function (e) { failed[e.item] = e.error; });
+            var failed = {}, nFailed = 0, firstErr = '';
+            (res.errors || []).forEach(function (e) { failed[e.item] = e.error; nFailed++; if (!firstErr) { firstErr = e.error; } });
             ids.forEach(function (id) {
                 if (sync.dirty[id] !== sentAt[id]) { return; }      // changed again while in flight: goes next time
                 delete sync.dirty[id];
                 var l = state.sheet[id];
-                if (l) { if (failed[id]) { l.error = 'Not saved to NetSuite: ' + failed[id]; } else { l.synced = true; } }
+                if (l) { if (failed[id]) { l.error = 'Not saved to NetSuite: ' + failed[id]; } else { l.synced = true; l.error = ''; } }
             });
             dels.forEach(function (id) { delete sync.removed[id]; });
             saveSheet();
+            // The administrator's merged sheet now lags this device's own lines.
+            if (BOOT.canSubmit && state.session && (upserts.length || dels.length)) { state.session.stale = true; }
+            if (nFailed) {
+                // NetSuite refused these (a mandatory field, a permission): say so
+                // in the header and leave them until the line is edited again.
+                sync.failed = nFailed; sync.error = firstErr; sync.status = 'error'; paintSync();
+                if (pendingCount()) { scheduleSync(50); }
+                return;
+            }
+            sync.failed = 0;
             if (pendingCount()) { scheduleSync(50); } else { sync.status = 'saved'; paintSync(); }
         });
     }
@@ -2050,6 +2063,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var n = pendingCount();
         if (sync.status === 'saving') { return 'Saving to NetSuite…'; }
         if (sync.status === 'offline') { return 'Not saved (' + n + ' line' + (n === 1 ? '' : 's') + ') — retrying'; }
+        if (sync.status === 'error') { return 'NetSuite refused ' + sync.failed + ' line' + (sync.failed === 1 ? '' : 's') + ': ' + sync.error; }
         if (sync.status === 'pending') { return n + ' line' + (n === 1 ? '' : 's') + ' to save'; }
         if (sync.lastOk) { return 'Saved to NetSuite · ' + fmtWhen(sync.lastOk); }
         return 'Shared count';
@@ -2058,7 +2072,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var e = document.getElementById('icSync');
         if (!e) { return; }
         e.textContent = syncText();
-        e.className = 'ic-sync' + (sync.status === 'offline' ? ' is-bad' : (sync.status === 'saving' || sync.status === 'pending') ? ' is-busy' : '');
+        e.className = 'ic-sync' + ((sync.status === 'offline' || sync.status === 'error') ? ' is-bad' : (sync.status === 'saving' || sync.status === 'pending') ? ' is-busy' : '');
         e.title = sync.error || '';
     }
     // What the server holds for this device against what the browser holds.
@@ -2733,7 +2747,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // out, plus each ticked open order once (two people ticking the same order
     // are agreeing, not doubling it), unless the administrator set a total.
     function mergedFor(m) {
-        var s = state.session, shelf = 0, orders = {}, refs = [], names = [], ids = [], live = 0, latest = 0;
+        var s = state.session, shelf = 0, orders = {}, refs = [], names = [], ids = [], live = 0, latest = '';
         m.subs.forEach(function (l) {
             ids.push(l.id);
             if (s.excluded[l.id]) { return; }
@@ -2741,7 +2755,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             shelf += Number(l.shelf) || 0;
             (l.orders || []).forEach(function (o) { if (!orders[o.ref]) { orders[o.ref] = Number(o.qty) || 0; refs.push(o.ref); } });
             if (l.counterName && names.indexOf(l.counterName) === -1) { names.push(l.counterName); }
-            if (l.at > latest) { latest = l.at; }
+            if (String(l.at || '') > latest) { latest = String(l.at); }
         });
         var onOrders = 0;
         refs.forEach(function (r) { onOrders += orders[r]; });
@@ -2846,7 +2860,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             return;
         }
         var s = state.session;
-        if (!s || s.loc !== state.loc) { loadSession(); s = state.session; }
+        if (!s || s.loc !== state.loc || (s.stale && !s.loading && !state.submitting)) { loadSession(); s = state.session; }
         main.appendChild(deviceLabelField());
         if (s.loading) { main.appendChild(el('div', { class: 'ic-progress', text: 'Loading everyone\'s counts…' })); return; }
         if (s.error) {
@@ -3279,7 +3293,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return el('div', { class: 'ic-export', 'data-export': what }, [
             el('span', { text: label }),
             el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'CSV', onclick: function () { go('csv'); } }),
-            el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Excel', onclick: function () { go('xlsx'); } }),
+            BOOT.excel === false ? null : el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Excel', onclick: function () { go('xlsx'); } }),
             el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'PDF', onclick: function () { go('pdf'); } })
         ]);
     }
@@ -3512,6 +3526,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 sync.dirty = {}; sync.removed = {};
                 render(); // the search view reloads the list for the new location
                 reconcile();
+                if (SHARED && BOOT.canSubmit && state.loc) { loadSession(); }   // the Sheet badge shows what is waiting here
             } });
             sel.appendChild(el('option', { value: '', text: (BOOT.locations || []).length ? '— pick location —' : 'No locations found' }));
             (BOOT.locations || []).forEach(function (l) {
@@ -3526,7 +3541,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             el('div', { class: 'ic-tabseg', role: 'tablist' }, [
                 el('button', { class: 'ic-tab' + (state.view === 'search' ? ' is-on' : ''), type: 'button', text: 'Count', onclick: function () { state.view = 'search'; state.done = null; render(); } }),
                 el('button', { class: 'ic-tab' + (state.view === 'orders' ? ' is-on' : ''), type: 'button', text: 'Open orders', onclick: function () { state.view = 'orders'; state.done = null; render(); } }),
-                el('button', { class: 'ic-tab' + (state.view === 'sheet' ? ' is-on' : ''), type: 'button', onclick: function () { state.view = 'sheet'; state.done = null; state.submitError = ''; state.confirm = false; render(); } }, [
+                el('button', { class: 'ic-tab' + (state.view === 'sheet' ? ' is-on' : ''), type: 'button', onclick: function () {
+                    state.view = 'sheet'; state.done = null; state.submitError = ''; state.confirm = false;
+                    // Coming back to the merged sheet after a while: show what has arrived since.
+                    if (SHARED && BOOT.canSubmit && state.session && !state.session.loading && Date.now() - (state.session.loadedAt || 0) > 30000) { state.session.stale = true; }
+                    render();
+                } }, [
                     'Sheet', el('span', { id: 'icSheetBadge', class: 'ic-badge', text: String(sheetSize()) })
                 ])
             ])
@@ -3591,7 +3611,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (BOOT.canSubmit && !(BOOT.multiLoc && !state.loc)) { loadSession(); }
             // Pick up posts and discards while the page sits open, and never
             // let a tab close with counts that have not reached NetSuite.
-            setInterval(function () { if (!document.hidden && !sync.inflight) { reconcile(); } }, 60000);
+            setInterval(function () {
+                if (document.hidden || sync.inflight) { return; }
+                reconcile();
+                // The administrator's merged sheet follows the counters while it is
+                // being looked at and nothing is mid-edit or mid-submit.
+                var a = document.activeElement, typing = a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
+                if (BOOT.canSubmit && state.view === 'sheet' && state.session && !state.session.loading && !state.submitting && !state.confirm && !typing) { loadSession(); }
+            }, 60000);
             document.addEventListener('visibilitychange', function () { if (!document.hidden) { reconcile(); } });
             window.addEventListener('beforeunload', function (ev) { if (pendingCount()) { ev.preventDefault(); ev.returnValue = ''; } });
         }
