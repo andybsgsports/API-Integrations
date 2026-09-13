@@ -1128,6 +1128,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     record.submitFields({ type: CONFIG.SHARED_RECORD, id: existing[id], values: vals });
                 } else {
                     var rec = record.create({ type: CONFIG.SHARED_RECORD });
+                    // If the record type kept its Name field, give it one rather
+                    // than fail the save; without a Name field this is a no-op.
+                    trySet(rec, 'name', 'Item ' + id + ' · ' + g.device.slice(0, 8));
                     rec.setValue({ fieldId: F.item, value: id });
                     if (g.locId) { rec.setValue({ fieldId: F.location, value: g.locId }); }
                     rec.setValue({ fieldId: F.counter, value: g.uid });

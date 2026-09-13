@@ -213,6 +213,7 @@ under Customization › Lists, Records & Fields › Record Types › **New**:
 |---|---|
 | Record type ID | `customrecord_bsg_count_line` (name it *BSG Count Line*) |
 | Access Type | **No Permission Required** — counters' roles write to it through the page |
+| Include Name Field | Either way — the page fills a Name in if the field exists |
 | Field `custrecord_bcl_item` | List/Record → **Item**, mandatory |
 | Field `custrecord_bcl_location` | List/Record → **Location** |
 | Field `custrecord_bcl_shelf` | Decimal Number |
