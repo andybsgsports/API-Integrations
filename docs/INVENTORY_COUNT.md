@@ -82,15 +82,24 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    themselves start collapsed and open on a click (or **Expand all**), each
    with its own totals. **Collapse all** folds everything all the way down to
    the sales rep names (not just each order's lines); **Expand all** reopens
-   every rep section and every order under it. The filter box narrows by
+   every rep section and every order under it. **Select all**, next to them,
+   ticks every countable line for every sales rep and every order at once
+   (someone else's already-ticked lines are left alone); **Clear my ticks**
+   undoes every line ticked from this device the same way. Both ask for
+   confirmation first, naming how many lines are about to move, since one
+   click can affect thousands of lines across the whole location. Type in
+   the filter box first to narrow either button to just what it matches —
+   an item, a sales rep, a customer or an order number — instead of
+   everything at the location. The filter box narrows by
    order number, customer, sales rep or item and opens what it matches, even
    inside a rep section that was collapsed. Orders carrying no sales rep
    group under *No sales rep*, last. Tick a line once its units are found and
    those units are added to
    the item's count on the sheet (the line is created if needed); untick to
    take them back out, and a line that only existed because of a tick leaves
-   the sheet again. An order with several lines has a **Select all** row
-   under its number that ticks or unticks every countable line at once.
+   the sheet again. An order with several lines also has its own **Select
+   all** row under its number that ticks or unticks just that order's
+   countable lines at once.
    **Two lines of the same item on one order** — two decoration jobs on one
    blank, say — are told apart by the line's own position on the order, not
    just the order number, so each is listed and tickable on its own and both
@@ -393,7 +402,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.15` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.16` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
