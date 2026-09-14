@@ -323,6 +323,13 @@ should equal what was keyed. Then repeat the same count — it should report
   item filter …`); those are remembered for a day so pages stay fast.
 - **Non-JSON response** errors on the page mean NetSuite returned an HTML error
   page; the deployment's execution log has the stack.
+- **Someone's ticks or counts are not showing on another device** — first
+  compare the version in each page's footer (`v2026-09-14.2` …): a tab left
+  open from before an upload keeps running the old copy until it is reloaded.
+  Then open the Open orders tab (it fetches every device's ticks each time it
+  opens, on Reload, and every 30 seconds while showing). If NetSuite refused
+  the request, the tab says *Other devices' ticks could not be loaded* with
+  the reason.
 - **"Shared count is not set up yet"** (administrators, Sheet tab) — the custom
   record or one of its fields is missing; the notice names what. Counters see
   nothing and keep counting; their sheets just stay on their devices until it

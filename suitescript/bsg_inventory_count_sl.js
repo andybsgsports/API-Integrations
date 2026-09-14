@@ -48,6 +48,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
+        // Shown in the page footer so a device running an old copy is obvious.
+        VERSION: '2026-09-14.2',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1544,6 +1546,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // Shared count: ready, not set up (with what is missing), or switched off.
         try { boot.shared = sharedStatus(); } catch (e3) { boot.shared = { ready: false, error: userErr(e3) }; }
         boot.sharedBatch = CONFIG.SHARED_BATCH;
+        boot.version = CONFIG.VERSION;
         // Excel needs N/compress, which not every account has; the page only
         // offers the button where it does (CSV opens in Excel regardless).
         try { require('N/compress'); boot.excel = true; } catch (e4) { boot.excel = false; }
@@ -2266,20 +2269,32 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     }
     // Ticks made on other devices (action=ticks), shown locked on this one so
     // nobody hunts for units that have already been found.
-    var others = { map: {}, loadedAt: 0, loading: false };
+    var others = { map: {}, loadedAt: 0, loading: false, error: '', waiters: [] };
     function othersKey(item, ref) { return String(item) + '|' + String(ref); }
     function loadOthers(cb) {
-        if (!SHARED || others.loading || (BOOT.multiLoc && !state.loc)) { if (cb) { cb(false); } return; }
+        if (!SHARED || (BOOT.multiLoc && !state.loc)) { if (cb) { cb(false); } return; }
+        if (cb) { others.waiters.push(cb); }
+        if (others.loading) { return; }            // the fetch in flight will call every waiter
         others.loading = true;
         apiGet('ticks', { loc: state.loc || '', device: state.device }).then(function (res) {
             others.loading = false;
-            if (!res || !res.ok) { if (cb) { cb(false); } return; }
-            var map = {};
-            (res.ticks || []).forEach(function (t) { map[othersKey(t.item, t.ref)] = { name: t.name || 'someone', label: t.label || '' }; });
-            var changed = JSON.stringify(map) !== JSON.stringify(others.map);
-            others.map = map; others.loadedAt = Date.now();
-            if (cb) { cb(changed); }
+            var waiters = others.waiters; others.waiters = [];
+            var changed = false;
+            if (!res || !res.ok) {
+                others.error = (res && res.error) || 'Could not reach NetSuite.';
+            } else {
+                var map = {};
+                (res.ticks || []).forEach(function (t) { map[othersKey(t.item, t.ref)] = { name: t.name || 'someone', label: t.label || '' }; });
+                changed = JSON.stringify(map) !== JSON.stringify(others.map) || !!others.error;
+                others.map = map; others.loadedAt = Date.now(); others.error = '';
+            }
+            waiters.forEach(function (w) { try { w(changed); } catch (e) { /* one bad waiter must not stop the rest */ } });
         });
+    }
+    // Repaints the Open orders tab that is on screen now, whichever render
+    // built it -- a callback from an earlier fetch must not paint a dead one.
+    function repaintOrders() {
+        if (state.view === 'orders' && state.repaintOrders) { state.repaintOrders(); }
     }
     function othersStale() { return SHARED && Date.now() - others.loadedAt > 30000; }
     // 'me', or who on another device ticked this order line, or null.
@@ -2436,6 +2451,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 return;
             }
             box.appendChild(el('div', { class: 'ic-meta', text: 'Received or pulled for these orders, not marked shipped. Tick an order once you have found its units (staged, at the decorator, waiting for pickup): they are added to the count.' }));
+            if (others.error) { box.appendChild(el('div', { class: 'ic-error', text: 'Other devices\' ticks could not be loaded: ' + others.error })); }
             cached.orders.forEach(function (o) { box.appendChild(orderRow(item, o, onChange)); });
         }
         return {
@@ -3396,6 +3412,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (clr) { clr.style.display = state.ordersFilter ? '' : 'none'; }
             if (a.loading) { box.appendChild(el('div', { class: 'ic-progress', text: 'Loading open orders…' })); if (cnt) { cnt.textContent = ''; } return; }
             if (a.error) { box.appendChild(el('div', { class: 'ic-error', text: a.error })); if (cnt) { cnt.textContent = ''; } return; }
+            if (SHARED && others.error) { box.appendChild(el('div', { class: 'ic-error', text: 'Other devices\' ticks could not be loaded, so only yours are shown: ' + others.error + ' Press Reload to try again.' })); }
             var q = state.ordersFilter.trim().toLowerCase();
             var groups = {}, order = [];
             a.entries.forEach(function (o) {
@@ -3528,8 +3545,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 box.appendChild(sec);
             });
         }
+        state.repaintOrders = paintGroups;
         paintGroups();
-        if (othersStale()) { loadOthers(function (changed) { if (changed && state.view === 'orders') { paintGroups(); } }); }
+        if (othersStale()) { loadOthers(function (changed) { if (changed) { repaintOrders(); } }); }
     }
 
     function renderDoneView(main) {
@@ -3621,6 +3639,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (!root) { return; }
         var active = document.activeElement;
         var keepSearchFocus = active && active.id === 'icSearch';
+        state.repaintOrders = null;
         root.innerHTML = '';
         renderHeader(root);
         var main = el('div', { class: 'ic-main' });
@@ -3635,13 +3654,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         else if (state.view === 'sheet') { if (SHARED && BOOT.canSubmit) { renderSharedSheetView(main); } else { renderSheetView(main); } }
         else if (state.view === 'orders') { renderOrdersView(main); }
         else { renderSearchView(main); }
-        main.appendChild(el('div', { class: 'ic-footer', text: SHARED
+        main.appendChild(el('div', { class: 'ic-footer', 'data-version': BOOT.version || '', text: (BOOT.version ? 'v' + BOOT.version + ' · ' : '') + (SHARED
             ? (BOOT.canSubmit
                 ? 'Counts save to NetSuite as they are keyed, from every device. Submitting posts everyone\'s merged sheet as an Inventory Adjustment, as you.'
                 : 'Counts save to NetSuite as you key them. An administrator reviews everyone\'s lines together and posts the adjustment.')
             : (BOOT.canSubmit
                 ? 'Counts are saved in this browser until you submit. Submitting creates an Inventory Adjustment in NetSuite as you.'
-                : 'Counts are saved in this browser. Your role cannot post adjustments, so export the sheet when you are done.') }));
+                : 'Counts are saved in this browser. Your role cannot post adjustments, so export the sheet when you are done.')) }));
         if (state.view === 'search' && (keepSearchFocus || !state.q)) {
             var s = document.getElementById('icSearch');
             if (s && !('ontouchstart' in window && !keepSearchFocus)) { s.focus(); }
@@ -3680,8 +3699,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 // being looked at and nothing is mid-edit or mid-submit.
                 var a = document.activeElement, typing = a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
                 if (BOOT.canSubmit && state.view === 'sheet' && state.session && !state.session.loading && !state.submitting && !state.confirm && !typing) { loadSession(); }
-                if (state.view === 'orders' && !typing) { loadOthers(function (changed) { if (changed && state.view === 'orders') { render(); } }); }
             }, 60000);
+            setInterval(function () {
+                if (document.hidden || state.view !== 'orders') { return; }
+                loadOthers(function (changed) { if (changed) { repaintOrders(); } });
+            }, 30000);
             document.addEventListener('visibilitychange', function () { if (!document.hidden) { reconcile(); } });
             window.addEventListener('beforeunload', function (ev) { if (pendingCount()) { ev.preventDefault(); ev.returnValue = ''; } });
         }
