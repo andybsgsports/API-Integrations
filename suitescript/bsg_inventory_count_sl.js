@@ -203,6 +203,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 out = mineLines(request.parameters);
             } else if (action === 'session') {
                 out = sessionLines(request.parameters);
+            } else if (action === 'ticks') {
+                out = sharedTicks(request.parameters);
             } else if (action === 'mark') {
                 out = isPost ? markPosted(body) : { ok: false, error: 'POST required.' };
             } else if (action === 'discard') {
@@ -1160,6 +1162,20 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         return { ok: true, lines: rows.map(function (r) { return { id: r.id, item: r.item, name: r.name, shelf: r.shelf, orders: r.orders, onhand: r.onhand, at: r.at }; }) };
     }
 
+    // Every ticked open order at the location from every device but the asking
+    // one, so a counter walking the floor sees what has already been found.
+    function sharedTicks(params) {
+        requireShared();
+        var g = deviceGuard(params);
+        if (g.error) { return { ok: false, error: g.error }; }
+        var F = CONFIG.SHARED_FIELDS, out = [];
+        sharedRows(sharedLocFilter([[F.posted, 'is', 'F']], g.locId)).forEach(function (r) {
+            if (r.device === g.device || !r.orders.length) { return; }
+            r.orders.forEach(function (o) { out.push({ item: r.item, ref: o.ref, qty: o.qty, name: r.counterName, label: r.label }); });
+        });
+        return { ok: true, ticks: out };
+    }
+
     // Every open line at the location, for the administrator's merged sheet.
     function sessionLines(params) {
         requireShared();
@@ -1782,6 +1798,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .ic-order a{color:var(--red-700);font-weight:700;text-decoration:underline;text-underline-offset:3px}
 .ic-order small{color:var(--muted);font-variant-numeric:tabular-nums}
 .ic-order.is-off{opacity:.45;cursor:default}
+.ic-tickedby{color:var(--ok);font-size:12px;font-weight:600}
+.ic-ordline.is-others,.ic-order.is-others{cursor:default}
+.ic-ordline.is-others input,.ic-order.is-others input{accent-color:var(--ok);cursor:default}
 
 .ic-sync{font-size:12px;color:var(--muted);white-space:nowrap}
 .ic-sync.is-busy{color:var(--ink)}
@@ -2245,6 +2264,30 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         updateBadge();
         return line;
     }
+    // Ticks made on other devices (action=ticks), shown locked on this one so
+    // nobody hunts for units that have already been found.
+    var others = { map: {}, loadedAt: 0, loading: false };
+    function othersKey(item, ref) { return String(item) + '|' + String(ref); }
+    function loadOthers(cb) {
+        if (!SHARED || others.loading || (BOOT.multiLoc && !state.loc)) { if (cb) { cb(false); } return; }
+        others.loading = true;
+        apiGet('ticks', { loc: state.loc || '', device: state.device }).then(function (res) {
+            others.loading = false;
+            if (!res || !res.ok) { if (cb) { cb(false); } return; }
+            var map = {};
+            (res.ticks || []).forEach(function (t) { map[othersKey(t.item, t.ref)] = { name: t.name || 'someone', label: t.label || '' }; });
+            var changed = JSON.stringify(map) !== JSON.stringify(others.map);
+            others.map = map; others.loadedAt = Date.now();
+            if (cb) { cb(changed); }
+        });
+    }
+    function othersStale() { return SHARED && Date.now() - others.loadedAt > 30000; }
+    // 'me', or who on another device ticked this order line, or null.
+    function tickedBy(itemId, ref) {
+        if (isTicked(itemId, ref)) { return 'me'; }
+        return others.map[othersKey(itemId, ref)] || null;
+    }
+    function tickedByText(t) { return 'ticked by ' + t.name + (t.label ? ' · ' + t.label : ''); }
     function isTicked(itemId, ref) {
         var line = state.sheet[itemId];
         return !!line && (line.orders || []).some(function (o) { return o.ref === ref; });
@@ -2401,6 +2444,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 if (!box.hidden) { box.hidden = true; return; }
                 box.hidden = false;
                 paint();
+                if (othersStale()) { loadOthers(function (changed) { if (changed && !box.hidden) { paint(); } }); }
             }
         };
     }
@@ -2417,21 +2461,23 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // Open orders tab.
     function orderRow(item, o, onChange) {
         var off = !(o.committed > 0);
+        var by = tickedBy(item.id, o.ref), theirs = by && by !== 'me';
         var cb = el('input', { type: 'checkbox', 'aria-label': 'Counted: ' + o.ref + ' ' + (o.itemName || item.name || '') });
-        cb.checked = isTicked(item.id, o.ref);
-        cb.disabled = off;
+        cb.checked = !!by;
+        cb.disabled = off || !!theirs;
         cb.addEventListener('change', function () {
             tickOrder(item, o, cb.checked);
             if (onChange) { onChange(); }
         });
         var detail = orderDetail(o);
-        return el('label', { class: 'ic-order' + (off ? ' is-off' : '') }, [
+        return el('label', { class: 'ic-order' + (off ? ' is-off' : '') + (theirs ? ' is-others' : '') }, [
             cb,
             el('span', {}, [
                 o.url ? el('a', { href: o.url, target: '_blank', rel: 'noopener', text: o.ref }) : el('b', { text: o.ref }),
                 o.customer ? ' · ' + o.customer : '',
                 el('br'),
-                el('small', { text: detail + (o.date ? ' · ' + o.date : '') })
+                el('small', { text: detail + (o.date ? ' · ' + o.date : '') }),
+                theirs ? el('small', { class: 'ic-tickedby', text: ' · ' + tickedByText(by) }) : null
             ])
         ]);
     }
@@ -3272,6 +3318,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     var l = state.sheet[id];
                     (l && l.orders || []).forEach(function (o) { ticked.push(o.ref + '|' + id); });
                 });
+                Object.keys(others.map).forEach(function (k) { var p = k.split('|'); ticked.push(p[1] + '|' + p[0]); });
                 fields.payload = JSON.stringify({ ticked: ticked });
             } else if (what === 'sheet') {
                 fields.payload = JSON.stringify({
@@ -3329,7 +3376,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             el('div', { class: 'ic-actions' }, [
                 el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Expand all', onclick: function () { setAllOpen(true); } }),
                 el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Collapse all', onclick: function () { setAllOpen(false); } }),
-                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Reload', onclick: function () { state.allOrders = null; render(); } })
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Reload', onclick: function () { state.allOrders = null; others.loadedAt = 0; render(); } })
             ])
         ]);
         function setAllOpen(open) {
@@ -3371,7 +3418,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 });
             });
             var lineCount = 0, ticked = 0;
-            order.forEach(function (ref) { groups[ref].lines.forEach(function (o) { lineCount++; if (isTicked(o.item, o.ref)) { ticked++; } }); });
+            order.forEach(function (ref) { groups[ref].lines.forEach(function (o) { lineCount++; if (tickedBy(o.item, o.ref)) { ticked++; } }); });
             if (cnt) {
                 cnt.textContent = repNames.length + ' sales rep' + (repNames.length === 1 ? '' : 's') + ' · ' + order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · list capped' : '');
             }
@@ -3386,7 +3433,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 // Collapsed unless the user opened it; a filter opens what it matched.
                 var open = !!q || !!state.ordersOpen[ref];
                 var gTicked = 0, gToCount = 0;
-                g.lines.forEach(function (o) { gToCount += Number(o.committed) || 0; if (isTicked(o.item, o.ref)) { gTicked++; } });
+                g.lines.forEach(function (o) { gToCount += Number(o.committed) || 0; if (tickedBy(o.item, o.ref)) { gTicked++; } });
                 var headEl = el('div', { class: 'ic-ordhead', role: 'button', 'aria-expanded': open ? 'true' : 'false', onclick: function (ev) {
                     if (ev.target && ev.target.tagName === 'A') { return; } // the order link itself
                     state.ordersOpen[ref] = !state.ordersOpen[ref];
@@ -3400,12 +3447,20 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 ]);
                 grp.appendChild(headEl);
                 if (!open) { return grp; }
-                // "Select all" first: large team orders have dozens of lines.
-                var tickable = g.lines.filter(function (o) { return o.committed > 0; });
+                // "Select all" first: large team orders have dozens of lines. Lines
+                // someone else already ticked are theirs and are left alone.
+                var theirsCount = 0;
+                var tickable = g.lines.filter(function (o) {
+                    if (!(o.committed > 0)) { return false; }
+                    var by = tickedBy(o.item, o.ref);
+                    if (by && by !== 'me') { theirsCount++; return false; }
+                    return true;
+                });
+                var mineTicked = tickable.filter(function (o) { return isTicked(o.item, o.ref); }).length;
                 if (tickable.length > 1) {
                     var all = el('input', { type: 'checkbox', class: 'ic-ordall', 'aria-label': 'Select all lines on ' + g.ref });
-                    all.checked = gTicked === tickable.length;
-                    all.indeterminate = gTicked > 0 && gTicked < tickable.length;
+                    all.checked = mineTicked === tickable.length;
+                    all.indeterminate = mineTicked > 0 && mineTicked < tickable.length;
                     all.addEventListener('change', function () {
                         var want = all.checked;
                         tickable.forEach(function (o) {
@@ -3417,27 +3472,29 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                         all,
                         el('span', { class: 'ic-info' }, [
                             el('div', { class: 'ic-name', text: 'Select all' }),
-                            el('div', { class: 'ic-meta', text: tickable.length + ' lines · ' + fmt(gToCount) + ' to count' })
+                            el('div', { class: 'ic-meta', text: tickable.length + ' lines · ' + fmt(gToCount) + ' to count' + (theirsCount ? ' · ' + theirsCount + ' already ticked by others' : '') })
                         ])
                     ]));
                 }
                 g.lines.forEach(function (o) {
                     var item = { id: o.item, name: o.itemName };
                     var off = !(o.committed > 0);
+                    var by = tickedBy(o.item, o.ref), theirs = by && by !== 'me';
                     var cb = el('input', { type: 'checkbox', 'aria-label': 'Counted: ' + o.ref + ' ' + o.itemName });
-                    cb.checked = isTicked(o.item, o.ref);
-                    cb.disabled = off;
+                    cb.checked = !!by;
+                    cb.disabled = off || !!theirs;
                     cb.addEventListener('change', function () {
                         tickOrder(item, o, cb.checked);
                         paintGroups();
                     });
                     var detail = orderDetail(o);
                     var line = state.sheet[o.item];
-                    grp.appendChild(el('label', { class: 'ic-ordline' + (off ? ' is-off' : '') }, [
+                    grp.appendChild(el('label', { class: 'ic-ordline' + (off ? ' is-off' : '') + (theirs ? ' is-others' : '') }, [
                         cb,
                         el('span', { class: 'ic-info' }, [
                             el('div', { class: 'ic-name', text: o.itemName || ('item ' + o.item) }),
-                            el('div', { class: 'ic-meta', text: detail + (line ? ' · on sheet: ' + fmt(line.count) : '') })
+                            el('div', { class: 'ic-meta', text: detail + (line ? ' · on sheet: ' + fmt(line.count) : '') }),
+                            theirs ? el('div', { class: 'ic-tickedby', text: tickedByText(by) }) : null
                         ])
                     ]));
                 });
@@ -3451,7 +3508,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 refs.forEach(function (ref) {
                     groups[ref].lines.forEach(function (o) {
                         rLines++; rToCount += Number(o.committed) || 0;
-                        if (isTicked(o.item, o.ref)) { rTicked++; }
+                        if (tickedBy(o.item, o.ref)) { rTicked++; }
                     });
                 });
                 var sec = el('div', { class: 'ic-repgrp', 'data-rep': repName });
@@ -3472,6 +3529,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             });
         }
         paintGroups();
+        if (othersStale()) { loadOthers(function (changed) { if (changed && state.view === 'orders') { paintGroups(); } }); }
     }
 
     function renderDoneView(main) {
@@ -3540,7 +3598,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         head.appendChild(el('div', { class: 'ic-tabs' }, [
             el('div', { class: 'ic-tabseg', role: 'tablist' }, [
                 el('button', { class: 'ic-tab' + (state.view === 'search' ? ' is-on' : ''), type: 'button', text: 'Count', onclick: function () { state.view = 'search'; state.done = null; render(); } }),
-                el('button', { class: 'ic-tab' + (state.view === 'orders' ? ' is-on' : ''), type: 'button', text: 'Open orders', onclick: function () { state.view = 'orders'; state.done = null; render(); } }),
+                el('button', { class: 'ic-tab' + (state.view === 'orders' ? ' is-on' : ''), type: 'button', text: 'Open orders', onclick: function () {
+                    state.view = 'orders'; state.done = null;
+                    others.loadedAt = 0;   // opening the tab always fetches other devices' ticks afresh
+                    render();
+                } }),
                 el('button', { class: 'ic-tab' + (state.view === 'sheet' ? ' is-on' : ''), type: 'button', onclick: function () {
                     state.view = 'sheet'; state.done = null; state.submitError = ''; state.confirm = false;
                     // Coming back to the merged sheet after a while: show what has arrived since.
@@ -3618,6 +3680,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 // being looked at and nothing is mid-edit or mid-submit.
                 var a = document.activeElement, typing = a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
                 if (BOOT.canSubmit && state.view === 'sheet' && state.session && !state.session.loading && !state.submitting && !state.confirm && !typing) { loadSession(); }
+                if (state.view === 'orders' && !typing) { loadOthers(function (changed) { if (changed && state.view === 'orders') { render(); } }); }
             }, 60000);
             document.addEventListener('visibilitychange', function () { if (!document.hidden) { reconcile(); } });
             window.addEventListener('beforeunload', function (ev) { if (pendingCount()) { ev.preventDefault(); ev.returnValue = ''; } });

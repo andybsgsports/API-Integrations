@@ -244,8 +244,11 @@ way — one sheet per device.
   90. The row is flagged *2 counters* and listed under **Needs review**. Untick
   a sub-line to leave it out (a true duplicate rather than a second area), or
   type a total by hand; a hand-set total is marked and can be reset.
-- Open-order ticks merge per order: two people ticking `JH-SO625` count its
-  units once.
+- Every device sees everyone's open-order ticks. A line someone else ticked
+  shows checked and locked with *ticked by Jeff Howard · Warehouse tablet 1*,
+  the order and rep headers count it, and **Select all** skips it; the view
+  refreshes each minute and on Reload. Only the device that ticked a line can
+  untick it (the administrator can leave it out on the merged sheet).
 - The administrator's deltas are against **fresh** on-hand. A sub-line whose
   on-hand has moved since it was counted says so (*on hand was 100 when
   counted*), and the item is flagged.
