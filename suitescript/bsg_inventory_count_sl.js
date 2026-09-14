@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.2',
+        VERSION: '2026-09-14.3',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1805,9 +1805,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .ic-ordline.is-others,.ic-order.is-others{cursor:default}
 .ic-ordline.is-others input,.ic-order.is-others input{accent-color:var(--ok);cursor:default}
 
-.ic-sync{font-size:12px;color:var(--muted);white-space:nowrap}
+.ic-sync{font-size:12px;color:var(--muted);white-space:nowrap;max-width:100%}
 .ic-sync.is-busy{color:var(--ink)}
-.ic-sync.is-bad{color:var(--red-700);font-weight:600}
+.ic-sync.is-bad{color:var(--red-700);font-weight:600;white-space:normal;overflow-wrap:break-word}
 .ic-devlabel{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin:0 0 18px}
 .ic-devlabel label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .ic-devlabel input{min-height:38px;padding:7px 10px;border:1px solid var(--line);border-radius:0;background:var(--surface);font-size:14px;width:240px;max-width:100%}
@@ -2084,7 +2084,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (!SHARED) { return ''; }
         var n = pendingCount();
         if (sync.status === 'saving') { return 'Saving to NetSuite…'; }
-        if (sync.status === 'offline') { return 'Not saved (' + n + ' line' + (n === 1 ? '' : 's') + ') — retrying'; }
+        if (sync.status === 'offline') { return 'Not saved (' + n + ' line' + (n === 1 ? '' : 's') + ') — retrying' + (sync.error ? ': ' + String(sync.error).slice(0, 160) : ''); }
         if (sync.status === 'error') { return 'NetSuite refused ' + sync.failed + ' line' + (sync.failed === 1 ? '' : 's') + ': ' + sync.error; }
         if (sync.status === 'pending') { return n + ' line' + (n === 1 ? '' : 's') + ' to save'; }
         if (sync.lastOk) { return 'Saved to NetSuite · ' + fmtWhen(sync.lastOk); }

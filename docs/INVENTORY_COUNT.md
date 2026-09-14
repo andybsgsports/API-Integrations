@@ -323,20 +323,37 @@ should equal what was keyed. Then repeat the same count — it should report
   item filter …`); those are remembered for a day so pages stay fast.
 - **Non-JSON response** errors on the page mean NetSuite returned an HTML error
   page; the deployment's execution log has the stack.
+- **The Open orders tab is grouped by the order's Sales Rep field, not by who
+  is counting.** A bucket named after an employee (e.g. "Jeff Howard") is
+  every open order where that person is the assigned sales rep — it has
+  nothing to do with which device ticked those lines. Someone counting the
+  floor will tick lines under many other people's names; do not read a
+  bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.2` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.3` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
   the request, the tab says *Other devices' ticks could not be loaded* with
-  the reason.
+  the reason. To check whether a specific device's data is reaching NetSuite
+  at all (regardless of what the Open orders tab shows), an administrator can
+  open the Sheet tab: the row of chips under the summary numbers lists every
+  counter and device that has actually saved a line, with a count and a last
+  update time. No chip for that person means nothing from their device has
+  reached NetSuite yet — the problem is on their end (see the next item), not
+  in how ticks are displayed.
 - **"Shared count is not set up yet"** (administrators, Sheet tab) — the custom
   record or one of its fields is missing; the notice names what. Counters see
   nothing and keep counting; their sheets just stay on their devices until it
   exists.
-- **"Not saved — retrying"** in the header — the device cannot reach NetSuite
-  (session expired, no signal). Counts stay on the device and go up when it
-  can; do not close the tab while it says so (the browser warns).
+- **"Not saved (N lines) — retrying: …"** in the header — the device could not
+  save to NetSuite, and since 2026-09-14.3 the header names the actual reason
+  (a session that timed out, a permission problem, the record type briefly
+  unreachable) instead of just "retrying" with no detail. Counts stay on the
+  device and go up once the problem clears; do not close the tab while it
+  says so (the browser warns). A session-timeout usually shows a "Server
+  returned a non-JSON response" message (NetSuite handed back a login page
+  instead of JSON) — signing in again and reloading the tab fixes it.
 - **"New counts arrived for N items"** on submit — a counter changed one of
   those items after the sheet loaded. Nothing posted; the sheet has reloaded
   with their numbers. Look at the flagged items and submit again.
