@@ -320,7 +320,15 @@ way — one sheet per device.
   shows checked and locked with *ticked by Jeff Howard · Warehouse tablet 1*,
   the order and rep headers count it, and **Select all** skips it; the view
   refreshes each minute and on Reload. Only the device that ticked a line can
-  untick it (the administrator can leave it out on the merged sheet).
+  untick it (the administrator can leave it out on the merged sheet). **An
+  order line's units are never counted twice, even by accident**: if two
+  people tick the very same line within the same refresh window (before
+  either has seen the other's tick), the merged sheet still adds that line's
+  units in only once — it is matched by the line's own identity, not just
+  summed like two people's separate counts of the same item. The header's
+  **Select all** re-checks who has already ticked what right before it grabs
+  a batch, since one click there can claim far more lines than clicking them
+  one at a time.
 - The administrator's deltas are against **fresh** on-hand. A sub-line whose
   on-hand has moved since it was counted says so (*on hand was 100 when
   counted*), and the item is flagged.

@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.16',
+        VERSION: '2026-09-14.17',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -3696,30 +3696,37 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         // Every sales rep's every order, ticked (or unticked) at once. Scoped to
         // whatever the filter box currently matches, so typing an item or rep
         // name first narrows it to just that slice. Lines someone else already
-        // ticked are theirs and are left alone, same as the per-order control.
+        // ticked are theirs and are left alone, same as the per-order control --
+        // an order line is ticked by one counter, ever; nobody else's tick can
+        // add its units a second time. Ticking a big batch first re-fetches who
+        // else has already ticked what, so a bulk grab uses the freshest lock
+        // data instead of whatever was last polled up to 30 seconds ago.
         function selectAllVisible(want) {
             if (!a || !a.entries) { return; }
-            var q = state.ordersFilter.trim().toLowerCase();
-            var targets = [];
-            a.entries.forEach(function (o) {
-                if (!matchesFilter(o, q)) { return; }
-                if (want) {
-                    if (!(o.committed > 0)) { return; }
-                    var by = tickedBy(o.item, orderKey(o));
-                    if (by && by !== 'me') { return; }
-                    if (!isTicked(o.item, orderKey(o))) { targets.push(o); }
-                } else if (isTicked(o.item, orderKey(o))) {
-                    targets.push(o);
-                }
-            });
-            if (!targets.length) { return; }
-            var scope = q ? ' matching "' + state.ordersFilter.trim() + '"' : ' across every sales rep\'s open orders';
-            var msg = want
-                ? 'Tick ' + targets.length + ' line' + (targets.length === 1 ? '' : 's') + scope + ' as counted? Their units are added to the Sheet. Nothing is posted to NetSuite.'
-                : 'Untick ' + targets.length + ' line' + (targets.length === 1 ? '' : 's') + ' you ticked' + scope + '? Their units come back out of the Sheet.';
-            if (!window.confirm(msg)) { return; }
-            targets.forEach(function (o) { tickOrder({ id: o.item, name: o.itemName }, o, want); });
-            paintGroups();
+            function proceed() {
+                var q = state.ordersFilter.trim().toLowerCase();
+                var targets = [];
+                a.entries.forEach(function (o) {
+                    if (!matchesFilter(o, q)) { return; }
+                    if (want) {
+                        if (!(o.committed > 0)) { return; }
+                        var by = tickedBy(o.item, orderKey(o));
+                        if (by && by !== 'me') { return; }
+                        if (!isTicked(o.item, orderKey(o))) { targets.push(o); }
+                    } else if (isTicked(o.item, orderKey(o))) {
+                        targets.push(o);
+                    }
+                });
+                if (!targets.length) { paintGroups(); return; }
+                var scope = q ? ' matching "' + state.ordersFilter.trim() + '"' : ' across every sales rep\'s open orders';
+                var msg = want
+                    ? 'Tick ' + targets.length + ' line' + (targets.length === 1 ? '' : 's') + scope + ' as counted? Their units are added to the Sheet. Nothing is posted to NetSuite.'
+                    : 'Untick ' + targets.length + ' line' + (targets.length === 1 ? '' : 's') + ' you ticked' + scope + '? Their units come back out of the Sheet.';
+                if (!window.confirm(msg)) { return; }
+                targets.forEach(function (o) { tickOrder({ id: o.item, name: o.itemName }, o, want); });
+                paintGroups();
+            }
+            if (want && SHARED) { loadOthers(proceed); } else { proceed(); }
         }
         main.appendChild(head);
         var box = el('div', { id: 'icOrdGroups', class: 'ic-list' });
