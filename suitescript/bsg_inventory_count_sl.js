@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.8',
+        VERSION: '2026-09-14.9',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -311,12 +311,24 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     // Not in the list: purchasedescription -- NetSuite rejects it as search
     // criteria ("An nlobjSearchFilter contains invalid search criteria").
     var WORD_FIELDS = ['itemid', 'displayname', 'salesdescription', 'vendorname', 'upccode'];
+    // A word with a digit in it is a style number, UPC or vendor code (or the
+    // start of one) or a size: it matches where a code or one of its parts
+    // BEGINS -- the start of the name, or right after a dash, slash or the
+    // "parent : child" colon -- never the middle. So 126 lists 126, 126300
+    // and 126 : 126-Black but never 0126; "1379806-black" finds the Black
+    // children; "royale 5" still finds the size-5 balls ("...-5"). It also
+    // matches anywhere in the display name and description ("Size 5").
+    // Plain words match anywhere in every field.
+    function codeLike(w) { return /\d/.test(w); }
     function wordFilter(w) {
-        var out = [];
+        var out = [], code = codeLike(w);
         WORD_FIELDS.forEach(function (f) {
             if (isDead('item', 'filter', f)) { return; }
-            if (out.length) { out.push('or'); }
-            out.push([f, f === 'upccode' ? 'is' : 'contains', w]);
+            var clauses;
+            if (f === 'upccode') { clauses = [[f, code ? 'startswith' : 'is', w]]; }
+            else if (code && (f === 'itemid' || f === 'vendorname')) { clauses = [[f, 'startswith', w], [f, 'contains', '-' + w], [f, 'contains', '/' + w], [f, 'contains', ': ' + w]]; }
+            else { clauses = [[f, 'contains', w]]; }
+            clauses.forEach(function (c) { if (out.length) { out.push('or'); } out.push(c); });
         });
         return out;
     }

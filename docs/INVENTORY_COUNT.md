@@ -25,7 +25,13 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    **Search** narrows the list by style #, display name, sales description,
    UPC or vendor code — any words, in any order (`royale 5` finds "Royale NFHS
    V25 Soccer Ball - Size 5"; `0125666912 white` narrows a style to its white
-   children). Clearing the search box brings the full list back.
+   children). A word with a digit in it is treated as a style number, UPC,
+   vendor code or size and matches where a code, or one of its dash / slash /
+   colon parts, **begins** — never the middle: `126` lists 126, 126300 and
+   `126 : 126-Black` but never 0126; `1379806-black` finds that style's Black
+   children; `5` still finds the size-5 balls (`…-5`) and anything with "5"
+   in its description. Plain words match anywhere. Clearing the search box
+   brings the full list back.
 2. **Count** — the Qty box holds **what is on the shelf**. Key it and press
    **Add** (Enter jumps to the next hit, so a keyboard or barcode scanner flows
    down a shelf). Units pulled for open orders are not on the shelf; they come
@@ -347,7 +353,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.8` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.9` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
