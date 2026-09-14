@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.17',
+        VERSION: '2026-09-14.18',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -712,13 +712,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 if (remaining <= 0) { return; } // this line is fully shipped even if the order is still open
                 var committed = Math.min(remaining, Math.abs(parseFloat(tval(r, 'quantitycommitted')) || 0));
                 var ref = orderRef(tval(r, 'tranid'), r.id);
-                // Two lines of the same item on the same order -- two
-                // decoration jobs on one blank, say -- are ticked and tracked
-                // separately by folding in the line's own sequence number;
-                // without one (an account that rejects it) they fall back to
-                // sharing the order-level key, the old behavior.
                 var lineSeq = tval(r, 'line');
-                var key = ref + (lineSeq !== '' && lineSeq != null ? '#' + lineSeq : '');
                 // committed 0 is usually "nothing received yet", but a line
                 // marked Do Not Commit never gets a committed quantity even
                 // when its units have been pulled and are standing in the
@@ -728,7 +722,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     kind: 'order',
                     id: String(r.id),
                     ref: ref,
-                    key: key,
+                    lineSeq: lineSeq,
                     customer: ttxt(r, 'entity') || '',
                     rep: ttxt(r, 'salesrep') || '',
                     po: cleanName(tval(r, 'otherrefnum'), 40),
@@ -838,6 +832,25 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             }
         });
         out = out.filter(function (o) { return o.committed > 0; });
+        // Two lines of the same item on the same order -- two decoration jobs
+        // on one blank, say -- are ticked and tracked separately by folding
+        // in the line's own sequence number, but ONLY when there really are
+        // two of them left standing here: an item with just one countable
+        // line for the order keeps the plain order ref as its key, exactly
+        // as before this line-aware keying existed (a backordered sibling
+        // line dropped by the filter just above must not count towards
+        // "two" -- it was never listed or tickable). Otherwise a tick made
+        // before this shipped -- stored under the old bare-ref key -- would
+        // never match the one true current line's new ref#lineSeq key, so
+        // it would show as untouched and get ticked a second time, adding
+        // the same units twice.
+        var byRefItem = {};
+        out.forEach(function (o) { var k = o.ref + '' + o.item; (byRefItem[k] = byRefItem[k] || []).push(o); });
+        out.forEach(function (o) {
+            var siblings = byRefItem[o.ref + '' + o.item];
+            o.key = (siblings.length > 1 && o.lineSeq !== '' && o.lineSeq != null) ? o.ref + '#' + o.lineSeq : o.ref;
+            delete o.lineSeq;
+        });
         return { ok: true, orders: out, truncated: truncated };
     }
 
