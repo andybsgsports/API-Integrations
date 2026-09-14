@@ -40,6 +40,15 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    with committed units, ticking Correct alone leaves the line short by that
    quantity and the sheet says so — tick those orders to bring the units in,
    and the total lands back on on-hand with a zero delta.
+   With the shared count on, the list also shows what **other devices** have
+   counted: an item someone else keyed goes green with *Counted by Steve
+   Eversoll · Retail iPad: 195 · 9/14 11:48 am* (and *Also counted by …* under
+   your own tag when you both keyed it), and if their shelf count is the
+   expected quantity their **Correct** shows ticked and locked. That is
+   information, not a lock on the row: keying it again adds a second line the
+   administrator sees side by side and reviews. It refreshes when the list
+   paints, every 30 seconds while the Count or Open orders tab is showing,
+   and when the tab comes back into view.
    Nothing is posted yet either way: every line lands on the **Sheet** tab
    with the current on-hand at the chosen location, an editable count with
    `−`/`+` buttons and its delta. Each line also records **who** keyed or
@@ -338,7 +347,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.7` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.8` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused

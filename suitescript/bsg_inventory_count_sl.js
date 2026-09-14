@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.7',
+        VERSION: '2026-09-14.8',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1243,18 +1243,22 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         return { ok: true, lines: rows.map(function (r) { return { id: r.id, item: r.item, name: r.name, shelf: r.shelf, orders: r.orders, onhand: r.onhand, at: r.at }; }) };
     }
 
-    // Every ticked open order at the location from every device but the asking
-    // one, so a counter walking the floor sees what has already been found.
+    // What every device but the asking one has done at the location: each
+    // ticked open order (so a counter walking the floor sees what has already
+    // been found) and each counted item (so the count list shows it counted,
+    // by whom, and nobody counts a shelf twice without meaning to).
     function sharedTicks(params) {
         requireShared();
         var g = deviceGuard(params);
         if (g.error) { return { ok: false, error: g.error }; }
-        var F = CONFIG.SHARED_FIELDS, out = [];
+        var F = CONFIG.SHARED_FIELDS, out = [], lines = [];
         sharedRows(sharedLocFilter([[F.posted, 'is', 'F']], g.locId)).forEach(function (r) {
-            if (r.device === g.device || !r.orders.length) { return; }
-            r.orders.forEach(function (o) { out.push({ item: r.item, ref: o.ref, qty: o.qty, name: r.counterName, label: r.label }); });
+            if (r.device === g.device) { return; }
+            var on = 0;
+            r.orders.forEach(function (o) { on += Number(o.qty) || 0; out.push({ item: r.item, ref: o.ref, qty: o.qty, name: r.counterName, label: r.label }); });
+            lines.push({ item: r.item, shelf: r.shelf, on: round4(on), name: r.counterName, label: r.label, at: r.at });
         });
-        return { ok: true, ticks: out };
+        return { ok: true, ticks: out, lines: lines };
     }
 
     // Every open line at the location, for the administrator's merged sheet.
@@ -1781,6 +1785,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .ic-meta b{color:var(--ink);font-weight:600}
 .ic-flag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--warn);background:var(--warn-bg);padding:2px 8px;margin-top:6px}
 .ic-onsheet{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--ok);background:var(--ok-bg);border:1px solid var(--ok-line);padding:2px 8px;margin-top:6px}
+.ic-onsheet.is-others{text-transform:none;letter-spacing:0;font-size:12px;margin-right:6px}
+.ic-ok.is-others{cursor:default;opacity:.85}
+.ic-ok.is-others input{cursor:default}
 
 /* --------------------------------------------------------------- controls -- */
 .ic-ctl{display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap}
@@ -2383,7 +2390,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     }
     // Ticks made on other devices (action=ticks), shown locked on this one so
     // nobody hunts for units that have already been found.
-    var others = { map: {}, loadedAt: 0, loading: false, error: '', waiters: [] };
+    var others = { map: {}, lines: {}, loadedAt: 0, loading: false, error: '', waiters: [] };
     function othersKey(item, ref) { return String(item) + '|' + String(ref); }
     function loadOthers(cb) {
         if (!SHARED || (BOOT.multiLoc && !state.loc)) { if (cb) { cb(false); } return; }
@@ -2397,10 +2404,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (!res || !res.ok) {
                 others.error = (res && res.error) || 'Could not reach NetSuite.';
             } else {
-                var map = {};
+                var map = {}, lines = {};
                 (res.ticks || []).forEach(function (t) { map[othersKey(t.item, t.ref)] = { name: t.name || 'someone', label: t.label || '' }; });
-                changed = JSON.stringify(map) !== JSON.stringify(others.map) || !!others.error;
-                others.map = map; others.loadedAt = Date.now(); others.error = '';
+                (res.lines || []).forEach(function (l) { (lines[String(l.item)] = lines[String(l.item)] || []).push({ name: l.name || 'someone', label: l.label || '', shelf: Number(l.shelf) || 0, on: Number(l.on) || 0, at: l.at || '' }); });
+                changed = JSON.stringify(map) !== JSON.stringify(others.map) || JSON.stringify(lines) !== JSON.stringify(others.lines) || !!others.error;
+                others.map = map; others.lines = lines; others.loadedAt = Date.now(); others.error = '';
             }
             waiters.forEach(function (w) { try { w(changed); } catch (e) { /* one bad waiter must not stop the rest */ } });
         });
@@ -2411,6 +2419,23 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (state.view === 'orders' && state.repaintOrders) { state.repaintOrders(); }
     }
     function othersStale() { return SHARED && Date.now() - others.loadedAt > 30000; }
+    // Other devices' lines for an item on the count list, or null.
+    function countedByOthers(itemId) { var l = others.lines[String(itemId)]; return l && l.length ? l : null; }
+    function countedByText(list, prefix) {
+        return prefix + list.map(function (l) { return l.name + (l.label ? ' · ' + l.label : '') + ': ' + fmt(l.shelf + l.on) + (l.on ? ' (incl. ' + fmt(l.on) + ' on open orders)' : '') + (l.at ? ' · ' + fmtAt(l.at) : ''); }).join('; ');
+    }
+    // Someone else's line whose shelf is what NetSuite expects: their Correct.
+    function othersMatch(list, item) {
+        if (!list || !item || item.available == null) { return false; }
+        var avail = round4(Number(item.available) || 0);
+        return list.some(function (l) { return round4(l.shelf) === avail; });
+    }
+    function resultItem(id) { return state.results.filter(function (it) { return String(it.id) === String(id); })[0] || null; }
+    // Repaint every count-list row on screen after other devices' lines changed.
+    function repaintCounted() {
+        if (state.view !== 'search') { return; }
+        Array.prototype.forEach.call(document.querySelectorAll('.ic-row[data-row-for]'), function (row) { refreshResultRow(row.getAttribute('data-row-for')); });
+    }
     // 'me', or who on another device ticked this order line, or null.
     function tickedBy(itemId, ref) {
         if (isTicked(itemId, ref)) { return 'me'; }
@@ -2626,15 +2651,16 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     }
 
     function resultRow(item) {
-        var line = lineFor(item);
+        var line = lineFor(item), theirs = countedByOthers(item.id);
         var panel = ordersPanel(item, function () { refreshResultRow(item.id); });
-        var row = el('div', { class: 'ic-row' + (line ? ' is-onsheet' : '') + (item.blocked ? ' is-blocked' : ''), 'data-row-for': item.id });
+        var row = el('div', { class: 'ic-row' + (line || theirs ? ' is-onsheet' : '') + (item.blocked ? ' is-blocked' : ''), 'data-row-for': item.id });
         var info = el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name' }, [itemLink(item.id, item.name)]),
             (item.display || item.desc) ? el('div', { class: 'ic-desc', text: item.display && item.desc && item.display !== item.desc ? item.display + ' - ' + item.desc : (item.display || item.desc) }) : null,
             item.upc ? el('div', { class: 'ic-meta', text: 'UPC ' + item.upc }) : null,
             item.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + item.blocked + ') - adjust manually' }) : null,
-            line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: onSheetText(line) }) : null
+            line ? el('div', { class: 'ic-onsheet', 'data-onsheet-for': item.id, text: onSheetText(line) }) : null,
+            theirs ? el('div', { class: 'ic-onsheet is-others', 'data-others-for': item.id, text: countedByText(theirs, line ? 'Also counted by ' : 'Counted by ') }) : null
         ]);
         row.appendChild(info);
         row.appendChild(el('div', { class: 'ic-vendor', text: item.vendor || '' }));
@@ -2657,6 +2683,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var ok = el('input', { type: 'checkbox', 'data-ok-for': item.id,
                 'aria-label': 'Counted ' + (item.name || 'this item') + ' and the shelf holds the expected ' + fmt(item.available) });
             ok.checked = matchesExpected(line);
+            // Nobody on this device has keyed it, but someone else found the
+            // expected quantity: their Correct shows, and stays theirs.
+            if (!line && othersMatch(theirs, item)) { ok.checked = true; ok.disabled = true; }
             ok.addEventListener('change', function () {
                 if (ok.checked) {
                     confirmExpected(item);
@@ -2667,7 +2696,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 }
                 refreshResultRow(item.id);
             });
-            var okWrap = el('label', { class: 'ic-ok' + (ok.checked ? ' is-on' : ''), title: 'Counted, and the shelf holds the expected ' + fmt(item.available) + (Number(item.committed) > 0 ? ' (the ' + fmt(item.committed) + ' committed are accounted for on Open orders)' : '') }, [
+            var okWrap = el('label', { class: 'ic-ok' + (ok.checked ? ' is-on' : '') + (ok.disabled ? ' is-others' : ''), title: 'Counted, and the shelf holds the expected ' + fmt(item.available) + (Number(item.committed) > 0 ? ' (the ' + fmt(item.committed) + ' committed are accounted for on Open orders)' : '') }, [
                 ok, el('span', { text: 'Correct' })
             ]);
             function commit(advance) {
@@ -2696,26 +2725,33 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function refreshResultRow(itemId) {
         var row = document.querySelector('[data-row-for="' + itemId + '"]');
         if (!row) { return; }
-        var line = state.sheet[itemId];
+        var line = state.sheet[itemId], theirs = countedByOthers(itemId), item = resultItem(itemId);
         var info = row.querySelector('.ic-info');
         var tag = info && info.querySelector('[data-onsheet-for]');
+        var otag = info && info.querySelector('[data-others-for]');
         var btn = row.querySelector('.ic-ctl .ic-btn');
         var ok = row.querySelector('[data-ok-for]');
         if (ok) {
             ok.checked = matchesExpected(line);
+            ok.disabled = false;
+            if (!line && othersMatch(theirs, item)) { ok.checked = true; ok.disabled = true; }
             // :has() is not everywhere yet, so the green state is a class too.
-            if (ok.parentNode) { ok.parentNode.className = 'ic-ok' + (ok.checked ? ' is-on' : ''); }
+            if (ok.parentNode) { ok.parentNode.className = 'ic-ok' + (ok.checked ? ' is-on' : '') + (ok.disabled ? ' is-others' : ''); }
         }
         if (line) {
-            row.classList.add('is-onsheet');
             if (btn) { btn.textContent = 'Update'; }
             if (tag) { tag.textContent = onSheetText(line); }
             else if (info) { info.appendChild(el('div', { class: 'ic-onsheet', 'data-onsheet-for': itemId, text: onSheetText(line) })); }
         } else {
-            row.classList.remove('is-onsheet');
             if (btn) { btn.textContent = 'Add'; }
             if (tag) { tag.parentNode.removeChild(tag); }
         }
+        if (theirs) {
+            var txt = countedByText(theirs, line ? 'Also counted by ' : 'Counted by ');
+            if (otag) { otag.textContent = txt; }
+            else if (info) { info.appendChild(el('div', { class: 'ic-onsheet is-others', 'data-others-for': itemId, text: txt })); }
+        } else if (otag) { otag.parentNode.removeChild(otag); }
+        if (line || theirs) { row.classList.add('is-onsheet'); } else { row.classList.remove('is-onsheet'); }
     }
 
     function renderResults() {
@@ -2740,6 +2776,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         ]));
         var list = el('div', { class: 'ic-list' });
         naturalItemOrder(state.results).forEach(function (it) { list.appendChild(resultRow(it)); });
+        if (othersStale()) { loadOthers(function (changed) { if (changed) { repaintCounted(); } }); }
         var table = el('div', { class: 'ic-table is-items' });
         if (state.results.length) {
             table.appendChild(el('div', { class: 'ic-thead' }, [
@@ -3825,10 +3862,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 if (BOOT.canSubmit && state.view === 'sheet' && state.session && !state.session.loading && !state.submitting && !state.confirm && !typing) { loadSession(); }
             }, 60000);
             setInterval(function () {
-                if (document.hidden || state.view !== 'orders') { return; }
-                loadOthers(function (changed) { if (changed) { repaintOrders(); } });
+                if (document.hidden || (state.view !== 'orders' && state.view !== 'search')) { return; }
+                loadOthers(function (changed) { if (changed) { repaintOrders(); repaintCounted(); } });
             }, 30000);
-            document.addEventListener('visibilitychange', function () { if (!document.hidden) { reconcile(); } });
+            document.addEventListener('visibilitychange', function () { if (!document.hidden) { reconcile(); if (othersStale()) { loadOthers(function (changed) { if (changed) { repaintOrders(); repaintCounted(); } }); } } });
             window.addEventListener('beforeunload', function (ev) { if (pendingCount()) { ev.preventDefault(); ev.returnValue = ''; } });
         }
     }
