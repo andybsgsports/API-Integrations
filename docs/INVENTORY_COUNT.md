@@ -59,12 +59,18 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    facility, or waiting for customer pickup. Instead of printing every open
    order, the **Open orders** tab lists every such line at the location,
    grouped by **sales rep** and, inside each rep, by order (oldest first) with
-   customer, date and status, as `0 shipped of 5 · 5 to count`. Each rep
-   header totals its orders, lines, units to count and ticks, and collapses
-   the whole section; the orders themselves start collapsed and open on a
-   click (or **Expand all**), each with its own totals. The filter box
-   narrows by order number, customer, sales rep or item and opens what it
-   matches. Orders carrying no sales rep group under *No sales rep*, last. Tick a line once its units are found and those units are added to
+   customer, the sales order's own **PO #** and **memo** (right after the
+   customer name, when either is filled in), date and status, as
+   `0 shipped of 5 · 5 to count`. Each rep header totals its orders, lines,
+   units to count and ticks, and collapses the whole section; the orders
+   themselves start collapsed and open on a click (or **Expand all**), each
+   with its own totals. **Collapse all** folds everything all the way down to
+   the sales rep names (not just each order's lines); **Expand all** reopens
+   every rep section and every order under it. The filter box narrows by
+   order number, customer, sales rep or item and opens what it matches, even
+   inside a rep section that was collapsed. Orders carrying no sales rep
+   group under *No sales rep*, last. Tick a line once its units are found and
+   those units are added to
    the item's count on the sheet (the line is created if needed); untick to
    take them back out, and a line that only existed because of a tick leaves
    the sheet again. An order with several lines has a **Select all** row
@@ -95,7 +101,8 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    exports the whole list as filtered on screen (In stock / All items and any
    search), with Pref. vendor and a blank Count column to fill in by hand;
    the Open orders tab exports every line led by Sales rep (sorted rep, then
-   date, like the screen) with a Ticked column; the Sheet tab exports the
+   date, like the screen) with the order's PO # and memo columns right after
+   Customer and a Ticked column; the Sheet tab exports the
    lines you have keyed with their Pref. vendor, on-hand, count and
    adjust-by, plus who counted each line and when. CSV and Excel
    cover the whole list; the PDF stops at `PDF_MAX_ROWS` (2,000) and says so.
@@ -330,7 +337,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.3` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.4` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused

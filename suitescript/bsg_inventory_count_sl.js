@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.3',
+        VERSION: '2026-09-14.4',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -675,7 +675,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
             if (locId && !isDead('transaction', 'filter', 'location')) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
             var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item'];
-            ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted', 'salesrep'].forEach(function (c) {
+            ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted', 'salesrep', 'otherrefnum', 'memo'].forEach(function (c) {
                 if (!isDead('transaction', 'column', c)) { cols.push(c); }
             });
             return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
@@ -694,6 +694,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     ref: orderRef(tval(r, 'tranid'), r.id),
                     customer: ttxt(r, 'entity') || '',
                     rep: ttxt(r, 'salesrep') || '',
+                    po: cleanName(tval(r, 'otherrefnum'), 40),
+                    memo: cleanName(tval(r, 'memo'), 200),
                     date: String(tval(r, 'trandate')),
                     item: String(tval(r, 'item')),
                     itemName: ttxt(r, 'item') || '',
@@ -1346,7 +1348,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     var ORDER_COLS = [
         { key: 'rep', label: 'Sales rep' },
-        { key: 'ref', label: 'Order' }, { key: 'customer', label: 'Customer' }, { key: 'date', label: 'Date' }, { key: 'status', label: 'Status' },
+        { key: 'ref', label: 'Order' }, { key: 'customer', label: 'Customer' }, { key: 'po', label: 'PO #' }, { key: 'memo', label: 'Memo' },
+        { key: 'date', label: 'Date' }, { key: 'status', label: 'Status' },
         { key: 'itemName', label: 'Item' }, { key: 'qty', label: 'Ordered', num: true }, { key: 'shipped', label: 'Shipped', num: true },
         { key: 'committed', label: 'To count', num: true }, { key: 'pulled', label: 'Pulled', num: true }, { key: 'ticked', label: 'Ticked' }
     ];
@@ -1356,7 +1359,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         (Array.isArray(payload.ticked) ? payload.ticked : []).forEach(function (t) { ticked[String(t)] = true; });
         var rows = openOrders(null, locId).orders.map(function (o) {
             return {
-                rep: o.rep || NO_REP, ref: o.ref, customer: o.customer, date: o.date, status: o.status,
+                rep: o.rep || NO_REP, ref: o.ref, customer: o.customer, po: o.po || '', memo: o.memo || '', date: o.date, status: o.status,
                 itemName: o.itemName, qty: o.qty, shipped: o.shipped, committed: o.committed, pulled: o.pulled || 0,
                 ticked: ticked[o.ref + '|' + o.item] ? 'Yes' : ''
             };
@@ -1783,6 +1786,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .ic-ordhead a{color:var(--ink);font-weight:700;font-size:14.5px;text-decoration:underline;text-underline-offset:3px}
 .ic-ordhead a:hover{color:var(--red)}
 .ic-ordhead small{color:var(--muted);font-size:12px}
+.ic-ordpo{font-weight:600}
+.ic-ordmemo{font-style:italic}
 .ic-ordsum{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ic-ordsum.is-ticked{color:var(--ok);font-weight:600}
 .ic-ordline{display:flex;align-items:flex-start;gap:12px;padding:9px 6px 9px 10px;border-top:1px solid var(--line-2);cursor:pointer;min-width:0}
@@ -3398,7 +3403,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         function setAllOpen(open) {
             state.ordersOpen = {};
             state.repsClosed = {};
-            if (open && a.entries) { a.entries.forEach(function (o) { state.ordersOpen[o.ref] = true; }); }
+            if (a.entries) {
+                if (open) { a.entries.forEach(function (o) { state.ordersOpen[o.ref] = true; }); }
+                else { a.entries.forEach(function (o) { state.repsClosed[o.rep || NO_REP] = true; }); }
+            }
             paintGroups();
         }
         main.appendChild(head);
@@ -3418,7 +3426,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             a.entries.forEach(function (o) {
                 var hay = (o.ref + ' ' + o.customer + ' ' + (o.rep || '') + ' ' + o.itemName).toLowerCase();
                 if (q && hay.indexOf(q) === -1) { return; }
-                if (!groups[o.ref]) { groups[o.ref] = { ref: o.ref, customer: o.customer, rep: o.rep || NO_REP, date: o.date, status: o.status, url: o.url, lines: [] }; order.push(o.ref); }
+                if (!groups[o.ref]) { groups[o.ref] = { ref: o.ref, customer: o.customer, po: o.po || '', memo: o.memo || '', rep: o.rep || NO_REP, date: o.date, status: o.status, url: o.url, lines: [] }; order.push(o.ref); }
                 groups[o.ref].lines.push(o);
             });
             // Sales rep first, their orders oldest first.
@@ -3459,6 +3467,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     el('span', { class: 'ic-caret', text: open ? '▾' : '▸' }),
                     g.url ? el('a', { href: g.url, target: '_blank', rel: 'noopener', text: g.ref }) : el('b', { text: g.ref }),
                     g.customer ? el('span', { text: g.customer }) : null,
+                    g.po ? el('small', { class: 'ic-ordpo', text: 'PO ' + g.po }) : null,
+                    g.memo ? el('small', { class: 'ic-ordmemo', text: g.memo }) : null,
                     el('small', { text: (g.date ? g.date + ' · ' : '') + (g.status || '') }),
                     el('span', { class: 'ic-ordsum' + (gTicked === g.lines.length ? ' is-ticked' : ''), text: g.lines.length + ' line' + (g.lines.length === 1 ? '' : 's') + ' · ' + fmt(gToCount) + ' to count · ' + gTicked + ' ticked' })
                 ]);
@@ -3520,7 +3530,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 
             repNames.forEach(function (repName) {
                 var refs = reps[repName];
-                var repOpen = !state.repsClosed[repName];
+                var repOpen = !!q || !state.repsClosed[repName];
                 var rTicked = 0, rLines = 0, rToCount = 0;
                 refs.forEach(function (ref) {
                     groups[ref].lines.forEach(function (o) {
