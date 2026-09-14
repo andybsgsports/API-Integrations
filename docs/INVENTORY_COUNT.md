@@ -91,9 +91,15 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    take them back out, and a line that only existed because of a tick leaves
    the sheet again. An order with several lines has a **Select all** row
    under its number that ticks or unticks every countable line at once.
-   A line appears only while it still has **committed** units on an order
-   that is itself open (Pending Fulfillment, Partially Fulfilled, Pending
-   Billing/Partially Fulfilled — never Billed, Closed or Cancelled).
+   A line appears while it still has **committed** units on an order that is
+   itself open (Pending Fulfillment, Partially Fulfilled, Pending
+   Billing/Partially Fulfilled — never Billed, Closed or Cancelled), **or**
+   while it has units **pulled** for it. That second case is a line marked
+   **Do Not Commit**: NetSuite commits nothing to it however much is picked,
+   so the pulled quantity is the only sign those units are standing in the
+   building. Such a line is listed on what was pulled, capped at what the
+   order still has open, and says so — `0 shipped of 40 · 40 to count
+   (40 pulled, do not commit)`.
    Committed quantity is the reliable signal: picking or packing does not
    clear it, shipping does, and a line that was zeroed or returned to the
    vendor has none even when a pick record survives. So backordered lines,
@@ -141,8 +147,9 @@ see which orders the units belonged to and who took the count.
 
 **Several people at once.** With the shared count set up (see below), every
 device's lines save to NetSuite as they are keyed and one administrator posts
-the merged result; the same item counted in two places is added together and
-flagged for review.
+the merged result; the same item counted by two people is flagged for review
+and, unless both found the same number, added together (or the latest kept,
+at the administrator's choice).
 
 **Serialized, lot-numbered and bin-tracked items** need Inventory Detail, which
 this tool does not collect. They are flagged in search results (no count box)
@@ -262,11 +269,21 @@ way — one sheet per device.
   "Warehouse tablet 1"). The administrator sees `Jeff Howard · Warehouse
   tablet 1 · 60 · 10:02` under each item, so a count traces to a place as well
   as a person.
-- **The same item counted by two people shows as two sub-lines and is added
-  together** — a warehouse count of 60 and a retail-floor count of 30 post as
-  90. The row is flagged *2 counters* and listed under **Needs review**. Untick
-  a sub-line to leave it out (a true duplicate rather than a second area), or
-  type a total by hand; a hand-set total is marked and can be reset.
+- **The same item counted by two people shows as two sub-lines.** If both
+  found the **same number**, that is one count, not double — they found the
+  same shelf — and the row says *same count, counted once*. If the numbers
+  **differ**, the sheet's *Two people counted the same item* switch decides:
+  **Add them up** (the default: a warehouse count of 60 and a retail-floor
+  count of 30 post as 90, *added together*) or **Keep the latest** (the same
+  shelf counted again, so the newest count wins, *latest kept (Jeff
+  Howard)*). The notice above the list says how many items two people
+  counted, how many agree, and how many of the units up / down sit on those
+  items — the first place to look when a total looks too high. Either way
+  the row is flagged *2 counters*; untick a sub-line to leave it out, or type
+  a total by hand (marked, resettable). **Needs review** lists only the
+  flagged items (two counters, or on hand moved since the count) that would
+  actually post a + or − adjustment — a flagged item whose total lands on
+  its on-hand needs nobody's time and stays under **All**.
 - Every device sees everyone's open-order ticks. A line someone else ticked
   shows checked and locked with *ticked by Jeff Howard · Warehouse tablet 1*,
   the order and rep headers count it, and **Select all** skips it; the view
@@ -353,7 +370,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.9` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.11` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused

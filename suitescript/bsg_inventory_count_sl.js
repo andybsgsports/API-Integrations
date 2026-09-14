@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.9',
+        VERSION: '2026-09-14.11',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -699,7 +699,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 var remaining = round4(Math.max(0, qty - shipped));
                 if (remaining <= 0) { return; } // this line is fully shipped even if the order is still open
                 var committed = Math.min(remaining, Math.abs(parseFloat(tval(r, 'quantitycommitted')) || 0));
-                if (committed <= 0) { return; } // nothing received for this line yet: not in the building
+                // committed 0 is usually "nothing received yet", but a line
+                // marked Do Not Commit never gets a committed quantity even
+                // when its units have been pulled and are standing in the
+                // building. So the line is kept here and dropped further down
+                // only if no pulled fulfillment turns up for it.
                 out.push({
                     kind: 'order',
                     id: String(r.id),
@@ -731,6 +735,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // rejected, the rows are de-duplicated by record + item.
         var pulled = [];
         if (!out.length) { return { ok: true, orders: out, truncated: truncated }; }
+        // (out may hold Do Not Commit lines with committed 0 at this point --
+        // the fulfillment search below is what says whether they are countable)
         try {
             function ifSpec() {
                 var filters = [
@@ -782,8 +788,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             out = out.filter(function (e) { return countable[e.item]; });
         }
 
-        // A pulled / packed fulfillment's units are still inside its order
-        // line's committed quantity, so it only annotates that line.
+        // A pulled / packed fulfillment's units are normally already inside
+        // its order line's committed quantity, so it only annotates that line.
         pulled.forEach(function (f) {
             for (var i = 0; i < out.length; i++) {
                 if (out[i].ref === f.ref && out[i].item === f.item) {
@@ -793,6 +799,19 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 }
             }
         });
+        // Do Not Commit: NetSuite commits nothing to the line, so the pulled
+        // quantity is the only signal that those units are in the building.
+        // It becomes what there is to count, capped at what the order still
+        // has open. Everything left with nothing committed and nothing pulled
+        // has not been received and is not listed.
+        out.forEach(function (o) {
+            if (!(o.committed > 0) && o.pulled > 0) {
+                o.committed = round4(Math.min(o.remaining, o.pulled));
+                o.backordered = round4(Math.max(0, o.remaining - o.committed));
+                o.uncommitted = true;
+            }
+        });
+        out = out.filter(function (o) { return o.committed > 0; });
         return { ok: true, orders: out, truncated: truncated };
     }
 
@@ -1157,7 +1176,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     // 5,000 -- more than a full physical count of BSG's catalog.
     function sharedRows(filters) {
         var F = CONFIG.SHARED_FIELDS;
-        var cols = [F.item, F.shelf, F.orders, F.onhand, F.counter, F.device, F.label, F.posted, F.adjustment, 'lastmodified'];
+        var cols = [F.item, F.shelf, F.orders, F.onhand, F.counter, F.device, F.label, F.posted, F.adjustment, search.createColumn({ name: 'lastmodified', sort: search.Sort.DESC })];
         var rs = search.create({ type: CONFIG.SHARED_RECORD, filters: filters, columns: cols }).run();
         var rows = [], start = 0, MAX = 5000;
         function num(v) { return v === '' || v == null ? null : parseFloat(v); }
@@ -1178,7 +1197,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     label: String(r.getValue(F.label) || ''),
                     posted: posted === true || posted === 'T',
                     adjustment: String(r.getValue(F.adjustment) || ''),
-                    at: String(r.getValue('lastmodified') || '')
+                    at: String(r.getValue('lastmodified') || ''),
+                    seq: rows.length     // 0 = saved most recently; 'at' is display text and does not sort
                 });
             });
             if (chunk.length < 1000) { break; }
@@ -1928,6 +1948,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .ic-row.is-review{box-shadow:inset 3px 0 0 var(--red)}
 .ic-qty.is-override{border-color:var(--red);background:var(--red-100)}
 .ic-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+.ic-dupes{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;background:var(--warn-bg);border-left:4px solid var(--warn-line);padding:11px 14px;margin:0 0 18px;font-size:13.5px;line-height:1.5}
+.ic-dupes-text{flex:1 1 360px}
 .ic-chip{border:1px solid var(--line);padding:6px 10px;font-size:12.5px;color:var(--ink-2);display:inline-flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .ic-chip b{color:var(--ink)}
 .ic-chip .ic-meta{margin:0}
@@ -2619,7 +2641,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // "0 shipped of 10 · 10 to count (10 layaway) · Pending Fulfillment"
     function orderDetail(o) {
         return fmt(o.shipped) + ' shipped of ' + fmt(o.qty) + ' · ' + fmt(o.committed) + ' to count'
-            + (o.pulled ? ' (' + fmt(o.pulled) + ' ' + String(o.pulledStatus || 'pulled').toLowerCase() + ')' : '')
+            + (o.pulled ? ' (' + fmt(o.pulled) + ' ' + String(o.pulledStatus || 'pulled').toLowerCase() + (o.uncommitted ? ', do not commit' : '') + ')' : '')
             + (o.backordered ? ' · ' + fmt(o.backordered) + ' more not received yet' : '')
             + (o.status ? ' · ' + o.status : '');
     }
@@ -2927,7 +2949,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function loadSession(after) {
         var prev = state.session || {};
         state.session = { loc: state.loc, loading: true, error: '', lines: [], items: [], byItem: {}, fresh: {}, freshDone: false, loadedAt: 0, truncated: false,
-            excluded: prev.excluded || {}, overrides: prev.overrides || {}, filter: prev.filter || 'all', precheck: null };
+            excluded: prev.excluded || {}, overrides: prev.overrides || {}, filter: prev.filter || 'all', dupes: prev.dupes || 'add', precheck: null };
         var s = state.session;
         apiGet('session', { loc: state.loc || '' }).then(function (res) {
             if (state.session !== s) { return; }   // superseded (location change, discard)
@@ -2947,6 +2969,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (!m) { m = byItem[l.item] = { id: l.item, name: l.name || ('item ' + l.item), subs: [] }; items.push(m); }
             m.subs.push(l);
         });
+        // Sub-lines oldest first (the server sends newest first so 'seq' can
+        // say which is latest); names and memos then read in counting order.
+        items.forEach(function (m) { m.subs.sort(function (a, b) { return (Number(b.seq) || 0) - (Number(a.seq) || 0); }); });
         items.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
         s.items = naturalItemOrder(items); s.byItem = byItem;
     }
@@ -2968,20 +2993,34 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         }
         next();
     }
-    // The merged count for an item: the shelf units of every counter not left
+    // The merged count for an item: the shelf units of the counters not left
     // out, plus each ticked open order once (two people ticking the same order
     // are agreeing, not doubling it), unless the administrator set a total.
+    // Two people on one item: the same number from both is one count, not
+    // double (they found the same shelf); different numbers are added up --
+    // two areas of the building -- or, with "Keep the latest" on, the newest
+    // one is kept (the same shelf counted again, better).
+    function dupeMode() { return state.session && state.session.dupes === 'latest' ? 'latest' : 'add'; }
     function mergedFor(m) {
-        var s = state.session, shelf = 0, orders = {}, refs = [], names = [], ids = [], live = 0, latest = '';
+        var s = state.session, shelf = 0, orders = {}, refs = [], names = [], ids = [], live = 0, latest = '', liveSubs = [];
         m.subs.forEach(function (l) {
             ids.push(l.id);
             if (s.excluded[l.id]) { return; }
             live++;
-            shelf += Number(l.shelf) || 0;
+            liveSubs.push(l);
             (l.orders || []).forEach(function (o) { if (!orders[o.ref]) { orders[o.ref] = Number(o.qty) || 0; refs.push(o.ref); } });
             if (l.counterName && names.indexOf(l.counterName) === -1) { names.push(l.counterName); }
             if (String(l.at || '') > latest) { latest = String(l.at); }
         });
+        var mode = 'one', keptBy = '';
+        if (liveSubs.length > 1) {
+            var vals = liveSubs.map(function (l) { return round4(Number(l.shelf) || 0); });
+            if (vals.every(function (v) { return v === vals[0]; })) { shelf = vals[0]; mode = 'agree'; }
+            else if (dupeMode() === 'latest') {
+                var newest = liveSubs.reduce(function (a, b) { return (Number(b.seq) || 0) < (Number(a.seq) || 0) ? b : a; });
+                shelf = round4(Number(newest.shelf) || 0); mode = 'latest'; keptBy = newest.counterName || '';
+            } else { vals.forEach(function (v) { shelf += v; }); mode = 'added'; }
+        } else if (liveSubs.length === 1) { shelf = Number(liveSubs[0].shelf) || 0; }
         var onOrders = 0;
         refs.forEach(function (r) { onOrders += orders[r]; });
         var computed = round4(shelf + onOrders);
@@ -2993,20 +3032,24 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var usable = !f.missing && !f.blocked && live > 0;
         return { computed: computed, total: total, overridden: ov != null, orders: refs.map(function (r) { return { ref: r, qty: orders[r] }; }), onOrders: onOrders,
             names: names, ids: ids, seen: m.subs.map(function (l) { return { id: l.id, shelf: l.shelf, orders: l.orders || [] }; }),
-            live: live, latest: latest, fresh: f, onhand: onhand, drift: drift, usable: usable,
+            live: live, latest: latest, fresh: f, onhand: onhand, drift: drift, usable: usable, mode: mode, keptBy: keptBy,
             delta: onhand == null || !usable ? null : round4(total - onhand),
-            review: m.subs.length > 1 || drift || !!f.missing || !!f.blocked };
+            // Needs review: something to look at (two counters, on hand moved,
+            // not countable) AND an adjustment would post -- an item that lands
+            // on its on-hand needs nobody's time.
+            review: (m.subs.length > 1 || drift || !!f.missing || !!f.blocked) && (f.missing || f.blocked ? false : (onhand != null && usable && round4(total - onhand) !== 0)) };
     }
     function sharedTotals(s) {
-        var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0 };
+        var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0, multi: 0, multiPos: 0, multiNeg: 0, agreed: 0 };
         s.items.forEach(function (m) {
             var g = mergedFor(m);
             t.items++; t.lines += m.subs.length;
             if (g.review) { t.review++; }
+            if (g.live > 1) { t.multi++; if (g.mode === 'agree') { t.agreed++; } }
             if (!g.usable) { t.blocked++; return; }
             if (g.delta == null) { return; }
             if (g.delta !== 0) { t.changed++; }
-            if (g.delta > 0) { t.pos += g.delta; } else { t.neg += -g.delta; }
+            if (g.delta > 0) { t.pos += g.delta; if (g.live > 1) { t.multiPos += g.delta; } } else { t.neg += -g.delta; if (g.live > 1) { t.multiNeg += -g.delta; } }
         });
         s.lines.forEach(function (l) {
             var k = (l.counterName || 'Unknown') + '|' + (l.label || '');
@@ -3050,7 +3093,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         row.appendChild(el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name' }, [itemLink(m.id, f.name || m.name)]),
             (f.display || f.desc) ? el('div', { class: 'ic-desc', text: f.display || f.desc }) : null,
-            m.subs.length > 1 ? el('div', { class: 'ic-flag is-review', text: m.subs.length + ' counters' + (g.live < m.subs.length ? ' · ' + (m.subs.length - g.live) + ' left out' : ' · added together') }) : null,
+            m.subs.length > 1 ? el('div', { class: 'ic-flag is-review', text: m.subs.length + ' counters' + (g.live < m.subs.length ? ' · ' + (m.subs.length - g.live) + ' left out' : '') + (g.mode === 'agree' ? ' · same count, counted once' : g.mode === 'latest' ? ' · latest kept' + (g.keptBy ? ' (' + g.keptBy + ')' : '') : g.mode === 'added' ? ' · added together' : '') }) : null,
             g.drift ? el('div', { class: 'ic-flag', text: 'On hand changed since it was counted' }) : null,
             f.missing ? el('div', { class: 'ic-flag', text: 'Not found at this location - will be skipped' }) : null,
             f.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + f.blocked + ') - will be skipped' }) : null,
@@ -3108,6 +3151,18 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 var c = t.counters[k];
                 return el('span', { class: 'ic-chip' }, [el('b', { text: c.name }), c.label ? el('span', { text: c.label }) : null, el('span', { class: 'ic-meta', text: c.lines + ' line' + (c.lines === 1 ? '' : 's') + (c.at ? ' · ' + fmtAt(c.at) : '') })]);
             })));
+        }
+        if (t.multi) {
+            main.appendChild(el('div', { class: 'ic-dupes', id: 'icDupes' }, [
+                el('div', { class: 'ic-dupes-text' }, [
+                    el('b', { text: t.multi + ' item' + (t.multi === 1 ? ' was' : 's were') + ' counted by two people. ' }),
+                    (t.agreed ? t.agreed + ' agree and count once. ' : '') + 'For the rest: ' + (dupeMode() === 'latest' ? 'the latest count is kept' : 'the counts are added up (two areas of the building)') + '. Those items carry +' + fmt(t.multiPos) + ' / −' + fmt(t.multiNeg) + ' of the units up / down.'
+                ]),
+                el('div', { class: 'ic-seg', role: 'group', 'aria-label': 'Two people counted the same item' }, [
+                    el('button', { class: 'ic-segbtn' + (dupeMode() === 'add' ? ' is-on' : ''), type: 'button', text: 'Add them up', onclick: function () { s.dupes = 'add'; render(); } }),
+                    el('button', { class: 'ic-segbtn' + (dupeMode() === 'latest' ? ' is-on' : ''), type: 'button', text: 'Keep the latest', onclick: function () { s.dupes = 'latest'; render(); } })
+                ])
+            ]));
         }
         if (s.truncated) { main.appendChild(el('div', { class: 'ic-warn', text: 'The shared count has more than 5,000 lines; only the first 5,000 are shown. Post these, then reload for the rest.' })); }
         if (state.submitError) { main.appendChild(el('div', { class: 'ic-error', text: state.submitError })); }
@@ -3176,7 +3231,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 el('p', { text: nothing
                     ? 'All ' + live + ' item' + (live === 1 ? '' : 's') + ' equal the on-hand NetSuite already holds, so submitting records the count, clears everyone\'s sheets, and creates no Inventory Adjustment.'
                     : 'Those ' + t.changed + ' item' + (t.changed === 1 ? '' : 's') + ' move to the merged count (+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). The other ' + (live - t.changed) + ' already match and are left off. Every counter\'s lines are then cleared from their sheets.' }),
-                t.review ? el('p', { text: t.review + ' item' + (t.review === 1 ? ' is' : 's are') + ' flagged for review (two counters, or on hand changed). Counts from two people are added together unless one is unticked.' }) : null,
+                t.review ? el('p', { text: t.review + ' item' + (t.review === 1 ? ' is' : 's are') + ' flagged for review (two counters, or on hand changed). Where two people counted one item, the same number counts once; different numbers are ' + (dupeMode() === 'latest' ? 'resolved by keeping the latest' : 'added together') + ' unless one is unticked or a total set by hand.' }) : null,
                 t.blocked ? el('p', { text: t.blocked + ' item' + (t.blocked === 1 ? ' is' : 's are') + ' skipped and stay on the sheet.' }) : null,
                 pre === null ? el('p', { class: 'ic-meta', text: 'Checking today\'s adjustments…' }) : (pre && pre.length ? el('div', { class: 'ic-commit-warn' }, [
                     el('b', { text: pre.length + ' item' + (pre.length === 1 ? ' was' : 's were') + ' already adjusted by a count today: ' }),
