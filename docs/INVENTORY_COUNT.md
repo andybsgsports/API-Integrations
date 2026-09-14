@@ -91,6 +91,11 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    take them back out, and a line that only existed because of a tick leaves
    the sheet again. An order with several lines has a **Select all** row
    under its number that ticks or unticks every countable line at once.
+   **Two lines of the same item on one order** — two decoration jobs on one
+   blank, say — are told apart by the line's own position on the order, not
+   just the order number, so each is listed and tickable on its own and both
+   contribute their own quantity; ticking one never shows the other as
+   already done, and unticking one only takes its own units back out.
    A line appears while it still has **committed** units on an order that is
    itself open (Pending Fulfillment, Partially Fulfilled, Pending
    Billing/Partially Fulfilled — never Billed, Closed or Cancelled), **or**
@@ -388,7 +393,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.14` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.15` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused

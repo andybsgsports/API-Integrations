@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.14',
+        VERSION: '2026-09-14.15',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -698,7 +698,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             itemTypeFilter(filters);
             if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
             if (locId && !isDead('transaction', 'filter', 'location')) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
-            var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item'];
+            var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item', 'line'];
             ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted', 'salesrep', 'otherrefnum', 'memomain'].forEach(function (c) {
                 if (!isDead('transaction', 'column', c)) { cols.push(c); }
             });
@@ -711,6 +711,14 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 var remaining = round4(Math.max(0, qty - shipped));
                 if (remaining <= 0) { return; } // this line is fully shipped even if the order is still open
                 var committed = Math.min(remaining, Math.abs(parseFloat(tval(r, 'quantitycommitted')) || 0));
+                var ref = orderRef(tval(r, 'tranid'), r.id);
+                // Two lines of the same item on the same order -- two
+                // decoration jobs on one blank, say -- are ticked and tracked
+                // separately by folding in the line's own sequence number;
+                // without one (an account that rejects it) they fall back to
+                // sharing the order-level key, the old behavior.
+                var lineSeq = tval(r, 'line');
+                var key = ref + (lineSeq !== '' && lineSeq != null ? '#' + lineSeq : '');
                 // committed 0 is usually "nothing received yet", but a line
                 // marked Do Not Commit never gets a committed quantity even
                 // when its units have been pulled and are standing in the
@@ -719,7 +727,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 out.push({
                     kind: 'order',
                     id: String(r.id),
-                    ref: orderRef(tval(r, 'tranid'), r.id),
+                    ref: ref,
+                    key: key,
                     customer: ttxt(r, 'entity') || '',
                     rep: ttxt(r, 'salesrep') || '',
                     po: cleanName(tval(r, 'otherrefnum'), 40),
@@ -802,14 +811,19 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
         // A pulled / packed fulfillment's units are normally already inside
         // its order line's committed quantity, so it only annotates that line.
+        // When the same item has two lines on one order, the fulfillment
+        // search can't tell which line it came from either; an unclaimed line
+        // is preferred so two picks split across two lines rather than both
+        // landing on the first.
         pulled.forEach(function (f) {
+            var target = null;
             for (var i = 0; i < out.length; i++) {
-                if (out[i].ref === f.ref && out[i].item === f.item) {
-                    out[i].pulled = round4((out[i].pulled || 0) + f.qty);
-                    out[i].pulledStatus = f.pulledStatus;
-                    break;
-                }
+                if (out[i].ref === f.ref && out[i].item === f.item && out[i].pulled == null) { target = out[i]; break; }
             }
+            if (!target) {
+                for (var j = 0; j < out.length; j++) { if (out[j].ref === f.ref && out[j].item === f.item) { target = out[j]; break; } }
+            }
+            if (target) { target.pulled = round4((target.pulled || 0) + f.qty); target.pulledStatus = f.pulledStatus; }
         });
         // Do Not Commit: NetSuite commits nothing to the line, so the pulled
         // quantity is the only signal that those units are in the building.
@@ -1159,7 +1173,12 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         var out = [];
         (Array.isArray(raw) ? raw : []).slice(0, 30).forEach(function (o) {
             var ref = cleanRef(o && o.ref), qty = parseFloat(o && o.qty);
-            if (ref && isFinite(qty) && qty > 0) { out.push({ ref: ref, qty: round4(qty) }); }
+            // key tells apart two lines of one item on one order (two
+            // decoration jobs on the same blank, say); older saved data and
+            // an account where 'line' was rejected have none, so it falls
+            // back to the ref, same as before this existed.
+            var key = cleanRef(o && o.key) || ref;
+            if (ref && isFinite(qty) && qty > 0) { out.push({ ref: ref, key: key, qty: round4(qty) }); }
         });
         return out;
     }
@@ -1299,7 +1318,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         sharedRows(sharedLocFilter([[F.posted, 'is', 'F']], g.locId)).forEach(function (r) {
             if (r.device === g.device) { return; }
             var on = 0;
-            r.orders.forEach(function (o) { on += Number(o.qty) || 0; out.push({ item: r.item, ref: o.ref, qty: o.qty, name: r.counterName, label: r.label }); });
+            r.orders.forEach(function (o) { on += Number(o.qty) || 0; out.push({ item: r.item, ref: o.ref, key: o.key || o.ref, qty: o.qty, name: r.counterName, label: r.label }); });
             lines.push({ item: r.item, shelf: r.shelf, on: round4(on), name: r.counterName, label: r.label, at: r.at });
         });
         return { ok: true, ticks: out, lines: lines };
@@ -2412,14 +2431,16 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     }
     // Tick / untick an open order (or picked/packed fulfillment) for an item:
     // its committed units go into that item's count and the order is recorded.
+    function orderKey(entry) { return (entry && (entry.key || entry.ref)) || ''; }
     function tickOrder(item, entry, checked) {
         var existed = !!state.sheet[item.id];
         var line = ensureLine(item);
         if (!existed) { line.viaTick = true; } // never keyed: only here because of a tick
         var qty = round4(entry.committed);
-        line.orders = (line.orders || []).filter(function (o) { return o.ref !== entry.ref; });
+        var k = orderKey(entry);
+        line.orders = (line.orders || []).filter(function (o) { return orderKey(o) !== k; });
         if (checked) {
-            line.orders.push({ ref: entry.ref, qty: qty });
+            line.orders.push({ ref: entry.ref, key: k, qty: qty });
             line.count = round4((Number(line.count) || 0) + qty);
         } else {
             line.count = round4(Math.max(0, (Number(line.count) || 0) - qty));
@@ -2437,7 +2458,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // Ticks made on other devices (action=ticks), shown locked on this one so
     // nobody hunts for units that have already been found.
     var others = { map: {}, lines: {}, loadedAt: 0, loading: false, error: '', waiters: [] };
-    function othersKey(item, ref) { return String(item) + '|' + String(ref); }
+    function othersKey(item, key) { return String(item) + '|' + String(key); }
     function loadOthers(cb) {
         if (!SHARED || (BOOT.multiLoc && !state.loc)) { if (cb) { cb(false); } return; }
         if (cb) { others.waiters.push(cb); }
@@ -2451,7 +2472,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 others.error = (res && res.error) || 'Could not reach NetSuite.';
             } else {
                 var map = {}, lines = {};
-                (res.ticks || []).forEach(function (t) { map[othersKey(t.item, t.ref)] = { name: t.name || 'someone', label: t.label || '' }; });
+                (res.ticks || []).forEach(function (t) { map[othersKey(t.item, t.key || t.ref)] = { name: t.name || 'someone', label: t.label || '' }; });
                 (res.lines || []).forEach(function (l) { (lines[String(l.item)] = lines[String(l.item)] || []).push({ name: l.name || 'someone', label: l.label || '', shelf: Number(l.shelf) || 0, on: Number(l.on) || 0, at: l.at || '' }); });
                 changed = JSON.stringify(map) !== JSON.stringify(others.map) || JSON.stringify(lines) !== JSON.stringify(others.lines) || !!others.error;
                 others.map = map; others.lines = lines; others.loadedAt = Date.now(); others.error = '';
@@ -2483,14 +2504,17 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         Array.prototype.forEach.call(document.querySelectorAll('.ic-row[data-row-for]'), function (row) { refreshResultRow(row.getAttribute('data-row-for')); });
     }
     // 'me', or who on another device ticked this order line, or null.
-    function tickedBy(itemId, ref) {
-        if (isTicked(itemId, ref)) { return 'me'; }
-        return others.map[othersKey(itemId, ref)] || null;
+    // itemId + the entry's own key (its ref alone when two lines don't share
+    // one, its ref#line when they do) -- passing a bare ref would treat two
+    // separate lines of the same item on one order as a single tick.
+    function tickedBy(itemId, key) {
+        if (isTicked(itemId, key)) { return 'me'; }
+        return others.map[othersKey(itemId, key)] || null;
     }
     function tickedByText(t) { return 'ticked by ' + t.name + (t.label ? ' · ' + t.label : ''); }
-    function isTicked(itemId, ref) {
+    function isTicked(itemId, key) {
         var line = state.sheet[itemId];
-        return !!line && (line.orders || []).some(function (o) { return o.ref === ref; });
+        return !!line && (line.orders || []).some(function (o) { return orderKey(o) === key; });
     }
     function inclText(line) {
         var t = ordersTotal(line);
@@ -2662,7 +2686,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // Open orders tab.
     function orderRow(item, o, onChange) {
         var off = !(o.committed > 0);
-        var by = tickedBy(item.id, o.ref), theirs = by && by !== 'me';
+        var by = tickedBy(item.id, orderKey(o)), theirs = by && by !== 'me';
         var cb = el('input', { type: 'checkbox', 'aria-label': 'Counted: ' + o.ref + ' ' + (o.itemName || item.name || '') });
         cb.checked = !!by;
         cb.disabled = off || !!theirs;
@@ -3040,7 +3064,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (s.excluded[l.id]) { return; }
             live++;
             liveSubs.push(l);
-            (l.orders || []).forEach(function (o) { if (!orders[o.ref]) { orders[o.ref] = Number(o.qty) || 0; refs.push(o.ref); } });
+            // Keyed by the line's own identity, not its order ref alone: two
+            // counters ticking the SAME line agree and count once, but two
+            // DIFFERENT lines of one item on one order (two decoration jobs)
+            // must both survive even though they share an order ref.
+            (l.orders || []).forEach(function (o) { var k = o.key || o.ref; if (!orders[k]) { orders[k] = { ref: o.ref, qty: Number(o.qty) || 0 }; refs.push(k); } });
             if (l.counterName && names.indexOf(l.counterName) === -1) { names.push(l.counterName); }
             if (String(l.at || '') > latest) { latest = String(l.at); }
         });
@@ -3054,7 +3082,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             }
         } else if (liveSubs.length === 1) { shelf = Number(liveSubs[0].shelf) || 0; }
         var onOrders = 0;
-        refs.forEach(function (r) { onOrders += orders[r]; });
+        refs.forEach(function (r) { onOrders += orders[r].qty; });
         var computed = round4(shelf + onOrders);
         var ov = s.overrides[m.id];
         var total = ov != null ? round4(ov) : computed;
@@ -3062,7 +3090,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var onhand = f.onhand == null ? null : Number(f.onhand);
         var drift = m.subs.some(function (l) { return !s.excluded[l.id] && l.onhand != null && onhand != null && round4(l.onhand) !== round4(onhand); });
         var usable = !f.missing && !f.blocked && live > 0;
-        return { computed: computed, total: total, overridden: ov != null, orders: refs.map(function (r) { return { ref: r, qty: orders[r] }; }), onOrders: onOrders,
+        return { computed: computed, total: total, overridden: ov != null, orders: refs.map(function (r) { return { ref: orders[r].ref, qty: orders[r].qty }; }), onOrders: onOrders,
             names: names, ids: ids, seen: m.subs.map(function (l) { return { id: l.id, shelf: l.shelf, orders: l.orders || [] }; }),
             live: live, latest: latest, fresh: f, onhand: onhand, drift: drift, usable: usable, mode: mode, keptBy: keptBy,
             delta: onhand == null || !usable ? null : round4(total - onhand),
@@ -3692,7 +3720,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 });
             });
             var lineCount = 0, ticked = 0;
-            order.forEach(function (ref) { groups[ref].lines.forEach(function (o) { lineCount++; if (tickedBy(o.item, o.ref)) { ticked++; } }); });
+            order.forEach(function (ref) { groups[ref].lines.forEach(function (o) { lineCount++; if (tickedBy(o.item, orderKey(o))) { ticked++; } }); });
             if (cnt) {
                 cnt.textContent = repNames.length + ' sales rep' + (repNames.length === 1 ? '' : 's') + ' · ' + order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · list capped' : '');
             }
@@ -3707,7 +3735,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 // Collapsed unless the user opened it; a filter opens what it matched.
                 var open = !!q || !!state.ordersOpen[ref];
                 var gTicked = 0, gToCount = 0;
-                g.lines.forEach(function (o) { gToCount += Number(o.committed) || 0; if (tickedBy(o.item, o.ref)) { gTicked++; } });
+                g.lines.forEach(function (o) { gToCount += Number(o.committed) || 0; if (tickedBy(o.item, orderKey(o))) { gTicked++; } });
                 var headEl = el('div', { class: 'ic-ordhead', role: 'button', 'aria-expanded': open ? 'true' : 'false', onclick: function (ev) {
                     if (ev.target && ev.target.tagName === 'A') { return; } // the order link itself
                     state.ordersOpen[ref] = !state.ordersOpen[ref];
@@ -3728,11 +3756,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 var theirsCount = 0;
                 var tickable = g.lines.filter(function (o) {
                     if (!(o.committed > 0)) { return false; }
-                    var by = tickedBy(o.item, o.ref);
+                    var by = tickedBy(o.item, orderKey(o));
                     if (by && by !== 'me') { theirsCount++; return false; }
                     return true;
                 });
-                var mineTicked = tickable.filter(function (o) { return isTicked(o.item, o.ref); }).length;
+                var mineTicked = tickable.filter(function (o) { return isTicked(o.item, orderKey(o)); }).length;
                 if (tickable.length > 1) {
                     var all = el('input', { type: 'checkbox', class: 'ic-ordall', 'aria-label': 'Select all lines on ' + g.ref });
                     all.checked = mineTicked === tickable.length;
@@ -3740,7 +3768,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     all.addEventListener('change', function () {
                         var want = all.checked;
                         tickable.forEach(function (o) {
-                            if (isTicked(o.item, o.ref) !== want) { tickOrder({ id: o.item, name: o.itemName }, o, want); }
+                            if (isTicked(o.item, orderKey(o)) !== want) { tickOrder({ id: o.item, name: o.itemName }, o, want); }
                         });
                         paintGroups();
                     });
@@ -3755,7 +3783,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 g.lines.forEach(function (o) {
                     var item = { id: o.item, name: o.itemName };
                     var off = !(o.committed > 0);
-                    var by = tickedBy(o.item, o.ref), theirs = by && by !== 'me';
+                    var by = tickedBy(o.item, orderKey(o)), theirs = by && by !== 'me';
                     var cb = el('input', { type: 'checkbox', 'aria-label': 'Counted: ' + o.ref + ' ' + o.itemName });
                     cb.checked = !!by;
                     cb.disabled = off || !!theirs;
@@ -3784,7 +3812,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 refs.forEach(function (ref) {
                     groups[ref].lines.forEach(function (o) {
                         rLines++; rToCount += Number(o.committed) || 0;
-                        if (tickedBy(o.item, o.ref)) { rTicked++; }
+                        if (tickedBy(o.item, orderKey(o))) { rTicked++; }
                     });
                 });
                 var sec = el('div', { class: 'ic-repgrp', 'data-rep': repName });
