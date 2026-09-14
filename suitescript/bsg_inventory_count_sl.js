@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.6',
+        VERSION: '2026-09-14.7',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1026,31 +1026,47 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         if (!st.ready) { throw new Error(st.off ? 'The shared count is switched off.' : 'The shared count is not set up: ' + (st.error || 'record type missing')); }
     }
 
-    // The employee this request's lines belong to. Normally the signed-in
-    // user's id. Some logins are not employee records themselves -- NetSuite
-    // reports a negative id for them (-4 anonymous; -5 for BSG's original
-    // administrator login, which is how Jeff signs in) -- and the counter
-    // field is List/Record -> Employee, so such a login is matched to its
-    // employee record by e-mail, then by name. The match is remembered for a
-    // day. Nothing matched: null, and noUserReason() says what was tried.
+    // The employee this request's lines belong to: the signed-in user's id
+    // whenever it is an employee record. That includes negative ids -- BSG's
+    // original administrator (Jeff) IS employee -5; NetSuite numbered the
+    // account's first employee that way and an internal id cannot be changed
+    // -- so anything but 0 and -4 (an anonymous request) is checked against
+    // the employee list. A login that is no employee at all is matched to one
+    // by e-mail, then by name. The answer is remembered for a day.
     var counterResolved = { key: '', id: null, tried: '' };
+    function anyInt(v) {
+        var n = parseInt(v, 10);
+        return isFinite(n) && n !== 0 ? n : null;
+    }
     function sharedUser() {
         var u;
         try { u = runtime.getCurrentUser(); } catch (e) { return null; }
-        var raw = posInt(u.id);
-        if (raw) { return raw; }
+        var raw = anyInt(u.id);
+        if (raw && raw > 0) { return raw; }
         var email = '', name = '';
         try { email = cleanName(u.email, 120).toLowerCase(); } catch (e1) { /* ignore */ }
         try { name = cleanName(u.name, 120); } catch (e2) { /* ignore */ }
         var key = 'counter_v1:' + String(u.id) + ':' + email + ':' + name;
-        if (counterResolved.key === key && counterResolved.id) { return counterResolved.id; }   // a miss is retried: the employee record may just have been fixed
-        counterResolved = { key: key, id: null, tried: (email ? 'e-mail ' + email : '') + (email && name ? ' or ' : '') + (name ? 'name "' + name + '"' : '') };
+        if (counterResolved.key === key && counterResolved.id) { return counterResolved.id; }   // a miss is retried: the record may just have been fixed
+        var checkId = raw && raw !== -4;
+        counterResolved = { key: key, id: null, tried: [checkId ? 'internal id ' + raw : '', email ? 'e-mail ' + email : '', name ? 'name "' + name + '"' : ''].filter(Boolean).join(', ') };
         var c = deadCache();
-        if (c) { try { var hit = c.get({ key: key }); if (hit) { counterResolved.id = posInt(hit); if (counterResolved.id) { return counterResolved.id; } } } catch (e3) { /* miss */ } }
-        var id = findEmployee(email, name);
+        if (c) { try { var hit = anyInt(c.get({ key: key })); if (hit) { counterResolved.id = hit; return hit; } } catch (e3) { /* miss */ } }
+        var id = checkId && employeeExists(raw) ? raw : findEmployee(email, name);
         if (id && c) { try { c.put({ key: key, value: String(id), ttl: 86400 }); } catch (e4) { /* best effort */ } }
         counterResolved.id = id;
         return id;
+    }
+    function employeeExists(id) {
+        var n = 0;
+        try {
+            search.create({ type: 'employee', filters: [['internalid', 'anyof', [String(id)]], 'and', ['isinactive', 'is', 'F']], columns: ['internalid'] })
+                .run().each(function () { n++; return false; });
+        } catch (e) {
+            log.error({ title: 'invcount: could not check employee ' + id, details: safeErr(e) });
+        }
+        if (n) { log.audit({ title: 'invcount: signed-in user is employee ' + id, details: 'a non-positive id that is a real employee record' }); }
+        return n > 0;
     }
     function findEmployee(email, name) {
         if (!email && !name) { return null; }
@@ -1065,15 +1081,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         var rows = [];
         try {
             search.create({ type: 'employee', filters: [['isinactive', 'is', 'F'], 'and', any], columns: ['internalid', 'email', 'entityid'] })
-                .run().each(function (r) { rows.push({ id: posInt(r.id), email: String(r.getValue('email') || '').toLowerCase(), name: String(r.getValue('entityid') || '') }); return rows.length < 20; });
+                .run().each(function (r) { rows.push({ id: anyInt(r.id), email: String(r.getValue('email') || '').toLowerCase(), name: String(r.getValue('entityid') || '') }); return rows.length < 20; });
         } catch (e) {
             log.error({ title: 'invcount: employee lookup for the signed-in login failed', details: safeErr(e) });
             return null;
         }
+        rows = rows.filter(function (r) { return !!r.id; });
         var best = rows.filter(function (r) { return email && r.email === email; })[0]
             || rows.filter(function (r) { return name && r.name === name; })[0]
             || rows[0];
-        if (best) { log.audit({ title: 'invcount: login matched to employee ' + best.id, details: 'login without an employee id resolved by ' + (best.email === email && email ? 'e-mail' : 'name') + ': ' + best.name }); }
+        if (best) { log.audit({ title: 'invcount: login matched to employee ' + best.id, details: 'login without an employee id resolved by ' + (email && best.email === email ? 'e-mail' : 'name') + ': ' + best.name }); }
         return best ? best.id : null;
     }
     // Why sharedUser() came back empty, with what NetSuite actually reported,

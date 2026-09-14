@@ -338,7 +338,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.6` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.7` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
@@ -355,23 +355,25 @@ should equal what was keyed. Then repeat the same count — it should report
   nothing and keep counting; their sheets just stay on their devices until it
   exists.
 - **"No signed-in user: NetSuite reports user id "-5" …"** with a red
-  *NetSuite is not reporting a signed-in user for this tab* banner — every save
-  and reconcile from that tab was refused because `runtime.getCurrentUser()`
-  gave no employee id. Some logins are not employee records: NetSuite
-  reports a negative id for them (-4 is an anonymous request; BSG's original
-  administrator login, which Jeff uses, reports -5 with his name). The
-  counter field is List/Record → Employee, so since 2026-09-14.6 such a login
-  is matched to its **employee record** by e-mail address, then by name
-  (`entityid`, or first + last), and the match is remembered for a day. If
-  the banner still shows, the message says what was tried (*No active
-  employee record matched this login by e-mail … or name …*): give that
-  person's employee record the login's e-mail address (or the same name),
-  make sure it is active, then reload. The counts stay in the browser and
-  are counted as pending (*Not saved (N lines)*) until then, and go up as
-  soon as a save is accepted. The footer shows the raw id the page load saw
-  (`v… · user -5`), and the same line is written to the deployment's
-  execution log at Audit level (`invcount: request without a usable user
-  id`; a successful match logs `invcount: login matched to employee N`).
+  *NetSuite is not reporting a signed-in user for this tab* banner — the
+  signed-in user's id is not a positive number. Up to 2026-09-14.6 the page
+  treated that as "no user" and refused every save from that device, so its
+  lines stayed in the browser. But a negative id can be a real employee:
+  NetSuite numbers the account's **original administrator** employee **-5**
+  (Jeff, at BSG — he is listed at internal id -5 on Lists → Employees), and
+  an internal id can never be changed. Since 2026-09-14.7 any id but 0 and
+  -4 (an anonymous request) is checked against the active employee list and
+  used as is; a login that is no employee at all is matched to one by e-mail
+  address, then by name. The answer is remembered for a day. If the banner
+  still shows, its line says what was tried (*No active employee record
+  matched this login by internal id …, e-mail …, name …*): make sure that
+  person has an active employee record with the login's e-mail address (or
+  the same name), then reload. The counts stay in the browser and are
+  counted as pending (*Not saved (N lines)*) until then, and go up as soon as
+  a save is accepted. The footer shows the raw id the page load saw
+  (`v… · user -5`); the execution log records the outcome at Audit level
+  (`invcount: signed-in user is employee -5`, `… login matched to employee
+  N`, or `… request without a usable user id`).
 - **"Not saved (N lines) — retrying: …"** in the header — the device could not
   save to NetSuite, and since 2026-09-14.3 the header names the actual reason
   (a session that timed out, a permission problem, the record type briefly
