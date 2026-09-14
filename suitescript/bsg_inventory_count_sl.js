@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.5',
+        VERSION: '2026-09-14.6',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -675,7 +675,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
             if (locId && !isDead('transaction', 'filter', 'location')) { filters.push('and'); filters.push(['location', 'anyof', [String(locId)]]); }
             var cols = [search.createColumn({ name: 'trandate', sort: search.Sort.ASC }), 'tranid', 'quantity', 'item'];
-            ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted', 'salesrep', 'otherrefnum', 'memo'].forEach(function (c) {
+            ['entity', 'statusref', 'quantityshiprecv', 'quantitycommitted', 'salesrep', 'otherrefnum', 'memomain'].forEach(function (c) {
                 if (!isDead('transaction', 'column', c)) { cols.push(c); }
             });
             return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
@@ -695,7 +695,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     customer: ttxt(r, 'entity') || '',
                     rep: ttxt(r, 'salesrep') || '',
                     po: cleanName(tval(r, 'otherrefnum'), 40),
-                    memo: cleanName(tval(r, 'memo'), 200),
+                    memo: cleanName(tval(r, 'memomain'), 200),   // the order's own memo; 'memo' on a line row is that line's (the item description)
                     date: String(tval(r, 'trandate')),
                     item: String(tval(r, 'item')),
                     itemName: ttxt(r, 'item') || '',
@@ -1026,17 +1026,66 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         if (!st.ready) { throw new Error(st.off ? 'The shared count is switched off.' : 'The shared count is not set up: ' + (st.error || 'record type missing')); }
     }
 
+    // The employee this request's lines belong to. Normally the signed-in
+    // user's id. Some logins are not employee records themselves -- NetSuite
+    // reports a negative id for them (-4 anonymous; -5 for BSG's original
+    // administrator login, which is how Jeff signs in) -- and the counter
+    // field is List/Record -> Employee, so such a login is matched to its
+    // employee record by e-mail, then by name. The match is remembered for a
+    // day. Nothing matched: null, and noUserReason() says what was tried.
+    var counterResolved = { key: '', id: null, tried: '' };
     function sharedUser() {
-        try { return posInt(runtime.getCurrentUser().id); } catch (e) { return null; }
+        var u;
+        try { u = runtime.getCurrentUser(); } catch (e) { return null; }
+        var raw = posInt(u.id);
+        if (raw) { return raw; }
+        var email = '', name = '';
+        try { email = cleanName(u.email, 120).toLowerCase(); } catch (e1) { /* ignore */ }
+        try { name = cleanName(u.name, 120); } catch (e2) { /* ignore */ }
+        var key = 'counter_v1:' + String(u.id) + ':' + email + ':' + name;
+        if (counterResolved.key === key && counterResolved.id) { return counterResolved.id; }   // a miss is retried: the employee record may just have been fixed
+        counterResolved = { key: key, id: null, tried: (email ? 'e-mail ' + email : '') + (email && name ? ' or ' : '') + (name ? 'name "' + name + '"' : '') };
+        var c = deadCache();
+        if (c) { try { var hit = c.get({ key: key }); if (hit) { counterResolved.id = posInt(hit); if (counterResolved.id) { return counterResolved.id; } } } catch (e3) { /* miss */ } }
+        var id = findEmployee(email, name);
+        if (id && c) { try { c.put({ key: key, value: String(id), ttl: 86400 }); } catch (e4) { /* best effort */ } }
+        counterResolved.id = id;
+        return id;
+    }
+    function findEmployee(email, name) {
+        if (!email && !name) { return null; }
+        var any = [];
+        if (email) { any.push(['email', 'is', email]); }
+        if (name) {
+            if (any.length) { any.push('or'); }
+            any.push(['entityid', 'is', name]);
+            var parts = name.split(' ');
+            if (parts.length > 1) { any.push('or'); any.push([['firstname', 'is', parts[0]], 'and', ['lastname', 'is', parts[parts.length - 1]]]); }
+        }
+        var rows = [];
+        try {
+            search.create({ type: 'employee', filters: [['isinactive', 'is', 'F'], 'and', any], columns: ['internalid', 'email', 'entityid'] })
+                .run().each(function (r) { rows.push({ id: posInt(r.id), email: String(r.getValue('email') || '').toLowerCase(), name: String(r.getValue('entityid') || '') }); return rows.length < 20; });
+        } catch (e) {
+            log.error({ title: 'invcount: employee lookup for the signed-in login failed', details: safeErr(e) });
+            return null;
+        }
+        var best = rows.filter(function (r) { return email && r.email === email; })[0]
+            || rows.filter(function (r) { return name && r.name === name; })[0]
+            || rows[0];
+        if (best) { log.audit({ title: 'invcount: login matched to employee ' + best.id, details: 'login without an employee id resolved by ' + (best.email === email && email ? 'e-mail' : 'name') + ': ' + best.name }); }
+        return best ? best.id : null;
     }
     // Why sharedUser() came back empty, with what NetSuite actually reported,
     // so the page (and the execution log) can say more than "no user". -4 is
-    // NetSuite's id for an anonymous request; 0 or blank is no session at all.
+    // NetSuite's id for an anonymous request; 0 or blank is no session at all;
+    // another negative id is a login without an employee record of its own.
     function noUserReason() {
         var id = '', name = '', role = '', roleId = '';
         try { var u = runtime.getCurrentUser(); id = String(u.id); name = String(u.name || ''); role = String(u.role || ''); roleId = String(u.roleId || ''); }
         catch (e) { id = 'error: ' + userErr(e); }
         var why = 'No signed-in user: NetSuite reports user id "' + id + '"' + (name ? ', name "' + name + '"' : '') + (role || roleId ? ', role ' + role + (roleId ? ' (' + roleId + ')' : '') : '') + '.';
+        if (counterResolved.tried) { why += ' No active employee record matched this login by ' + counterResolved.tried + ' -- give the employee record the login\'s e-mail address (or the same name), then reload.'; }
         log.audit({ title: 'invcount: request without a usable user id', details: why });
         return why;
     }

@@ -59,8 +59,9 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    facility, or waiting for customer pickup. Instead of printing every open
    order, the **Open orders** tab lists every such line at the location,
    grouped by **sales rep** and, inside each rep, by order (oldest first) with
-   customer, the sales order's own **PO #** and **memo** (right after the
-   customer name, when either is filled in), date and status, as
+   customer, the sales order's own **PO #** and header **memo** (the order's
+   Memo field, not a line's; right after the customer name, when either is
+   filled in), date and status, as
    `0 shipped of 5 · 5 to count`. Each rep header totals its orders, lines,
    units to count and ticks, and collapses the whole section; the orders
    themselves start collapsed and open on a click (or **Expand all**), each
@@ -337,7 +338,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.5` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.6` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
@@ -353,20 +354,24 @@ should equal what was keyed. Then repeat the same count — it should report
   record or one of its fields is missing; the notice names what. Counters see
   nothing and keep counting; their sheets just stay on their devices until it
   exists.
-- **"No signed-in user: NetSuite reports user id "-4" …"** with a red
+- **"No signed-in user: NetSuite reports user id "-5" …"** with a red
   *NetSuite is not reporting a signed-in user for this tab* banner — every save
-  and reconcile from that tab is refused because `runtime.getCurrentUser()`
-  gave no usable employee id (-4 is NetSuite's anonymous user; 0 or blank is
-  no session). The counts stay in that browser and are counted as pending
-  (*Not saved (N lines)*), and go up as soon as NetSuite reports the person
-  again. Reload first (a timed-out session, or a sign-in or role switch in
-  another tab, comes back with a reload). If the banner returns straight
-  away on a fresh login, the message names the id and role NetSuite reported
-  — send it, with the page footer (`v… · user <id>`, the id the page load
-  saw), to whoever administers the account: it points at that login's role
-  or the deployment's audience/execute-as settings, not at the count page.
-  The same line is written to the deployment's execution log at Audit level
-  (`invcount: request without a usable user id`).
+  and reconcile from that tab was refused because `runtime.getCurrentUser()`
+  gave no employee id. Some logins are not employee records: NetSuite
+  reports a negative id for them (-4 is an anonymous request; BSG's original
+  administrator login, which Jeff uses, reports -5 with his name). The
+  counter field is List/Record → Employee, so since 2026-09-14.6 such a login
+  is matched to its **employee record** by e-mail address, then by name
+  (`entityid`, or first + last), and the match is remembered for a day. If
+  the banner still shows, the message says what was tried (*No active
+  employee record matched this login by e-mail … or name …*): give that
+  person's employee record the login's e-mail address (or the same name),
+  make sure it is active, then reload. The counts stay in the browser and
+  are counted as pending (*Not saved (N lines)*) until then, and go up as
+  soon as a save is accepted. The footer shows the raw id the page load saw
+  (`v… · user -5`), and the same line is written to the deployment's
+  execution log at Audit level (`invcount: request without a usable user
+  id`; a successful match logs `invcount: login matched to employee N`).
 - **"Not saved (N lines) — retrying: …"** in the header — the device could not
   save to NetSuite, and since 2026-09-14.3 the header names the actual reason
   (a session that timed out, a permission problem, the record type briefly
