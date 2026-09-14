@@ -94,12 +94,13 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    A line appears while it still has **committed** units on an order that is
    itself open (Pending Fulfillment, Partially Fulfilled, Pending
    Billing/Partially Fulfilled — never Billed, Closed or Cancelled), **or**
-   while it has units **pulled** for it. That second case is a line marked
-   **Do Not Commit**: NetSuite commits nothing to it however much is picked,
-   so the pulled quantity is the only sign those units are standing in the
-   building. Such a line is listed on what was pulled, capped at what the
-   order still has open, and says so — `0 shipped of 40 · 40 to count
-   (40 pulled, do not commit)`.
+   while it has units **pulled** for it with nothing committed — a line
+   marked **Do Not Commit**, or an ordinary line whose committed quantity
+   has already moved into a pending Item Fulfillment once it was picked
+   (BSG sees both). Either way the pulled quantity is the only sign those
+   units are standing in the building; such a line is listed on what was
+   pulled, capped at what the order still has open, and says so —
+   `0 shipped of 40 · 40 to count (40 pulled, do not commit)`.
    Committed quantity is the reliable signal: picking or packing does not
    clear it, shipping does, and a line that was zeroed or returned to the
    vendor has none even when a pick record survives. So backordered lines,
