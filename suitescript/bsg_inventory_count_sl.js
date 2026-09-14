@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.4',
+        VERSION: '2026-09-14.5',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1029,6 +1029,17 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     function sharedUser() {
         try { return posInt(runtime.getCurrentUser().id); } catch (e) { return null; }
     }
+    // Why sharedUser() came back empty, with what NetSuite actually reported,
+    // so the page (and the execution log) can say more than "no user". -4 is
+    // NetSuite's id for an anonymous request; 0 or blank is no session at all.
+    function noUserReason() {
+        var id = '', name = '', role = '', roleId = '';
+        try { var u = runtime.getCurrentUser(); id = String(u.id); name = String(u.name || ''); role = String(u.role || ''); roleId = String(u.roleId || ''); }
+        catch (e) { id = 'error: ' + userErr(e); }
+        var why = 'No signed-in user: NetSuite reports user id "' + id + '"' + (name ? ', name "' + name + '"' : '') + (role || roleId ? ', role ' + role + (roleId ? ' (' + roleId + ')' : '') : '') + '.';
+        log.audit({ title: 'invcount: request without a usable user id', details: why });
+        return why;
+    }
     // A browser's id for its own lines: letters and digits, long enough not to
     // collide with another tablet's.
     function cleanDevice(v) {
@@ -1056,7 +1067,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     // Who this device is and where it is counting, or why the request cannot go on.
     function deviceGuard(body) {
         var uid = sharedUser();
-        if (!uid) { return { error: 'No signed-in user.' }; }
+        if (!uid) { return { error: noUserReason() }; }
         var device = cleanDevice(body.device);
         if (!device) { return { error: 'This device has no id yet; reload the page.' }; }
         var locId = multiLocation() ? posInt(body.loc) : null;
@@ -1225,7 +1236,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         var filters = [[F.posted, 'is', 'F']];
         if (!all) {
             var uid = sharedUser();
-            if (!uid) { return { ok: false, error: 'No signed-in user.' }; }
+            if (!uid) { return { ok: false, error: noUserReason() }; }
             filters.push('and');
             filters.push([F.counter, 'anyof', [String(uid)]]);
         }
@@ -1650,6 +1661,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 /* --------------------------------------------------------------- notices -- */
 .ic-warn{background:var(--warn-bg);border-left:4px solid var(--warn-line);color:var(--warn);padding:11px 14px;margin-bottom:14px;font-size:13.5px;line-height:1.5}
 .ic-error{background:var(--bad-bg);border-left:4px solid var(--red);color:var(--bad);padding:11px 14px;margin:12px 0;font-size:13.5px;word-break:break-word}
+.ic-session{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--bad-bg);border:2px solid var(--red);color:var(--ink);padding:14px 16px;margin:0 0 18px;font-size:14px;line-height:1.5}
+.ic-session[hidden]{display:none}
+.ic-session p{margin:0;flex:1 1 320px}
+.ic-session b{color:var(--bad)}
 .ic-empty{padding:48px 16px;text-align:center;color:var(--muted);font-size:14px}
 .ic-progress{padding:18px;text-align:center;color:var(--muted);font-size:14px}
 
@@ -2101,6 +2116,34 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         e.textContent = syncText();
         e.className = 'ic-sync' + ((sync.status === 'offline' || sync.status === 'error') ? ' is-bad' : (sync.status === 'saving' || sync.status === 'pending') ? ' is-busy' : '');
         e.title = sync.error || '';
+        paintSessionBanner();
+    }
+    // A save refused because NetSuite no longer knows who this tab is: the
+    // session behind it went stale (timed out, or the person signed in again
+    // or switched role in another tab), or NetSuite answered with a login
+    // page instead of JSON. Retrying never fixes that -- only a reload signs
+    // the tab back in -- so it gets a banner nobody can miss, not just the
+    // small header text.
+    function sessionLost() {
+        return SHARED && sync.status === 'offline' && /no signed-in user|non-json response/i.test(String(sync.error || ''));
+    }
+    function sessionBanner() {
+        return el('div', { id: 'icSession', class: 'ic-session', role: 'alert', hidden: !sessionLost() }, [
+            el('p', {}, [
+                el('b', { text: 'NetSuite is not reporting a signed-in user for this tab, so nothing can save. ' }),
+                'Your counts are safe in this browser and will go up once it is fixed. Reload the page first (a session that timed out, or a sign-in or role switch in another tab, comes back with a reload). If this banner returns straight away, send your administrator the line below and the footer of this page.',
+                el('br'),
+                el('small', { id: 'icSessionWhy', class: 'ic-meta' })
+            ]),
+            el('button', { class: 'ic-btn is-sm', type: 'button', text: 'Reload page', onclick: function () { location.reload(); } })
+        ]);
+    }
+    function paintSessionBanner() {
+        var b = document.getElementById('icSession');
+        if (!b) { return; }
+        b.hidden = !sessionLost();
+        var w = document.getElementById('icSessionWhy');
+        if (w) { w.textContent = sessionLost() ? String(sync.error || '') : ''; }
     }
     // What the server holds for this device against what the browser holds.
     // Lines never saved are pushed; lines saved before and now gone from the
@@ -3653,6 +3696,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         root.innerHTML = '';
         renderHeader(root);
         var main = el('div', { class: 'ic-main' });
+        if (SHARED) { main.appendChild(sessionBanner()); }
         (BOOT.warnings || []).forEach(function (w) { main.appendChild(el('div', { class: 'ic-warn', text: w })); });
         if (BOOT.multiLoc && !state.loc) {
             main.appendChild(el('div', { class: 'ic-warn', text: 'Pick the location you are counting at the top. On-hand quantities and the adjustment are per location.' }));
@@ -3664,7 +3708,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         else if (state.view === 'sheet') { if (SHARED && BOOT.canSubmit) { renderSharedSheetView(main); } else { renderSheetView(main); } }
         else if (state.view === 'orders') { renderOrdersView(main); }
         else { renderSearchView(main); }
-        main.appendChild(el('div', { class: 'ic-footer', 'data-version': BOOT.version || '', text: (BOOT.version ? 'v' + BOOT.version + ' · ' : '') + (SHARED
+        main.appendChild(el('div', { class: 'ic-footer', 'data-version': BOOT.version || '', 'data-user': BOOT.userId || '', text: (BOOT.version ? 'v' + BOOT.version + ' · ' : '') + (SHARED && BOOT.userId ? 'user ' + BOOT.userId + ' · ' : '') + (SHARED
             ? (BOOT.canSubmit
                 ? 'Counts save to NetSuite as they are keyed, from every device. Submitting posts everyone\'s merged sheet as an Inventory Adjustment, as you.'
                 : 'Counts save to NetSuite as you key them. An administrator reviews everyone\'s lines together and posts the adjustment.')
@@ -3698,6 +3742,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         savePrefs();
         render();
         if (SHARED) {
+            // Lines this browser never got saved are pending from the start,
+            // not only after a reconcile (which NetSuite might refuse too).
+            state.order.forEach(function (id) { var l = state.sheet[id]; if (l && !l.synced) { sync.dirty[id] = Date.now(); } });
+            if (pendingCount()) { scheduleSync(); }
             reconcile();
             if (BOOT.canSubmit && !(BOOT.multiLoc && !state.loc)) { loadSession(); }
             // Pick up posts and discards while the page sits open, and never
