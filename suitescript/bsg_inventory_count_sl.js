@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.13',
+        VERSION: '2026-09-14.14',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -3066,10 +3066,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             names: names, ids: ids, seen: m.subs.map(function (l) { return { id: l.id, shelf: l.shelf, orders: l.orders || [] }; }),
             live: live, latest: latest, fresh: f, onhand: onhand, drift: drift, usable: usable, mode: mode, keptBy: keptBy,
             delta: onhand == null || !usable ? null : round4(total - onhand),
-            // Needs review: something to look at (two counters, on hand moved,
-            // not countable) AND an adjustment would post -- an item that lands
-            // on its on-hand needs nobody's time.
-            review: (m.subs.length > 1 || drift || !!f.missing || !!f.blocked) && (f.missing || f.blocked ? false : (onhand != null && usable && round4(total - onhand) !== 0)) };
+            // Needs review: every item that would actually post a + or -
+            // adjustment (a real discrepancy, whether one counter or several),
+            // plus anything that cannot post normally (missing or blocked) --
+            // an item that lands exactly on its on-hand needs nobody's time.
+            review: !!f.missing || !!f.blocked || (onhand != null && usable && round4(total - onhand) !== 0) };
     }
     function sharedTotals(s) {
         var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0, multi: 0, multiPos: 0, multiNeg: 0 };

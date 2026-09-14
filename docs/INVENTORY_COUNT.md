@@ -297,10 +297,11 @@ way — one sheet per device.
   by mistake. The row is flagged *2 counters*; untick a sub-line to leave it
   out, or type a total by hand (marked, resettable). The choice is
   remembered in this browser, including across a reload, so it decides what
-  a later submit actually posts. **Needs review** lists only the flagged
-  items (two counters, or on hand moved since the count) that would actually
-  post a + or − adjustment — a flagged item whose total lands on its on-hand
-  needs nobody's time and stays under **All**.
+  a later submit actually posts. **Needs review** lists every item that
+  would actually post a + or − adjustment — one counter or several, on hand
+  moved or not — plus anything that cannot post normally (missing or
+  blocked); an item whose total lands exactly on its on-hand needs nobody's
+  time and stays under **All**.
 - Every device sees everyone's open-order ticks. A line someone else ticked
   shows checked and locked with *ticked by Jeff Howard · Warehouse tablet 1*,
   the order and rep headers count it, and **Select all** skips it; the view
@@ -387,7 +388,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.13` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.14` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
