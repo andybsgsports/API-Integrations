@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.11',
+        VERSION: '2026-09-14.12',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -2042,7 +2042,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function lsDel(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
 
     function loadPrefs() { try { return JSON.parse(lsGet(PREF_KEY) || '{}') || {}; } catch (e) { return {}; } }
-    function savePrefs() { lsSet(PREF_KEY, JSON.stringify({ loc: state.loc, account: state.account, instock: state.instock, device: state.device, deviceLabel: state.deviceLabel })); }
+    function savePrefs() { lsSet(PREF_KEY, JSON.stringify({ loc: state.loc, account: state.account, instock: state.instock, device: state.device, deviceLabel: state.deviceLabel, dupes: state.dupes })); }
     function newDeviceId() {
         var s = 'd', chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
         for (var i = 0; i < 20; i++) { s += chars.charAt(Math.floor(Math.random() * chars.length)); }
@@ -2949,7 +2949,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function loadSession(after) {
         var prev = state.session || {};
         state.session = { loc: state.loc, loading: true, error: '', lines: [], items: [], byItem: {}, fresh: {}, freshDone: false, loadedAt: 0, truncated: false,
-            excluded: prev.excluded || {}, overrides: prev.overrides || {}, filter: prev.filter || 'all', dupes: prev.dupes || 'add', precheck: null };
+            excluded: prev.excluded || {}, overrides: prev.overrides || {}, filter: prev.filter || 'all', precheck: null };
         var s = state.session;
         apiGet('session', { loc: state.loc || '' }).then(function (res) {
             if (state.session !== s) { return; }   // superseded (location change, discard)
@@ -3000,7 +3000,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // double (they found the same shelf); different numbers are added up --
     // two areas of the building -- or, with "Keep the latest" on, the newest
     // one is kept (the same shelf counted again, better).
-    function dupeMode() { return state.session && state.session.dupes === 'latest' ? 'latest' : 'add'; }
+    // Remembered in this browser: it decides what a submit posts, so a reload
+    // must not quietly put an administrator back on adding.
+    function dupeMode() { return state.dupes === 'latest' ? 'latest' : 'add'; }
+    function setDupeMode(v) { state.dupes = v; savePrefs(); render(); }
     function mergedFor(m) {
         var s = state.session, shelf = 0, orders = {}, refs = [], names = [], ids = [], live = 0, latest = '', liveSubs = [];
         m.subs.forEach(function (l) {
@@ -3014,12 +3017,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         });
         var mode = 'one', keptBy = '';
         if (liveSubs.length > 1) {
-            var vals = liveSubs.map(function (l) { return round4(Number(l.shelf) || 0); });
-            if (vals.every(function (v) { return v === vals[0]; })) { shelf = vals[0]; mode = 'agree'; }
-            else if (dupeMode() === 'latest') {
+            if (dupeMode() === 'latest') {
                 var newest = liveSubs.reduce(function (a, b) { return (Number(b.seq) || 0) < (Number(a.seq) || 0) ? b : a; });
                 shelf = round4(Number(newest.shelf) || 0); mode = 'latest'; keptBy = newest.counterName || '';
-            } else { vals.forEach(function (v) { shelf += v; }); mode = 'added'; }
+            } else {
+                liveSubs.forEach(function (l) { shelf += round4(Number(l.shelf) || 0); }); mode = 'added';
+            }
         } else if (liveSubs.length === 1) { shelf = Number(liveSubs[0].shelf) || 0; }
         var onOrders = 0;
         refs.forEach(function (r) { onOrders += orders[r]; });
@@ -3040,12 +3043,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             review: (m.subs.length > 1 || drift || !!f.missing || !!f.blocked) && (f.missing || f.blocked ? false : (onhand != null && usable && round4(total - onhand) !== 0)) };
     }
     function sharedTotals(s) {
-        var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0, multi: 0, multiPos: 0, multiNeg: 0, agreed: 0 };
+        var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0, multi: 0, multiPos: 0, multiNeg: 0 };
         s.items.forEach(function (m) {
             var g = mergedFor(m);
             t.items++; t.lines += m.subs.length;
             if (g.review) { t.review++; }
-            if (g.live > 1) { t.multi++; if (g.mode === 'agree') { t.agreed++; } }
+            if (g.live > 1) { t.multi++; }
             if (!g.usable) { t.blocked++; return; }
             if (g.delta == null) { return; }
             if (g.delta !== 0) { t.changed++; }
@@ -3093,7 +3096,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         row.appendChild(el('div', { class: 'ic-info' }, [
             el('div', { class: 'ic-name' }, [itemLink(m.id, f.name || m.name)]),
             (f.display || f.desc) ? el('div', { class: 'ic-desc', text: f.display || f.desc }) : null,
-            m.subs.length > 1 ? el('div', { class: 'ic-flag is-review', text: m.subs.length + ' counters' + (g.live < m.subs.length ? ' · ' + (m.subs.length - g.live) + ' left out' : '') + (g.mode === 'agree' ? ' · same count, counted once' : g.mode === 'latest' ? ' · latest kept' + (g.keptBy ? ' (' + g.keptBy + ')' : '') : g.mode === 'added' ? ' · added together' : '') }) : null,
+            m.subs.length > 1 ? el('div', { class: 'ic-flag is-review', text: m.subs.length + ' counters' + (g.live < m.subs.length ? ' · ' + (m.subs.length - g.live) + ' left out' : '') + (g.mode === 'latest' ? ' · latest kept' + (g.keptBy ? ' (' + g.keptBy + ')' : '') : g.mode === 'added' ? ' · added together' : '') }) : null,
             g.drift ? el('div', { class: 'ic-flag', text: 'On hand changed since it was counted' }) : null,
             f.missing ? el('div', { class: 'ic-flag', text: 'Not found at this location - will be skipped' }) : null,
             f.blocked ? el('div', { class: 'ic-flag', text: 'Needs inventory detail (' + f.blocked + ') - will be skipped' }) : null,
@@ -3156,11 +3159,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             main.appendChild(el('div', { class: 'ic-dupes', id: 'icDupes' }, [
                 el('div', { class: 'ic-dupes-text' }, [
                     el('b', { text: t.multi + ' item' + (t.multi === 1 ? ' was' : 's were') + ' counted by two people. ' }),
-                    (t.agreed ? t.agreed + ' agree and count once. ' : '') + 'For the rest: ' + (dupeMode() === 'latest' ? 'the latest count is kept' : 'the counts are added up (two areas of the building)') + '. Those items carry +' + fmt(t.multiPos) + ' / −' + fmt(t.multiNeg) + ' of the units up / down.'
+                    (dupeMode() === 'latest' ? 'Only the latest count is kept for each -- for a shelf counted twice by mistake, even when both counters landed on the same number.' : 'The counts are added up for each -- for two areas of the building.') + ' Those items carry +' + fmt(t.multiPos) + ' / −' + fmt(t.multiNeg) + ' of the units up / down. This choice is remembered in this browser.'
                 ]),
                 el('div', { class: 'ic-seg', role: 'group', 'aria-label': 'Two people counted the same item' }, [
-                    el('button', { class: 'ic-segbtn' + (dupeMode() === 'add' ? ' is-on' : ''), type: 'button', text: 'Add them up', onclick: function () { s.dupes = 'add'; render(); } }),
-                    el('button', { class: 'ic-segbtn' + (dupeMode() === 'latest' ? ' is-on' : ''), type: 'button', text: 'Keep the latest', onclick: function () { s.dupes = 'latest'; render(); } })
+                    el('button', { class: 'ic-segbtn' + (dupeMode() === 'add' ? ' is-on' : ''), type: 'button', text: 'Add them up', onclick: function () { setDupeMode('add'); } }),
+                    el('button', { class: 'ic-segbtn' + (dupeMode() === 'latest' ? ' is-on' : ''), type: 'button', text: 'Keep the latest', onclick: function () { setDupeMode('latest'); } })
                 ])
             ]));
         }
@@ -3231,7 +3234,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 el('p', { text: nothing
                     ? 'All ' + live + ' item' + (live === 1 ? '' : 's') + ' equal the on-hand NetSuite already holds, so submitting records the count, clears everyone\'s sheets, and creates no Inventory Adjustment.'
                     : 'Those ' + t.changed + ' item' + (t.changed === 1 ? '' : 's') + ' move to the merged count (+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). The other ' + (live - t.changed) + ' already match and are left off. Every counter\'s lines are then cleared from their sheets.' }),
-                t.review ? el('p', { text: t.review + ' item' + (t.review === 1 ? ' is' : 's are') + ' flagged for review (two counters, or on hand changed). Where two people counted one item, the same number counts once; different numbers are ' + (dupeMode() === 'latest' ? 'resolved by keeping the latest' : 'added together') + ' unless one is unticked or a total set by hand.' }) : null,
+                t.review ? el('p', { text: t.review + ' item' + (t.review === 1 ? ' is' : 's are') + ' flagged for review (two counters, or on hand changed). Where two people counted one item, the counts are ' + (dupeMode() === 'latest' ? 'resolved by keeping the latest' : 'added together') + ' unless one is unticked or a total set by hand.' }) : null,
                 t.blocked ? el('p', { text: t.blocked + ' item' + (t.blocked === 1 ? ' is' : 's are') + ' skipped and stay on the sheet.' }) : null,
                 pre === null ? el('p', { class: 'ic-meta', text: 'Checking today\'s adjustments…' }) : (pre && pre.length ? el('div', { class: 'ic-commit-warn' }, [
                     el('b', { text: pre.length + ' item' + (pre.length === 1 ? ' was' : 's were') + ' already adjusted by a count today: ' }),
@@ -3908,6 +3911,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         }
         state.device = prefs.device || newDeviceId();
         state.deviceLabel = prefs.deviceLabel || '';
+        state.dupes = prefs.dupes === 'latest' ? 'latest' : 'add';
         loadSheet();
         savePrefs();
         render();
