@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.12',
+        VERSION: '2026-09-14.13',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -619,8 +619,20 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     // Item fulfillments that exist but have not shipped (Pick, Pack, Ship):
     // the units are pulled and boxed, still on hand in NetSuite, and no
     // longer "unshipped" on the sales order line -- so they need listing too.
-    var UNSHIPPED_IF_STATUSES = ['ItemShip:A', 'ItemShip:B'];
+    // Pick, Pack, Ship has three stages -- BSG labels them Pulled, Layaway
+    // and Shipped -- and all three can still be sitting in the building:
+    // the SO's own quantityshiprecv, not this fulfillment's label, is what
+    // says units actually left (checked separately, below). BSG's "Shipped"
+    // label on this record is a warehouse stage, not proof of departure.
+    var UNSHIPPED_IF_STATUSES = ['ItemShip:A', 'ItemShip:B', 'ItemShip:C'];
 
+    // The fulfillment record's own status label, softened where it could be
+    // misread as proof the units are gone: they are still being counted here
+    // precisely because the sales order itself has not shipped them.
+    function pulledWord(status) {
+        var s = String(status || '').trim();
+        return /^shipped$/i.test(s) ? 'packed, not yet shipped' : (s || 'pulled');
+    }
     // BSG's order numbers already read "JH-SO625"; a bare number gets "SO ".
     function orderRef(tranid, id) {
         var n = String(tranid || id || '').trim();
@@ -765,7 +777,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     var from = ttxt(r, 'createdfrom');           // "Sales Order #JH-SO625"
                     var m = /#\s*(\S+)/.exec(from);
                     var ref = m ? orderRef(m[1], '') : ('IF ' + String(tval(r, 'tranid') || r.id));
-                    pulled.push({ ref: ref, item: String(tval(r, 'item')), qty: qty, pulledStatus: ttxt(r, 'statusref') || 'Pulled' });
+                    pulled.push({ ref: ref, item: String(tval(r, 'item')), qty: qty, pulledStatus: pulledWord(ttxt(r, 'statusref')) });
                 });
             });
         } catch (e) {
@@ -2641,7 +2653,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // "0 shipped of 10 · 10 to count (10 layaway) · Pending Fulfillment"
     function orderDetail(o) {
         return fmt(o.shipped) + ' shipped of ' + fmt(o.qty) + ' · ' + fmt(o.committed) + ' to count'
-            + (o.pulled ? ' (' + fmt(o.pulled) + ' ' + String(o.pulledStatus || 'pulled').toLowerCase() + (o.uncommitted ? ', do not commit' : '') + ')' : '')
+            + (o.pulled ? ' (' + fmt(o.pulled) + ' ' + String(o.pulledStatus || 'pulled').toLowerCase() + (o.uncommitted && !/^packed, not yet shipped$/.test(o.pulledStatus || '') ? ', do not commit' : '') + ')' : '')
             + (o.backordered ? ' · ' + fmt(o.backordered) + ' more not received yet' : '')
             + (o.status ? ' · ' + o.status : '');
     }
@@ -2946,10 +2958,27 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // -- a warehouse count and a retail-floor count of the same SKU -- and
     // either can be left out, or the total set by hand, before posting.
 
+    // The administrator's leave-out and hand-set-total decisions, kept in
+    // this browser so a page reload (not just a same-tab reload of the
+    // session) does not silently put an unticked duplicate back in.
+    function sessionPrefsKey(loc) { return 'bsg_invcount_session_v1:' + (loc || 'all'); }
+    function loadSessionPrefs(loc) {
+        try { var p = JSON.parse(lsGet(sessionPrefsKey(loc)) || 'null'); return (p && typeof p === 'object') ? p : {}; }
+        catch (e) { return {}; }
+    }
+    function saveSessionPrefs() {
+        var s = state.session;
+        if (!s) { return; }
+        lsSet(sessionPrefsKey(s.loc), JSON.stringify({ excluded: s.excluded, overrides: s.overrides }));
+    }
     function loadSession(after) {
         var prev = state.session || {};
+        // Same location, same in-page session: carry its live decisions
+        // forward. A brand new page (prev.loc unset or a different location)
+        // has no live session to carry, so it picks up what was saved.
+        var carried = prev.loc === state.loc ? prev : loadSessionPrefs(state.loc);
         state.session = { loc: state.loc, loading: true, error: '', lines: [], items: [], byItem: {}, fresh: {}, freshDone: false, loadedAt: 0, truncated: false,
-            excluded: prev.excluded || {}, overrides: prev.overrides || {}, filter: prev.filter || 'all', precheck: null };
+            excluded: carried.excluded || {}, overrides: carried.overrides || {}, filter: prev.filter || 'all', precheck: null };
         var s = state.session;
         apiGet('session', { loc: state.loc || '' }).then(function (res) {
             if (state.session !== s) { return; }   // superseded (location change, discard)
@@ -3071,7 +3100,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var off = !!s.excluded[l.id];
             var cb = el('input', { type: 'checkbox', 'aria-label': 'Include the count from ' + (l.counterName || 'this counter') });
             cb.checked = !off;
-            cb.addEventListener('change', function () { if (cb.checked) { delete s.excluded[l.id]; } else { s.excluded[l.id] = true; } render(); });
+            cb.addEventListener('change', function () { if (cb.checked) { delete s.excluded[l.id]; } else { s.excluded[l.id] = true; } saveSessionPrefs(); render(); });
             var extra = (l.orders || []).length ? ' + ' + (l.orders || []).map(function (o) { return fmt(o.qty) + ' on ' + o.ref; }).join(', ') : '';
             var stale = l.onhand != null && g.onhand != null && round4(l.onhand) !== round4(g.onhand);
             subs.appendChild(el('label', { class: 'ic-sub' + (off ? ' is-off' : ''), 'data-sub-for': l.id }, [
@@ -3088,9 +3117,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var c = parseCount(input.value);
             if (c === null) { input.value = fmt(g.total); return; }
             if (c === g.computed) { delete s.overrides[m.id]; } else { s.overrides[m.id] = c; }
+            saveSessionPrefs();
             render();
         });
-        var reset = el('button', { class: 'ic-x', type: 'button', text: '↺', title: 'Back to the counted total (' + fmt(g.computed) + ')', 'aria-label': 'Use the counted total', onclick: function () { delete s.overrides[m.id]; render(); } });
+        var reset = el('button', { class: 'ic-x', type: 'button', text: '↺', title: 'Back to the counted total (' + fmt(g.computed) + ')', 'aria-label': 'Use the counted total', onclick: function () { delete s.overrides[m.id]; saveSessionPrefs(); render(); } });
         if (!g.overridden) { reset.style.visibility = 'hidden'; }
         var delta = el('div', { class: 'ic-delta ' + (g.delta == null ? 'is-zero' : g.delta > 0 ? 'is-pos' : g.delta < 0 ? 'is-neg' : 'is-zero'), text: g.delta == null ? (f.missing || f.blocked ? 'n/a' : '…') : signed(g.delta) });
         row.appendChild(el('div', { class: 'ic-info' }, [
@@ -3291,6 +3321,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         }
         function finish() {
             state.submitting = false; state.progress = '';
+            lsDel(sessionPrefsKey(s.loc));
             state.session = null;    // whatever is left -- blocked, or arrived meanwhile -- reloads on the next visit
             state.done = done; state.view = 'done';
             render();
@@ -3338,6 +3369,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         function step() {
             apiPost('discard', { loc: state.loc || '', scope: 'all' }).then(function (r) {
                 if (!r || !r.ok) { state.submitting = false; state.progress = ''; state.submitError = (r && r.error) || 'Discard failed.'; state.session = null; render(); return; }
+                lsDel(sessionPrefsKey(state.loc));
                 if (r.remaining > 0 && r.deleted > 0) { step(); return; }
                 state.submitting = false; state.progress = ''; state.session = null;
                 state.order.slice().forEach(removeLocal);

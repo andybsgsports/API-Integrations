@@ -100,7 +100,13 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    (BSG sees both). Either way the pulled quantity is the only sign those
    units are standing in the building; such a line is listed on what was
    pulled, capped at what the order still has open, and says so —
-   `0 shipped of 40 · 40 to count (40 pulled, do not commit)`.
+   `0 shipped of 40 · 40 to count (40 pulled, do not commit)`. Pick, Pack,
+   Ship's three stages (BSG labels them Pulled, Layaway and **Shipped**) are
+   all fetched — the third stage's own "Shipped" label describes a
+   warehouse step, not proof the units left, which is checked separately
+   from the sales order's own ship/receive quantity; a line found only
+   there reads `(40 packed, not yet shipped)` so nobody mistakes it for
+   gone.
    Committed quantity is the reliable signal: picking or packing does not
    clear it, shipping does, and a line that was zeroed or returned to the
    vendor has none even when a pick record survives. So backordered lines,
@@ -270,6 +276,10 @@ way — one sheet per device.
   "Warehouse tablet 1"). The administrator sees `Jeff Howard · Warehouse
   tablet 1 · 60 · 10:02` under each item, so a count traces to a place as well
   as a person.
+- An administrator's **leave-out** and **hand-set-total** decisions on the
+  merged sheet are remembered in this browser and survive a real page
+  reload, not just a same-tab re-fetch, so an unticked duplicate does not
+  quietly come back.
 - **The same item counted by two people shows as two sub-lines.** If both
   found the **same number**, that is one count, not double — they found the
   same shelf — and the row says *same count, counted once*. If the numbers
@@ -377,7 +387,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.12` …): a tab left
+  compare the version in each page's footer (`v2026-09-14.13` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
