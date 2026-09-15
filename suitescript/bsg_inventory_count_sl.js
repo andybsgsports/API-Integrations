@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-15.1',
+        VERSION: '2026-09-15.2',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -366,6 +366,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     function qtyField(locId, which) {
         return (locId ? 'locationquantity' : 'quantity') + which;
     }
+    // Average cost, per location where the count is per location. Both are
+    // optional: an account that rejects either simply reports no cost, and the
+    // sheet leaves the money out rather than showing a wrong zero.
+    function costField(locId) { return locId ? 'locationaveragecost' : 'averagecost'; }
 
     // "In stock" = quantity on hand, positive or negative: something is (or is
     // supposed to be) on a shelf. On order is not in stock -- nothing has been
@@ -448,7 +452,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     function itemColumns(locId) {
         var cols = [search.createColumn({ name: 'itemid', sort: search.Sort.ASC }), 'type', qtyField(locId, 'onhand')];
-        [qtyField(locId, 'available'), qtyField(locId, 'committed'), qtyField(locId, 'onorder')].concat(OPTIONAL_COLS).forEach(function (c) {
+        var costs = costField(locId) === 'averagecost' ? ['averagecost'] : [costField(locId), 'averagecost'];
+        [qtyField(locId, 'available'), qtyField(locId, 'committed'), qtyField(locId, 'onorder')].concat(costs).concat(OPTIONAL_COLS).forEach(function (c) {
             if (!isDead('item', 'column', c)) { cols.push(c); }
         });
         flagCols().forEach(function (c) { cols.push(c.name); });
@@ -489,6 +494,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             available: num(r, qtyField(locId, 'available')),
             committed: num(r, qtyField(locId, 'committed')),
             onorder: num(r, qtyField(locId, 'onorder')),
+            // This location's average cost, or the item's own where there is
+            // none; 0 means "not known", and the money is left off rather
+            // than reported as nothing.
+            cost: num(r, costField(locId)) || num(r, 'averagecost'),
             blocked: flags.length ? flags.join(', ') : ''
         };
     }
@@ -1902,6 +1911,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
 .ic-sum div:last-child{margin-left:auto;text-align:right}
 .ic-sum b{font-size:24px;display:block;color:var(--ink);font-weight:800;letter-spacing:-.02em;margin-bottom:1px;text-transform:none;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .ic-sum b#icTotNeg{color:var(--red-700)}
+.ic-cost{margin-top:3px;font-size:12px;font-weight:700;color:var(--ink);text-transform:none;letter-spacing:0;font-variant-numeric:tabular-nums}
+#icTotNegCost{color:var(--red-700)}
 .ic-deltacell{text-align:right;min-width:0}
 .ic-xcell{text-align:right;min-width:0}
 .ic-delta{display:inline-block;font-weight:700;min-width:52px;text-align:center;padding:4px 8px;font-size:13px;font-variant-numeric:tabular-nums}
@@ -2084,6 +2095,85 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
     function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
     function lsDel(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
+    // Per tab, and it survives a reload: two tabs keep their own place, and
+    // closing the tab forgets it.
+    function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+    function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch (e) { /* private mode */ } }
+
+    // ------------------------------------------------------------- scroll --
+    // Counting a location is hours of work down a list thousands of rows long,
+    // and the page rebuilds itself under the reader: the shared count refreshes
+    // every minute, a count saving re-renders, and a manual reload starts empty
+    // and fills in from NetSuite a moment later. Each of those would otherwise
+    // drop whoever was halfway down Needs review back at the top. The place is
+    // kept by the ROW nearest the top of the screen, not the pixel offset, so
+    // it holds even when rows above it arrive late, change height as on-hand
+    // lands, or leave because someone else's count came in.
+    var scroll = { timer: null, quietUntil: 0 };
+    function scrollKey() { return 'bsg_invcount_scroll_v1:' + state.view + ':' + (state.loc || 'all'); }
+    function scrollY() { return window.pageYOffset || (document.documentElement || {}).scrollTop || 0; }
+    function scrollMax() {
+        var d = document.documentElement || {};
+        return Math.max(0, (d.scrollHeight || 0) - (window.innerHeight || 0));
+    }
+    function rowAt(id) {
+        var rows = document.querySelectorAll('[data-row-for]');
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-row-for') === id) { return rows[i]; }
+        }
+        return null;
+    }
+    function rememberScroll() {
+        var y = scrollY();
+        // Emptying the page drops it to nothing and the browser scrolls to the
+        // top by itself. That is the rebuild, not the reader, so it must not
+        // overwrite the place -- but only a jump to the top is ignored, and
+        // only while a rebuild is in flight; anywhere else is the reader, and
+        // is recorded even in the moment after a rebuild.
+        if (y <= 4 && Date.now() < scroll.quietUntil) {
+            clearTimeout(scroll.timer);
+            scroll.timer = setTimeout(function () { scroll.timer = null; rememberScroll(); }, 300);
+            return;
+        }
+        var anchor = null;
+        var rows = document.querySelectorAll('[data-row-for]');
+        for (var i = 0; i < rows.length; i++) {
+            var top = rows[i].getBoundingClientRect().top + y;
+            if (top > y + 4) { break; }                   // rows are in document order
+            anchor = { id: rows[i].getAttribute('data-row-for'), off: y - top };
+        }
+        ssSet(scrollKey(), JSON.stringify({ y: y, id: anchor ? anchor.id : '', off: anchor ? anchor.off : 0 }));
+    }
+    function restoreScroll() {
+        var p;
+        try { p = JSON.parse(ssGet(scrollKey()) || 'null'); } catch (e) { p = null; }
+        if (!p || typeof p !== 'object') { return; }
+        // Anywhere but the top means the reader has already put themselves
+        // somewhere since the rebuild -- never haul them off it.
+        if (scrollY() > 4) { return; }
+        var target = -1;
+        if (p.id) {
+            var row = rowAt(String(p.id));
+            // off is how far past that row's top the reader had scrolled.
+            if (row) { target = row.getBoundingClientRect().top + scrollY() + (Number(p.off) || 0); }
+        }
+        if (target < 0) { target = Number(p.y) || 0; }
+        if (target <= 4) { return; }
+        // Still loading: too short to hold the place yet, so leave it saved and
+        // let the render that brings the rest of the rows in try again.
+        if (scrollMax() < target - 4) { return; }
+        scroll.quietUntil = Date.now() + 250;
+        window.scrollTo(0, target);
+    }
+    function watchScroll() {
+        if (window.history && 'scrollRestoration' in window.history) {
+            try { window.history.scrollRestoration = 'manual'; } catch (e) { /* not ours to set */ }
+        }
+        window.addEventListener('scroll', function () {
+            if (scroll.timer) { return; }
+            scroll.timer = setTimeout(function () { scroll.timer = null; rememberScroll(); }, 150);
+        }, { passive: true });
+    }
 
     function loadPrefs() { try { return JSON.parse(lsGet(PREF_KEY) || '{}') || {}; } catch (e) { return {}; } }
     function savePrefs() { lsSet(PREF_KEY, JSON.stringify({ loc: state.loc, account: state.account, instock: state.instock, device: state.device, deviceLabel: state.deviceLabel, dupes: state.dupes })); }
@@ -2157,6 +2247,21 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return (Math.round(n * 10000) / 10000).toString();
     }
     function signed(n) { return (n > 0 ? '+' : '') + fmt(n); }
+    // What the units are worth at average cost, for the sheet's summary.
+    function money(n) {
+        n = Number(n);
+        if (!isFinite(n)) { n = 0; }
+        var s = Math.abs(Math.round(n * 100) / 100).toFixed(2);
+        var parts = s.split('.');
+        return (n < 0 ? '-$' : '$') + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + parts[1];
+    }
+    // What a summary's units are worth at average cost, under its label. Left
+    // off entirely when no item carrying a change has a cost, so an account
+    // that does not report one shows nothing rather than $0.00.
+    function costNote(costed, amount, id) {
+        if (!costed) { return null; }
+        return el('div', { class: 'ic-cost', id: id, text: money(amount) });
+    }
     function locName(id) {
         var hit = (BOOT.locations || []).filter(function (l) { return l.id === id; })[0];
         return hit ? hit.name : '';
@@ -2381,7 +2486,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var line = state.sheet[item.id];
         if (!line) {
             line = { id: item.id, name: item.name || ('item ' + item.id), display: item.display || '', desc: item.desc || '', upc: item.upc || '', vendor: item.vendor || '',
-                onhand: item.onhand, available: item.available, committed: item.committed, onorder: item.onorder, blocked: item.blocked || '', count: 0, orders: [] };
+                onhand: item.onhand, available: item.available, committed: item.committed, onorder: item.onorder, cost: item.cost, blocked: item.blocked || '', count: 0, orders: [] };
             state.sheet[item.id] = line;
             state.order.push(item.id);
             if (item.onhand == null) { hydrateLine(item.id); }
@@ -2397,7 +2502,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var line = state.sheet[id], fresh = res && res.ok && res.items && res.items[id];
             if (!line || !fresh) { return; }
             line.name = fresh.name || line.name; line.display = fresh.display; line.desc = fresh.desc; line.upc = fresh.upc; line.vendor = fresh.vendor;
-            line.onhand = fresh.onhand; line.available = fresh.available; line.committed = fresh.committed; line.onorder = fresh.onorder; line.blocked = fresh.blocked || '';
+            line.onhand = fresh.onhand; line.available = fresh.available; line.committed = fresh.committed; line.onorder = fresh.onorder; line.cost = fresh.cost; line.blocked = fresh.blocked || '';
             saveSheet();
             markDirty(id);
             if (state.view === 'sheet') { render(); }
@@ -2571,7 +2676,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return Math.round(n * 10000) / 10000;
     }
     function totals() {
-        var lines = 0, pos = 0, neg = 0, blocked = 0, below = 0, changed = 0;
+        var lines = 0, pos = 0, neg = 0, blocked = 0, below = 0, changed = 0, posCost = 0, negCost = 0, costed = false;
         state.order.forEach(function (id) {
             var l = state.sheet[id];
             if (!l) { return; }
@@ -2580,9 +2685,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (belowCommitted(l)) { below++; }
             if (!noChange(l)) { changed++; }
             var d = (Number(l.count) || 0) - (Number(l.onhand) || 0);
-            if (d > 0) { pos += d; } else { neg += -d; }
+            var c = Number(l.cost) || 0;
+            if (c > 0 && d !== 0) { costed = true; }
+            if (d > 0) { pos += d; posCost += d * c; } else { neg += -d; negCost += -d * c; }
         });
-        return { lines: lines, pos: pos, neg: neg, blocked: blocked, below: below, changed: changed };
+        return { lines: lines, pos: pos, neg: neg, blocked: blocked, below: below, changed: changed, posCost: posCost, negCost: negCost, costed: costed };
     }
     function sheetSize() {
         if (SHARED && BOOT.canSubmit && state.session && state.session.items) { return state.session.items.length; }
@@ -2906,6 +3013,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Load more' + (left ? ' (' + left + ' left)' : ''), onclick: function () { runSearch(false); } })
             ]));
         }
+        // The rows this list was waiting for have landed, so the place saved
+        // before a reload can be held now even though it could not be earlier.
+        restoreScroll();
     }
 
     function renderSearchView(main) {
@@ -3160,7 +3270,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             review: !!f.missing || !!f.blocked || (onhand != null && usable && round4(total - onhand) !== 0) };
     }
     function sharedTotals(s) {
-        var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0, multi: 0, multiPos: 0, multiNeg: 0 };
+        var t = { items: 0, pos: 0, neg: 0, changed: 0, review: 0, blocked: 0, counters: {}, lines: 0, multi: 0, multiPos: 0, multiNeg: 0, posCost: 0, negCost: 0, costed: false };
         s.items.forEach(function (m) {
             var g = mergedFor(m);
             t.items++; t.lines += m.subs.length;
@@ -3169,7 +3279,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (!g.usable) { t.blocked++; return; }
             if (g.delta == null) { return; }
             if (g.delta !== 0) { t.changed++; }
-            if (g.delta > 0) { t.pos += g.delta; if (g.live > 1) { t.multiPos += g.delta; } } else { t.neg += -g.delta; if (g.live > 1) { t.multiNeg += -g.delta; } }
+            var c = Number(g.fresh && g.fresh.cost) || 0;
+            if (c > 0 && g.delta !== 0) { t.costed = true; }
+            if (g.delta > 0) { t.pos += g.delta; t.posCost += g.delta * c; if (g.live > 1) { t.multiPos += g.delta; } } else { t.neg += -g.delta; t.negCost += -g.delta * c; if (g.live > 1) { t.multiNeg += -g.delta; } }
         });
         s.lines.forEach(function (l) {
             var k = (l.counterName || 'Unknown') + '|' + (l.label || '');
@@ -3263,8 +3375,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         main.appendChild(el('div', { class: 'ic-sum' }, [
             el('div', {}, [el('b', { id: 'icTotLines', text: String(t.items) }), 'items']),
             el('div', {}, [el('b', { text: String(counterKeys.length) }), 'counters']),
-            el('div', {}, [el('b', { id: 'icTotPos', text: '+' + fmt(t.pos) }), 'units up']),
-            el('div', {}, [el('b', { id: 'icTotNeg', text: '−' + fmt(t.neg) }), 'units down']),
+            el('div', {}, [el('b', { id: 'icTotPos', text: '+' + fmt(t.pos) }), 'units up', costNote(t.costed, t.posCost, 'icTotPosCost')]),
+            el('div', {}, [el('b', { id: 'icTotNeg', text: '−' + fmt(t.neg) }), 'units down', costNote(t.costed, t.negCost, 'icTotNegCost')]),
             el('div', {}, [el('b', { text: state.loc ? locName(state.loc) : (BOOT.multiLoc ? 'No location' : 'All locations') }), 'location'])
         ]));
         if (counterKeys.length) {
@@ -3482,8 +3594,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (SHARED) { main.appendChild(deviceLabelField()); }
         main.appendChild(el('div', { class: 'ic-sum' }, [
             el('div', {}, [el('b', { id: 'icTotLines', text: String(t.lines) }), 'lines']),
-            el('div', {}, [el('b', { id: 'icTotPos', text: '+' + fmt(t.pos) }), 'units up']),
-            el('div', {}, [el('b', { id: 'icTotNeg', text: '−' + fmt(t.neg) }), 'units down']),
+            el('div', {}, [el('b', { id: 'icTotPos', text: '+' + fmt(t.pos) }), 'units up', costNote(t.costed, t.posCost, 'icTotPosCost')]),
+            el('div', {}, [el('b', { id: 'icTotNeg', text: '−' + fmt(t.neg) }), 'units down', costNote(t.costed, t.negCost, 'icTotNegCost')]),
             el('div', {}, [el('b', { text: state.loc ? locName(state.loc) : (BOOT.multiLoc ? 'No location' : 'All locations') }), 'location'])
         ]));
         if (!state.order.length) {
@@ -4027,6 +4139,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var active = document.activeElement;
         var keepSearchFocus = active && active.id === 'icSearch';
         state.repaintOrders = null;
+        // Emptying the page drops it to nothing and the browser scrolls to the
+        // top on its own; that is the rebuild moving, not the reader, so the
+        // place stays saved for restoreScroll below.
+        scroll.quietUntil = Date.now() + 250;
         root.innerHTML = '';
         renderHeader(root);
         var main = el('div', { class: 'ic-main' });
@@ -4053,6 +4169,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var s = document.getElementById('icSearch');
             if (s && !('ontouchstart' in window && !keepSearchFocus)) { s.focus(); }
         }
+        restoreScroll();
     }
 
     // --------------------------------------------------------------- boot --
@@ -4075,6 +4192,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         state.dupes = prefs.dupes === 'latest' ? 'latest' : 'add';
         loadSheet();
         savePrefs();
+        watchScroll();
         render();
         if (SHARED) {
             // Lines this browser never got saved are pending from the start,

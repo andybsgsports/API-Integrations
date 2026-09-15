@@ -63,6 +63,21 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    memo, so a doubtful count can be traced to a person. The sheet is saved in
    the browser, per location, so a refresh or a dead battery does not lose the
    count.
+   The sheet's summary totals the **units up** and **units down**, and under
+   each is what those units are **worth at average cost** — this location's
+   average cost for the item where NetSuite keeps one per location, the
+   item's own otherwise. It is the value of the adjustment about to be
+   posted, not of the inventory. An account that does not report an average
+   cost shows the unit totals alone rather than a misleading `$0.00`.
+   **Your place in the list is kept.** The page rebuilds itself as counts
+   save and as the shared count refreshes, and a reload starts it empty and
+   fills it from NetSuite a moment later; either would otherwise drop
+   whoever was halfway down Needs review back at the top. The place is
+   remembered by the row that was at the top of the screen, so it holds even
+   while rows above it arrive, change height as on-hand lands, or leave
+   because someone else's count came in. Each tab keeps its own place, it
+   survives a manual reload, and it is per browser tab — two tabs do not
+   fight over it, and closing the tab forgets it.
    A line whose count equals its on-hand is a *counted, no change* record: it
    proves the item was checked, and submit leaves it off the adjustment. When
    **every** line on the sheet matches, submit says "Nothing to adjust", the
@@ -427,7 +442,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-15.1` …): a tab left
+  compare the version in each page's footer (`v2026-09-15.2` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
