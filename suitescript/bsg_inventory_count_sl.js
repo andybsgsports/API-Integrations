@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-15.6',
+        VERSION: '2026-09-15.7',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1019,17 +1019,26 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             }
             return out;
         }
+        // A count of a few thousand items is sent in batches, but it is one
+        // count and belongs in ONE adjustment: after the first batch makes the
+        // record, every later batch adds its lines to that same one.
+        var addTo = posInt(body.adjustment);
         if (!candidates.length) {
-            return finish({ ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Nothing on this sheet could be adjusted.' });
+            return finish({ ok: true, adjustment: addTo ? adjustmentRef(addTo) : null, applied: [], skipped: skipped, blocked: blocked, message: 'Nothing on this sheet could be adjusted.' });
         }
 
-        var rec = record.create({ type: record.Type.INVENTORY_ADJUSTMENT, isDynamic: true });
-        var subId = posInt(CONFIG.SUBSIDIARY_ID) || locationSubsidiary(locId) || currentUserSubsidiary();
-        if (subId) { trySet(rec, 'subsidiary', subId); }
-        rec.setValue({ fieldId: 'account', value: accountId });
-        if (locId) { trySet(rec, 'adjlocation', locId); }
-        rec.setValue({ fieldId: 'trandate', value: new Date() });
-        rec.setValue({ fieldId: 'memo', value: memo });
+        var rec;
+        if (addTo) {
+            rec = record.load({ type: record.Type.INVENTORY_ADJUSTMENT, id: addTo, isDynamic: true });
+        } else {
+            rec = record.create({ type: record.Type.INVENTORY_ADJUSTMENT, isDynamic: true });
+            var subId = posInt(CONFIG.SUBSIDIARY_ID) || locationSubsidiary(locId) || currentUserSubsidiary();
+            if (subId) { trySet(rec, 'subsidiary', subId); }
+            rec.setValue({ fieldId: 'account', value: accountId });
+            if (locId) { trySet(rec, 'adjlocation', locId); }
+            rec.setValue({ fieldId: 'trandate', value: new Date() });
+            rec.setValue({ fieldId: 'memo', value: memo });
+        }
 
         var applied = [];
         candidates.forEach(function (l) {
@@ -1053,27 +1062,31 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         });
 
         if (!applied.length) {
-            return finish({ ok: true, adjustment: null, applied: [], skipped: skipped, blocked: blocked, message: 'Every count already matches on-hand -- no adjustment needed.' });
+            return finish({ ok: true, adjustment: addTo ? adjustmentRef(addTo) : null, applied: [], skipped: skipped, blocked: blocked,
+                message: addTo ? '' : 'Every count already matches on-hand -- no adjustment needed.' });
         }
 
         var id = rec.save({ enableSourcing: true, ignoreMandatoryFields: false });
-        var tranid = '';
-        try {
-            tranid = search.lookupFields({ type: search.Type.INVENTORY_ADJUSTMENT, id: id, columns: ['tranid'] }).tranid || '';
-        } catch (e) { /* cosmetic */ }
-        var recUrl = '';
-        try {
-            recUrl = url.resolveRecord({ recordType: 'inventoryadjustment', recordId: id, isEditMode: false });
-        } catch (e2) { /* cosmetic */ }
         log.audit({
-            title: 'invcount: adjustment ' + id + (tranid ? ' (#' + tranid + ')' : ''),
+            title: 'invcount: adjustment ' + id + (addTo ? ' (added to)' : ' (created)'),
             details: applied.length + ' lines, ' + skipped.length + ' unchanged, ' + blocked.length + ' blocked; location ' + (locId || 'n/a') + '; account ' + accountId
         });
         return finish({
             ok: true,
-            adjustment: { id: String(id), tranid: String(tranid), url: recUrl },
+            adjustment: adjustmentRef(id),
             applied: applied, skipped: skipped, blocked: blocked
         });
+    }
+    // The adjustment's number and link, for the done page. Both are cosmetic:
+    // an account that will not hand them over still gets the id.
+    function adjustmentRef(id) {
+        var tranid = '';
+        try { tranid = search.lookupFields({ type: search.Type.INVENTORY_ADJUSTMENT, id: id, columns: ['tranid'] }).tranid || ''; }
+        catch (e) { /* cosmetic */ }
+        var recUrl = '';
+        try { recUrl = url.resolveRecord({ recordType: 'inventoryadjustment', recordId: id, isEditMode: false }); }
+        catch (e2) { /* cosmetic */ }
+        return { id: String(id), tranid: String(tranid), url: recUrl };
     }
 
     // ---------------------------------------------------------------- shared --
@@ -3639,7 +3652,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var batch = batches[n++];
             state.progress = batches.length > 1 ? 'Submitting batch ' + n + ' of ' + batches.length + '…' : 'Creating the Inventory Adjustment…';
             render();
-            apiPost('submit', { loc: state.loc || '', account: state.account || '', memo: state.memo || '', lines: batch }).then(function (res) {
+            // Every batch after the first adds its lines to the adjustment the
+            // first one made: a count is one count, however many requests it
+            // takes to send it.
+            var into = done.adjustments.length ? done.adjustments[0].id : '';
+            apiPost('submit', { loc: state.loc || '', account: state.account || '', memo: state.memo || '', lines: batch, adjustment: into }).then(function (res) {
                 if (!res || !res.ok) {
                     state.submitting = false; state.progress = '';
                     state.submitError = ((res && res.error) || 'Submit failed.') + (n > 1 && !(res && res.stale) ? ' (Earlier batches posted; what is left is still on the shared sheet.)' : '');
@@ -3654,7 +3671,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     render();
                     return;
                 }
-                if (res.adjustment) { done.adjustments.push(res.adjustment); }
+                if (res.adjustment && !done.adjustments.some(function (a) { return a.id === res.adjustment.id; })) { done.adjustments.push(res.adjustment); }
                 done.applied += (res.applied || []).length;
                 done.skipped += (res.skipped || []).length;
                 (res.blocked || []).forEach(function (b) { done.blocked.push({ name: b.name || ('item ' + b.item), reason: b.reason || '' }); });
@@ -3857,7 +3874,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     render();
                     return;
                 }
-                if (res.adjustment) { done.adjustments.push(res.adjustment); }
+                if (res.adjustment && !done.adjustments.some(function (a) { return a.id === res.adjustment.id; })) { done.adjustments.push(res.adjustment); }
                 done.applied += (res.applied || []).length;
                 done.skipped += (res.skipped || []).length;
                 (res.applied || []).concat(res.skipped || []).forEach(function (l) { removeLine(String(l.item)); });

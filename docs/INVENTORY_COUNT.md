@@ -219,7 +219,7 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    Excel needs `N/compress`; if an account lacks it the page says to use CSV,
    which Excel opens.
 5. **Submit** — the page posts the sheet to the Suitelet, which re-reads each
-   item's on-hand *at that moment* and creates one Inventory Adjustment whose
+   item's on-hand *at that moment* and creates **one** Inventory Adjustment whose
    lines bring on-hand to the counted quantity (`Adjust Qty. By = counted −
    on hand`). Items whose count already matches are left off; if nothing
    differs, no adjustment is created at all. The result page links straight to
@@ -399,7 +399,12 @@ way — one sheet per device.
 - The administrator's deltas are against **fresh** on-hand. A sub-line whose
   on-hand has moved since it was counted says so (*on hand was 100 when
   counted*), and the item is flagged.
-- **Submit** posts one adjustment per 100 items from the merged totals, memo
+- **Submit** posts **one** adjustment from the merged totals, however many
+  items the count covers. A big count is sent to the server in batches of
+  `SHARED_BATCH` (100) so no single request is huge, but only the first batch
+  creates the record — every batch after it is added to that same adjustment,
+  which it is told the id of. (Until v2026-09-15.7 each batch made its own
+  record, so a 2,310-item count posted 24 adjustments instead of one.) Memo
   `Counted 90 (…); on hand 100; counted by Jeff Howard, Amy Fox`, and marks
   every line behind it posted. Within a minute (or as soon as they return to
   the tab) the counters' own sheets clear those lines.
@@ -477,7 +482,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-15.6` …): a tab left
+  compare the version in each page's footer (`v2026-09-15.7` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
