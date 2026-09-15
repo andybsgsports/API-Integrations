@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-14.18',
+        VERSION: '2026-09-15.1',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -2449,18 +2449,25 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var existed = !!state.sheet[item.id];
         var line = ensureLine(item);
         if (!existed) { line.viaTick = true; } // never keyed: only here because of a tick
-        var qty = round4(entry.committed);
+        // What is on the shelf, before any order tick is counted on top. Taken
+        // first so the total below can be rebuilt from it rather than nudged up
+        // and down: a stale tick left by an older key scheme would otherwise
+        // stay baked into the count even once its entry has gone.
+        var shelfPortion = shelfOf(line);
         var k = orderKey(entry);
-        line.orders = (line.orders || []).filter(function (o) { return orderKey(o) !== k; });
-        if (checked) {
-            line.orders.push({ ref: entry.ref, key: k, qty: qty });
-            line.count = round4((Number(line.count) || 0) + qty);
-        } else {
-            line.count = round4(Math.max(0, (Number(line.count) || 0) - qty));
-            if (line.viaTick && !line.orders.length && line.count === 0) {
-                removeLine(item.id);
-                return null;
-            }
+        // A plain order ref means this item has only this one line on the
+        // order, so any tick naming that order is this same line under an
+        // older label and gives way. A ref#line only gives way to its own
+        // line number, leaving a genuine sibling line alone.
+        var oneLine = k === entry.ref;
+        line.orders = (line.orders || []).filter(function (o) {
+            return oneLine ? o.ref !== entry.ref : orderKey(o) !== k;
+        });
+        if (checked) { line.orders.push({ ref: entry.ref, key: k, qty: round4(entry.committed) }); }
+        line.count = round4(shelfPortion + ordersTotal(line));
+        if (!checked && line.viaTick && !line.orders.length && line.count === 0) {
+            removeLine(item.id);
+            return null;
         }
         stamp(line);
         line.error = '';
@@ -2485,7 +2492,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 others.error = (res && res.error) || 'Could not reach NetSuite.';
             } else {
                 var map = {}, lines = {};
-                (res.ticks || []).forEach(function (t) { map[othersKey(t.item, t.key || t.ref)] = { name: t.name || 'someone', label: t.label || '' }; });
+                // Recorded under the key it was stored with AND under the bare
+                // order ref, so a tick another counter made under an older key
+                // scheme still shows this device that those units are found.
+                (res.ticks || []).forEach(function (t) {
+                    var who = { name: t.name || 'someone', label: t.label || '' };
+                    map[othersKey(t.item, t.key || t.ref)] = who;
+                    if (t.ref) { var byRef = othersKey(t.item, t.ref); if (!map[byRef]) { map[byRef] = who; } }
+                });
                 (res.lines || []).forEach(function (l) { (lines[String(l.item)] = lines[String(l.item)] || []).push({ name: l.name || 'someone', label: l.label || '', shelf: Number(l.shelf) || 0, on: Number(l.on) || 0, at: l.at || '' }); });
                 changed = JSON.stringify(map) !== JSON.stringify(others.map) || JSON.stringify(lines) !== JSON.stringify(others.lines) || !!others.error;
                 others.map = map; others.lines = lines; others.loadedAt = Date.now(); others.error = '';
@@ -2525,9 +2539,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return others.map[othersKey(itemId, key)] || null;
     }
     function tickedByText(t) { return 'ticked by ' + t.name + (t.label ? ' · ' + t.label : ''); }
+    // A plain order ref means the item has only this one line on the order, so
+    // any tick naming that order is this line, whatever key scheme labelled it.
+    // A ref#line is one of several siblings and only its own tick counts.
     function isTicked(itemId, key) {
         var line = state.sheet[itemId];
-        return !!line && (line.orders || []).some(function (o) { return orderKey(o) === key; });
+        if (!line) { return false; }
+        var plain = String(key).indexOf('#') === -1;
+        return (line.orders || []).some(function (o) { return plain ? o.ref === key : orderKey(o) === key; });
     }
     function inclText(line) {
         var t = ordersTotal(line);
@@ -3070,21 +3089,48 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // must not quietly put an administrator back on adding.
     function dupeMode() { return state.dupes === 'latest' ? 'latest' : 'add'; }
     function setDupeMode(v) { state.dupes = v; savePrefs(); render(); }
+    // One entry per real order line, however many ticks name it. Ticks stored
+    // while this feature's keying changed carry different labels for the very
+    // same line -- a bare order ref from before line-aware keys, a ref#line
+    // after -- and two counters who both found the same units each stored
+    // their own. Only a ref whose ticks carry genuinely DIFFERENT line numbers
+    // is two lines (two decoration jobs on one blank); everything else is one
+    // line wearing more than one label, and counts once.
+    function collapseOrderEntries(list) {
+        var byRef = {}, order = [];
+        (list || []).forEach(function (o) {
+            if (!o) { return; }
+            var ref = String(o.ref == null ? '' : o.ref);
+            var m = (o.key && o.key !== ref) ? /#(.+)$/.exec(String(o.key)) : null;
+            if (!byRef[ref]) { byRef[ref] = []; order.push(ref); }
+            byRef[ref].push({ line: m ? m[1] : null, qty: Number(o.qty) || 0 });
+        });
+        var out = [];
+        order.forEach(function (ref) {
+            var seen = {}, lines = [];
+            byRef[ref].forEach(function (e) { if (e.line != null && !seen[e.line]) { seen[e.line] = true; lines.push(e.line); } });
+            if (lines.length > 1) {
+                lines.forEach(function (n) {
+                    out.push({ ref: ref, qty: byRef[ref].filter(function (e) { return e.line === n; })[0].qty });
+                });
+            } else {
+                out.push({ ref: ref, qty: byRef[ref][0].qty });
+            }
+        });
+        return out;
+    }
     function mergedFor(m) {
-        var s = state.session, shelf = 0, orders = {}, refs = [], names = [], ids = [], live = 0, latest = '', liveSubs = [];
+        var s = state.session, shelf = 0, rawOrders = [], names = [], ids = [], live = 0, latest = '', liveSubs = [];
         m.subs.forEach(function (l) {
             ids.push(l.id);
             if (s.excluded[l.id]) { return; }
             live++;
             liveSubs.push(l);
-            // Keyed by the line's own identity, not its order ref alone: two
-            // counters ticking the SAME line agree and count once, but two
-            // DIFFERENT lines of one item on one order (two decoration jobs)
-            // must both survive even though they share an order ref.
-            (l.orders || []).forEach(function (o) { var k = o.key || o.ref; if (!orders[k]) { orders[k] = { ref: o.ref, qty: Number(o.qty) || 0 }; refs.push(k); } });
+            (l.orders || []).forEach(function (o) { rawOrders.push(o); });
             if (l.counterName && names.indexOf(l.counterName) === -1) { names.push(l.counterName); }
             if (String(l.at || '') > latest) { latest = String(l.at); }
         });
+        var orders = collapseOrderEntries(rawOrders);
         var mode = 'one', keptBy = '';
         if (liveSubs.length > 1) {
             if (dupeMode() === 'latest') {
@@ -3095,7 +3141,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             }
         } else if (liveSubs.length === 1) { shelf = Number(liveSubs[0].shelf) || 0; }
         var onOrders = 0;
-        refs.forEach(function (r) { onOrders += orders[r].qty; });
+        orders.forEach(function (o) { onOrders += o.qty; });
         var computed = round4(shelf + onOrders);
         var ov = s.overrides[m.id];
         var total = ov != null ? round4(ov) : computed;
@@ -3103,7 +3149,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var onhand = f.onhand == null ? null : Number(f.onhand);
         var drift = m.subs.some(function (l) { return !s.excluded[l.id] && l.onhand != null && onhand != null && round4(l.onhand) !== round4(onhand); });
         var usable = !f.missing && !f.blocked && live > 0;
-        return { computed: computed, total: total, overridden: ov != null, orders: refs.map(function (r) { return { ref: orders[r].ref, qty: orders[r].qty }; }), onOrders: onOrders,
+        return { computed: computed, total: total, overridden: ov != null, orders: orders, onOrders: onOrders,
             names: names, ids: ids, seen: m.subs.map(function (l) { return { id: l.id, shelf: l.shelf, orders: l.orders || [] }; }),
             live: live, latest: latest, fresh: f, onhand: onhand, drift: drift, usable: usable, mode: mode, keptBy: keptBy,
             delta: onhand == null || !usable ? null : round4(total - onhand),

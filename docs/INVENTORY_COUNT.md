@@ -108,10 +108,20 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    order that has only **one** line for an item is not touched by any of
    this — it keeps the plain order number as its identity, exactly as
    always, so a tick made before this feature shipped still matches and
-   locks it correctly. (An early version of this feature disambiguated
-   every line regardless, which broke that matching for the ordinary
-   one-line case and let it be ticked a second time, doubling its units;
-   fixed the same day, v2026-09-14.18.)
+   locks it correctly.
+   **An order line's units are counted once however many ticks name it.**
+   A line is matched by the order it belongs to, and only split in two
+   when the ticks on it carry genuinely different line numbers. So a tick
+   stored before this feature existed and one stored after it are
+   recognised as the same line, not two; ticking a line that already
+   carries an older tick replaces it rather than stacking on top of it;
+   and the line's total is rebuilt from the shelf count plus its ticks
+   each time, so nothing can stay baked into a total after its tick is
+   gone. (While this feature's keying was being settled, the identity of
+   a tick changed twice in a day. Ticks stored under the earlier scheme
+   stopped matching, so lines showed as untouched, were ticked again, and
+   their units were added twice. v2026-09-15.1 made every stage of this
+   tolerant of the older labels, which is what stops it recurring.)
    A line appears while it still has **committed** units on an order that is
    itself open (Pending Fulfillment, Partially Fulfilled, Pending
    Billing/Partially Fulfilled — never Billed, Closed or Cancelled), **or**
@@ -417,7 +427,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-14.18` …): a tab left
+  compare the version in each page's footer (`v2026-09-15.1` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
