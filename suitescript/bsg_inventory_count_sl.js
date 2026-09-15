@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-15.2',
+        VERSION: '2026-09-15.3',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1543,24 +1543,73 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     }
 
     var SHEET_COLS = [
-        { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'vendor', label: 'Pref. vendor' }, { key: 'onhand', label: 'On hand', num: true },
-        { key: 'count', label: 'Count', num: true }, { key: 'delta', label: 'Adjust by', num: true }, { key: 'orders', label: 'On open orders' },
+        { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'color', label: 'Color' }, { key: 'size', label: 'Size' },
+        { key: 'vendor', label: 'Pref. vendor' }, { key: 'onhand', label: 'On hand', num: true },
+        { key: 'count', label: 'Count', num: true }, { key: 'delta', label: 'Adjust by', num: true },
+        { key: 'cost', label: 'Avg cost', num: true }, { key: 'value', label: 'Adjust $', num: true },
+        { key: 'orders', label: 'On open orders' },
         { key: 'by', label: 'Counted by' }, { key: 'when', label: 'When' }
     ];
+    // Size words as people write them, longest match wins; a plain number is a
+    // size too (shoes 9.5, waist 32x30, youth 7/8). Kept here rather than
+    // shared with naturalItemOrder, which knows the same vocabulary for
+    // sorting but is shipped to the browser verbatim and has to stay
+    // self-contained.
+    var SIZE_WORDS = ('xxs|2xs|2x-small|xs|x-small|xs/s|s|small|sm|s/m|small/medium|m|medium|m/l|medium/large|l|large|l/xl|lxl|large/x-large|' +
+        'xl|x-large|xl/2xl|xxl|2xl|2x-large|xxxl|3xl|3x-large|4xl|4x-large|5xl|5x-large|6xl|6x-large|yxs|ys|ym|yl|yxl|' +
+        'osfa|osfm|os|o/s|youth x-small|youth small|youth medium|youth large|youth x-large|one size|one size fits all|one size fits most|' +
+        'adult|youth|junior|jr|senior|sr|intermediate|int|varsity|toddler|infant|peewee|pee wee|kids|child').split('|');
+    function isSizeText(v) {
+        var t = String(v || '').trim().toLowerCase();
+        if (!t) { return false; }
+        var m = /^(.+?)[-\s\/]+(x-tall|tall|long|short|regular|reg)$/.exec(t);
+        if (m) { t = m[1]; }
+        if (SIZE_WORDS.indexOf(t) !== -1) { return true; }
+        return /^\d+(\.\d+)?(\s*[x\/]\s*\d+(\.\d+)?)?$/.test(t);
+    }
+    // "1379806 : 1379806-Black-2X-Large" -> Black / 2X-Large. Only a matrix
+    // child has a colour and size to report, and its parent says where its own
+    // part of the name starts; an item with no parent keeps both blank rather
+    // than having a guess made out of whatever follows a dash in its code.
+    function splitColorSize(name, parent) {
+        var full = String(name || ''), p = String(parent || '').trim();
+        if (!p) { return { color: '', size: '' }; }
+        var child = full, i = full.indexOf(' : ');
+        if (i >= 0) { child = full.slice(i + 3); }
+        if (child.toLowerCase().indexOf(p.toLowerCase() + '-') === 0) { child = child.slice(p.length + 1); }
+        else if (child.toLowerCase() === p.toLowerCase()) { return { color: '', size: '' }; }
+        var segs = child ? child.split('-') : [];
+        if (!segs.length) { return { color: '', size: '' }; }
+        var tail = 0;
+        for (var k = 1; k <= Math.min(3, segs.length); k++) {
+            if (isSizeText(segs.slice(segs.length - k).join('-'))) { tail = k; }
+        }
+        return { color: segs.slice(0, segs.length - tail).join('-'), size: tail ? segs.slice(segs.length - tail).join('-') : '' };
+    }
 
     function exportSheet(where, payload) {
         var rows = (Array.isArray(payload.lines) ? payload.lines : []).slice(0, CONFIG.EXPORT_MAX_ROWS).map(function (l) {
             var onhand = parseFloat(l.onhand) || 0, count = parseFloat(l.count) || 0;
+            var delta = round4(count - onhand);
+            var cost = parseFloat(l.cost);
+            var cs = splitColorSize(l.name, l.parent);
             return {
-                name: String(l.name || ''), display: String(l.display || l.desc || ''), vendor: String(l.vendor || ''), onhand: onhand, count: count,
-                delta: round4(count - onhand),
+                name: String(l.name || ''), display: String(l.display || l.desc || ''), color: cs.color, size: cs.size,
+                vendor: String(l.vendor || ''), onhand: onhand, count: count,
+                delta: delta,
+                cost: isFinite(cost) && cost > 0 ? round4(cost) : '',
+                value: isFinite(cost) && cost > 0 ? Math.round(delta * cost * 100) / 100 : '',
                 orders: (Array.isArray(l.orders) ? l.orders : []).map(function (o) { return cleanRef(o && o.ref) + (o && o.qty ? ' (' + o.qty + ')' : ''); }).filter(Boolean).join(', '),
                 by: cleanName(l.by), when: cleanName(l.when)
             };
         });
+        var net = 0, valued = false;
+        rows.forEach(function (r) { if (r.value !== '') { net += r.value; valued = true; } });
         return {
             title: 'Count sheet' + (where ? ' - ' + where : ''),
-            subtitle: rows.length + ' lines · not yet submitted' + (payload.memo ? ' · ' + String(payload.memo).slice(0, 200) : ''),
+            subtitle: rows.length + ' lines' + (payload.scope === 'review' ? ' · needs review only' : '') + ' · not yet submitted'
+                + (valued ? ' · net ' + (net < 0 ? '-' : '') + '$' + Math.abs(Math.round(net * 100) / 100).toFixed(2) + ' at average cost' : '')
+                + (payload.memo ? ' · ' + String(payload.memo).slice(0, 200) : ''),
             columns: SHEET_COLS, rows: rows
         };
     }
@@ -2486,6 +2535,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var line = state.sheet[item.id];
         if (!line) {
             line = { id: item.id, name: item.name || ('item ' + item.id), display: item.display || '', desc: item.desc || '', upc: item.upc || '', vendor: item.vendor || '',
+                parent: item.parent || '',
                 onhand: item.onhand, available: item.available, committed: item.committed, onorder: item.onorder, cost: item.cost, blocked: item.blocked || '', count: 0, orders: [] };
             state.sheet[item.id] = line;
             state.order.push(item.id);
@@ -2501,7 +2551,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             hydrating[id] = false;
             var line = state.sheet[id], fresh = res && res.ok && res.items && res.items[id];
             if (!line || !fresh) { return; }
-            line.name = fresh.name || line.name; line.display = fresh.display; line.desc = fresh.desc; line.upc = fresh.upc; line.vendor = fresh.vendor;
+            line.name = fresh.name || line.name; line.display = fresh.display; line.desc = fresh.desc; line.upc = fresh.upc; line.vendor = fresh.vendor; line.parent = fresh.parent || '';
             line.onhand = fresh.onhand; line.available = fresh.available; line.committed = fresh.committed; line.onorder = fresh.onorder; line.cost = fresh.cost; line.blocked = fresh.blocked || '';
             saveSheet();
             markDirty(id);
@@ -3346,13 +3396,18 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return row;
     }
 
+    // What the export carries: the sheet as it is on screen, so Needs review
+    // exports the items being reviewed rather than all 2,000 of them.
     function sharedExportLines() {
         var s = state.session;
-        return s.items.map(function (m) {
+        var out = [];
+        s.items.forEach(function (m) {
             var g = mergedFor(m), f = g.fresh;
-            return { name: f.name || m.name, display: f.display || f.desc || '', vendor: f.vendor || '', onhand: g.onhand, count: g.total,
-                orders: g.orders, by: g.names.join(', '), when: fmtAt(g.latest) };
+            if (s.filter === 'review' && !g.review) { return; }
+            out.push({ name: f.name || m.name, display: f.display || f.desc || '', vendor: f.vendor || '', parent: f.parent || '', cost: f.cost,
+                onhand: g.onhand, count: g.total, orders: g.orders, by: g.names.join(', '), when: fmtAt(g.latest) });
         });
+        return out;
     }
 
     function renderSharedSheetView(main) {
@@ -3792,8 +3847,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             } else if (what === 'sheet') {
                 fields.payload = JSON.stringify({
                     memo: state.memo || '',
+                    scope: (state.session && state.session.filter === 'review') ? 'review' : 'all',
                     lines: linesFn ? linesFn() : state.order.map(function (id) { return state.sheet[id]; }).filter(Boolean).map(function (l) {
-                        return { name: l.name, display: l.display || l.desc || '', vendor: l.vendor || '', onhand: l.onhand, count: l.count, orders: l.orders || [], by: l.by || '', when: fmtWhen(l.at) };
+                        return { name: l.name, display: l.display || l.desc || '', vendor: l.vendor || '', parent: l.parent || '', cost: l.cost,
+                            onhand: l.onhand, count: l.count, orders: l.orders || [], by: l.by || '', when: fmtWhen(l.at) };
                     })
                 });
             }

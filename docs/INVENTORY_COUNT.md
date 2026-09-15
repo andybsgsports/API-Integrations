@@ -177,9 +177,22 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    search), with Pref. vendor and a blank Count column to fill in by hand;
    the Open orders tab exports every line led by Sales rep (sorted rep, then
    date, like the screen) with the order's PO # and memo columns right after
-   Customer and a Ticked column; the Sheet tab exports the
-   lines you have keyed with their Pref. vendor, on-hand, count and
-   adjust-by, plus who counted each line and when. CSV and Excel
+   Customer and a Ticked column; the Sheet tab exports Item, Description,
+   **Color**, **Size**, Pref. vendor, On hand, Count, Adjust by, **Avg
+   cost**, **Adjust $**, the open orders ticked into the line, and who
+   counted it and when.
+   **The Sheet export follows the tab it is exporting.** On **Needs review**
+   it carries only the items being reviewed; on **All** it carries every
+   line. The file says which it is, and what the whole thing nets at average
+   cost.
+   Color and size come from the item's own name, split off using the matrix
+   parent NetSuite records for it — `1379806 : 1379806-Black-2X-Large` is
+   Black / 2X-Large. An item with no matrix parent has neither to report and
+   both are left blank rather than guessed at from whatever follows a dash
+   in its code. **Adjust $** is the adjust-by quantity at that item's
+   average cost, signed the same way, so a short count reads negative; both
+   money columns are left blank for an item with no average cost. They are
+   plain numbers, not `$` text, so a spreadsheet can total them. CSV and Excel
    cover the whole list; the PDF stops at `PDF_MAX_ROWS` (2,000) and says so.
    Excel needs `N/compress`; if an account lacks it the page says to use CSV,
    which Excel opens.
@@ -442,7 +455,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-15.2` …): a tab left
+  compare the version in each page's footer (`v2026-09-15.3` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
