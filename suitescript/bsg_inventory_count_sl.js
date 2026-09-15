@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-15.5',
+        VERSION: '2026-09-15.6',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -2214,13 +2214,21 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         }
         return null;
     }
+    function savedScroll() {
+        try { var p = JSON.parse(ssGet(scrollKey()) || 'null'); return (p && typeof p === 'object') ? p : null; }
+        catch (e) { return null; }
+    }
     function rememberScroll() {
         var y = scrollY();
-        // Emptying the page drops it to nothing and the browser scrolls to the
-        // top by itself. That is the rebuild, not the reader, so it must not
-        // overwrite the place -- but only a jump to the top is ignored, and
-        // only while a rebuild is in flight; anywhere else is the reader, and
-        // is recorded even in the moment after a rebuild.
+        // A page too short to hold the place already saved is mid-rebuild --
+        // most of the time it is sitting on "Loading everyone's counts..."
+        // waiting for NetSuite, with the browser holding the scroll at the
+        // bottom of what little there is to show. That is the rebuild, not the
+        // reader, and the refresh stays there for a whole round trip, so only
+        // the height can tell them apart; the clamp is not always to the top.
+        var prev = savedScroll();
+        if (prev && scrollMax() + 4 < (Number(prev.y) || 0)) { return; }
+        // The rebuild's own jump to the top is not the reader moving either.
         if (y <= 4 && Date.now() < scroll.quietUntil) {
             clearTimeout(scroll.timer);
             scroll.timer = setTimeout(function () { scroll.timer = null; rememberScroll(); }, 300);
@@ -2236,12 +2244,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         ssSet(scrollKey(), JSON.stringify({ y: y, id: anchor ? anchor.id : '', off: anchor ? anchor.off : 0 }));
     }
     function restoreScroll() {
-        var p;
-        try { p = JSON.parse(ssGet(scrollKey()) || 'null'); } catch (e) { p = null; }
-        if (!p || typeof p !== 'object') { return; }
-        // Anywhere but the top means the reader has already put themselves
-        // somewhere since the rebuild -- never haul them off it.
-        if (scrollY() > 4) { return; }
+        var p = savedScroll();
+        if (!p) { return; }
         var target = -1;
         if (p.id) {
             var row = rowAt(String(p.id));
@@ -2250,6 +2254,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         }
         if (target < 0) { target = Number(p.y) || 0; }
         if (target <= 4) { return; }
+        // Already there -- including when the reader has moved since, because
+        // only their own scrolling is ever saved. Emptying the page does not
+        // reliably leave it at the top: the browser holds the scroll at the
+        // bottom of the short "Loading everyone's counts..." page instead, so
+        // "anywhere but the top" would have refused to put them back at all.
+        if (Math.abs(scrollY() - target) <= 4) { return; }
         // Still loading: too short to hold the place yet, so leave it saved and
         // let the render that brings the rest of the rows in try again.
         if (scrollMax() < target - 4) { return; }

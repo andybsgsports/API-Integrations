@@ -77,7 +77,14 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    while rows above it arrive, change height as on-hand lands, or leave
    because someone else's count came in. Each tab keeps its own place, it
    survives a manual reload, and it is per browser tab — two tabs do not
-   fight over it, and closing the tab forgets it.
+   fight over it, and closing the tab forgets it. Emptying the page does not
+   reliably leave it at the top — the browser holds the scroll at the bottom
+   of the short *Loading everyone's counts…* page instead — so neither the
+   saving nor the putting-back goes by "is it at the top": a page too short
+   to hold the place is known to be mid-rebuild and leaves it alone, and the
+   place is put back unless the reader is already on it. It lands on the row
+   they were reading rather than an exact pixel, which drifts by a fraction
+   of a row as on-hand values arrive and rows change height.
    A line whose count equals its on-hand is a *counted, no change* record: it
    proves the item was checked, and submit leaves it off the adjustment. When
    **every** line on the sheet matches, submit says "Nothing to adjust", the
@@ -470,7 +477,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-15.5` …): a tab left
+  compare the version in each page's footer (`v2026-09-15.6` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
