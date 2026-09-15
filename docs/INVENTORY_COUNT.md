@@ -200,7 +200,14 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    column of averages added together is not the value of anything — and
    neither does the Count tab's blank fill-in-by-hand column. The row is
    labelled `TOTAL (157 lines)` in the first column, and in Excel it is a
-   real number, so a formula can use it. CSV and Excel
+   real number, so a formula can use it.
+   The **Excel** file opens ready to work with: the header row carries the
+   filter buttons and stays frozen while the list scrolls. The filter range
+   stops at the last real row, so the grand total underneath can never be
+   sorted into the middle of the list or hidden by a filter. **CSV cannot
+   carry a filter** — it is plain text, with no place to keep one — so in
+   CSV the header is just the first line; Excel's own Ctrl+Shift+L adds a
+   filter to it in one keystroke. CSV and Excel
    cover the whole list; the PDF stops at `PDF_MAX_ROWS` (2,000) and says so.
    Excel needs `N/compress`; if an account lacks it the page says to use CSV,
    which Excel opens.
@@ -463,7 +470,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-15.4` …): a tab left
+  compare the version in each page's footer (`v2026-09-15.5` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
