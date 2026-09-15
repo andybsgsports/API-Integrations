@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-15.3',
+        VERSION: '2026-09-15.4',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1472,8 +1472,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     var ITEM_COLS = [
         { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'vendor', label: 'Pref. vendor' },
-        { key: 'upc', label: 'UPC' }, { key: 'onhand', label: 'On hand', num: true }, { key: 'available', label: 'Available', num: true },
-        { key: 'committed', label: 'Committed', num: true }, { key: 'onorder', label: 'On order', num: true }, { key: 'count', label: 'Count' }
+        { key: 'upc', label: 'UPC' }, { key: 'onhand', label: 'On hand', num: true, total: true }, { key: 'available', label: 'Available', num: true, total: true },
+        { key: 'committed', label: 'Committed', num: true, total: true }, { key: 'onorder', label: 'On order', num: true, total: true }, { key: 'count', label: 'Count' }
     ];
 
     function exportItems(q, locId, inStock, where) {
@@ -1516,8 +1516,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         { key: 'rep', label: 'Sales rep' },
         { key: 'ref', label: 'Order' }, { key: 'customer', label: 'Customer' }, { key: 'po', label: 'PO #' }, { key: 'memo', label: 'Memo' },
         { key: 'date', label: 'Date' }, { key: 'status', label: 'Status' },
-        { key: 'itemName', label: 'Item' }, { key: 'qty', label: 'Ordered', num: true }, { key: 'shipped', label: 'Shipped', num: true },
-        { key: 'committed', label: 'To count', num: true }, { key: 'pulled', label: 'Pulled', num: true }, { key: 'ticked', label: 'Ticked' }
+        { key: 'itemName', label: 'Item' }, { key: 'qty', label: 'Ordered', num: true, total: true }, { key: 'shipped', label: 'Shipped', num: true, total: true },
+        { key: 'committed', label: 'To count', num: true, total: true }, { key: 'pulled', label: 'Pulled', num: true, total: true }, { key: 'ticked', label: 'Ticked' }
     ];
 
     function exportOrders(locId, where, payload) {
@@ -1544,9 +1544,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     var SHEET_COLS = [
         { key: 'name', label: 'Item' }, { key: 'display', label: 'Description' }, { key: 'color', label: 'Color' }, { key: 'size', label: 'Size' },
-        { key: 'vendor', label: 'Pref. vendor' }, { key: 'onhand', label: 'On hand', num: true },
-        { key: 'count', label: 'Count', num: true }, { key: 'delta', label: 'Adjust by', num: true },
-        { key: 'cost', label: 'Avg cost', num: true }, { key: 'value', label: 'Adjust $', num: true },
+        { key: 'vendor', label: 'Pref. vendor' }, { key: 'onhand', label: 'On hand', num: true, total: true },
+        { key: 'count', label: 'Count', num: true, total: true }, { key: 'delta', label: 'Adjust by', num: true, total: true },
+        { key: 'cost', label: 'Avg cost', num: true }, { key: 'value', label: 'Adjust $', num: true, total: true, money: true },
         { key: 'orders', label: 'On open orders' },
         { key: 'by', label: 'Counted by' }, { key: 'when', label: 'When' }
     ];
@@ -1629,6 +1629,29 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
 
     function cell(v) { return v == null ? '' : String(v); }
 
+    // A grand total under the list, for the columns where adding up means
+    // something. An average cost is deliberately not one of them: a column of
+    // averages added together is not the value of anything. Rows with nothing
+    // in the column (an item with no average cost) simply do not contribute.
+    function totalsRow(ds) {
+        var cols = ds.columns.filter(function (c) { return c.total; });
+        if (!cols.length || !ds.rows.length) { return null; }
+        var row = {}, any = false;
+        cols.forEach(function (c) {
+            var sum = 0, seen = false;
+            ds.rows.forEach(function (r) {
+                var n = parseFloat(r[c.key]);
+                if (isFinite(n)) { sum += n; seen = true; }
+            });
+            if (!seen) { row[c.key] = ''; return; }
+            any = true;
+            row[c.key] = c.money ? Math.round(sum * 100) / 100 : round4(sum);
+        });
+        if (!any) { return null; }
+        row[ds.columns[0].key] = 'TOTAL (' + ds.rows.length + ' line' + (ds.rows.length === 1 ? '' : 's') + ')';
+        return row;
+    }
+
     function csvText(ds) {
         function q(v) {
             var t = cell(v);
@@ -1636,6 +1659,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         }
         var lines = [ds.columns.map(function (c) { return q(c.label); }).join(',')];
         ds.rows.forEach(function (r) { lines.push(ds.columns.map(function (c) { return q(r[c.key]); }).join(',')); });
+        var tot = totalsRow(ds);
+        if (tot) { lines.push(ds.columns.map(function (c) { return q(tot[c.key]); }).join(',')); }
         return lines.join('\r\n') + '\r\n';
     }
 
@@ -1661,7 +1686,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         ds.columns.forEach(function (c, i) { head.push('<c r="' + colRef(i) + '1" t="inlineStr"><is><t>' + xmlEsc(c.label) + '</t></is></c>'); });
         head.push('</row>');
         xml.push(head.join(''));
-        ds.rows.forEach(function (r, ri) {
+        var body = ds.rows.slice();
+        var tot = totalsRow(ds);
+        if (tot) { body.push(tot); }       // last row, numbers still numeric so Excel can use them
+        body.forEach(function (r, ri) {
             var rn = ri + 2, row = ['<row r="' + rn + '">'];
             ds.columns.forEach(function (c, i) {
                 var v = r[c.key];
@@ -1704,8 +1732,14 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 return '<td' + (c.num ? ' align="right"' : '') + '>' + xmlEsc(r[c.key]) + '</td>';
             }).join('') + '</tr>';
         }).join('');
+        var tot = totalsRow(ds);
+        if (tot) {
+            body += '<tr class="tot">' + ds.columns.map(function (c) {
+                return '<td' + (c.num ? ' align="right"' : '') + '>' + xmlEsc(tot[c.key]) + '</td>';
+            }).join('') + '</tr>';
+        }
         return '<?xml version="1.0"?><!DOCTYPE pdf PUBLIC "-//big.faceless.org//report" "report-1.1.dtd">' +
-            '<pdf><head><style type="text/css">body{font-family:Helvetica,sans-serif;font-size:8pt}h1{font-size:14pt;margin:0 0 2pt 0}p.sub{color:#555;margin:0 0 8pt 0}table{width:100%;border-collapse:collapse}th{background:#b3252a;color:#fff;font-weight:bold;padding:3pt 4pt;text-align:left;font-size:8pt}td{padding:2pt 4pt;border-bottom:0.5pt solid #ccc;vertical-align:top}</style>' +
+            '<pdf><head><style type="text/css">body{font-family:Helvetica,sans-serif;font-size:8pt}h1{font-size:14pt;margin:0 0 2pt 0}p.sub{color:#555;margin:0 0 8pt 0}table{width:100%;border-collapse:collapse}th{background:#b3252a;color:#fff;font-weight:bold;padding:3pt 4pt;text-align:left;font-size:8pt}td{padding:2pt 4pt;border-bottom:0.5pt solid #ccc;vertical-align:top}tr.tot td{font-weight:bold;border-top:1pt solid #333;border-bottom:none}</style>' +
             '<macrolist><macro id="nlfooter"><p align="right" style="font-size:7pt;color:#777">' + xmlEsc(ds.title) + ' · page <pagenumber/> of <totalpages/></p></macro></macrolist></head>' +
             '<body size="Letter-Landscape" footer="nlfooter" footer-height="14pt" margin-top="24pt" margin-bottom="28pt" margin-left="24pt" margin-right="24pt">' +
             '<h1>' + xmlEsc(ds.title) + '</h1><p class="sub">' + xmlEsc(ds.subtitle) + ' · ' + xmlEsc(new Date().toISOString().slice(0, 10)) + '</p>' +

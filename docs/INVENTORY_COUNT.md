@@ -192,7 +192,15 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    in its code. **Adjust $** is the adjust-by quantity at that item's
    average cost, signed the same way, so a short count reads negative; both
    money columns are left blank for an item with no average cost. They are
-   plain numbers, not `$` text, so a spreadsheet can total them. CSV and Excel
+   plain numbers, not `$` text, so a spreadsheet can total them.
+   **Every export ends with a grand total row** for the columns a sum means
+   something in: On hand / Available / Committed / On order on the Count
+   tab, Ordered / Shipped / To count / Pulled on Open orders, and On hand /
+   Count / Adjust by / Adjust $ on the Sheet. **Avg cost has no total** — a
+   column of averages added together is not the value of anything — and
+   neither does the Count tab's blank fill-in-by-hand column. The row is
+   labelled `TOTAL (157 lines)` in the first column, and in Excel it is a
+   real number, so a formula can use it. CSV and Excel
    cover the whole list; the PDF stops at `PDF_MAX_ROWS` (2,000) and says so.
    Excel needs `N/compress`; if an account lacks it the page says to use CSV,
    which Excel opens.
@@ -455,7 +463,7 @@ should equal what was keyed. Then repeat the same count — it should report
   floor will tick lines under many other people's names; do not read a
   bucket's tick count as "how much this person has counted."
 - **Someone's ticks or counts are not showing on another device** — first
-  compare the version in each page's footer (`v2026-09-15.3` …): a tab left
+  compare the version in each page's footer (`v2026-09-15.4` …): a tab left
   open from before an upload keeps running the old copy until it is reloaded.
   Then open the Open orders tab (it fetches every device's ticks each time it
   opens, on Reload, and every 30 seconds while showing). If NetSuite refused
