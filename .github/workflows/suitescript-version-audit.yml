@@ -1,0 +1,47 @@
+name: SuiteScript Version Audit (read-only)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+# Deliberately NOT in the netsuite-writes concurrency group: this reads the
+# script list and writes nothing. Sharing the writers' group costs runs --
+# GitHub keeps only ONE pending run per group, so a queued probe is cancelled
+# outright when the nightly chain dispatches its next leg.
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          SYNC_DRY_RUN=true
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+
+      - name: Audit SuiteScript API versions
+        run: python scripts/suitescript_version_audit.py
