@@ -36,6 +36,17 @@ COLOR_LIST = "customlist_bsg_matrix_color"
 SIZE_LIST = "customlist_bsg_matrix_size"
 
 
+class MatrixOptionError(RuntimeError):
+    """A matrix list value could not be created.
+
+    Raised in place of the bare ``NetSuite 400: Bad Request`` the REST client
+    gives, because that message names neither the list nor the value: the
+    2026-09-22 nightly died on one unnamed size and took all 1,332 net-new
+    styles with it (run 35707265204), leaving nothing to act on. NetSuite puts
+    the real reason in ``o:errorDetails``, so it is carried through here.
+    """
+
+
 def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
@@ -110,7 +121,14 @@ class MatrixOptionResolver:
             return variant, "existing"
         if not self.allow_create:
             return None, "missing"
-        new_id = self.client.create_record(list_type, {"name": name})
+        try:
+            new_id = self.client.create_record(list_type, {"name": name})
+        except Exception as exc:  # noqa: BLE001 - re-raised with the value named
+            detail = getattr(exc, "payload", "")
+            raise MatrixOptionError(
+                f"could not create {list_type} value {name!r}: {exc} "
+                f":: {str(detail)[:400]}"
+            ) from exc
         log.info("Created %s value %r -> internal id %s", list_type, name, new_id)
         self._cache[key] = new_id
         return new_id, "created"
