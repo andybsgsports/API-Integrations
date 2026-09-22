@@ -313,6 +313,24 @@ def is_already_exists(message: str | None) -> bool:
     return "combination of options already exists" in (message or "").lower()
 
 
+def collect_new_options(resolver, style) -> set[str]:
+    """Resolve every colour/size this style's children need; report the new ones.
+
+    Creating when the resolver is live. Raises (``MatrixOptionError``) if
+    NetSuite rejects a value -- the caller decides what that costs, which is
+    the point: it used to cost the entire leg.
+    """
+    would_create: set[str] = set()
+    for sku in style.skus:
+        _cid, cstat = resolver.resolve(COLOR_LIST, sku.color_name)
+        _sid, sstat = resolver.resolve(SIZE_LIST, normalize_size(sku.size))
+        if cstat in ("missing", "created"):
+            would_create.add(f"colour {sku.color_name!r}")
+        if sstat in ("missing", "created"):
+            would_create.add(f"size {normalize_size(sku.size)!r}")
+    return would_create
+
+
 def main() -> int:
     cfg = get_config()
     allow_write = not cfg.sync.dry_run
@@ -377,14 +395,18 @@ def main() -> int:
         )
 
         # Resolve (creating when live) every colour/size the children need.
-        would_create = set()
-        for sku in style.skus:
-            _cid, cstat = resolver.resolve(COLOR_LIST, sku.color_name)
-            _sid, sstat = resolver.resolve(SIZE_LIST, normalize_size(sku.size))
-            if cstat in ("missing", "created"):
-                would_create.add(f"colour {sku.color_name!r}")
-            if sstat in ("missing", "created"):
-                would_create.add(f"size {normalize_size(sku.size)!r}")
+        # Guarded like every other write in this loop: NetSuite rejecting ONE
+        # option value used to raise straight out of main() and abandon the
+        # whole leg -- 1,332 net-new styles got no parent because a single
+        # size 400'd (2026-09-22, run 35707265204). A style whose grid can't
+        # be resolved is skipped, because creating its parent would leave it
+        # an incomplete grid; the rest of the night proceeds.
+        try:
+            would_create = collect_new_options(resolver, style)
+        except Exception as exc:  # noqa: BLE001 - one style must not kill the leg
+            failures += 1
+            print(f"  OPTION FAILED for {style_name}: {str(exc)[:300]}")
+            continue
         done += 1
         print(f"\n=== {style_name}: {len(style.skus)} child(ren) ===")
         if would_create:

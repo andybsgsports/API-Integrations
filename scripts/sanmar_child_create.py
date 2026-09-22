@@ -83,6 +83,13 @@ def main() -> int:
         print("\nsanmar child create: DRY RUN -- nothing posted")
         return 0
 
+    # externalId -> the item NAME we asked NetSuite for, so a rejection can
+    # name the colliding item instead of only an opaque external id. The
+    # 2026-09-22 run logged 227 "Uniqueness error - there is already an item
+    # with that name or name/parent combination" with no way to tell WHICH
+    # name collided (run 35707265204).
+    name_by_ext = {str(pl.get("externalId")): str(pl.get("itemId") or "?")
+                   for pl in payloads}
     created = already = failures = 0
     for i in range(0, len(payloads), RESTLET_BATCH):
         batch = payloads[i:i + RESTLET_BATCH]
@@ -102,7 +109,9 @@ def main() -> int:
                     already += 1
                     continue
                 failures += 1
-                print(f"  CHILD FAILED {r.get('externalId')}: {msg[:140]}")
+                ext = str(r.get("externalId"))
+                print(f"  CHILD FAILED {ext} "
+                      f"[{name_by_ext.get(ext, '?')}]: {msg[:140]}")
             else:
                 created += 1
 
