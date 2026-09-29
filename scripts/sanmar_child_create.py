@@ -29,6 +29,7 @@ from sanmar_parent_create import _child_payload, _resolve_feed, _uom_ids
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
+from sanmar_netsuite.netsuite.collisions import find_name_collisions, split_payloads
 from sanmar_netsuite.netsuite.matrix_options import MatrixOptionResolver
 from sanmar_netsuite.netsuite.merge import prepare_merge
 from sanmar_netsuite.netsuite.repository import child_external_id
@@ -79,8 +80,27 @@ def main() -> int:
     for name, n in sorted(per_style.items(), key=lambda kv: -kv[1])[:10]:
         print(f"    {name}: {n}")
 
+    # Read-only pre-flight (SuiteQL SELECT only, runs in dry-run too): NetSuite
+    # rejects a child whose name already exists under the parent even when the
+    # existing record is inactive or has another external id, which the
+    # externalId check above cannot see. 2026-09-29: 324 such rejections failed
+    # the whole night. Skip and REPORT them instead of posting and failing.
+    collisions = find_name_collisions(
+        client, [str(pl.get("itemId") or "") for pl in payloads]
+    )
+    payloads, skipped = split_payloads(payloads, collisions)
+    if skipped:
+        print(f"\n{len(skipped)} child(ren) SKIPPED -- name already exists in NetSuite "
+              "(needs a human look; nothing was posted for these):")
+        for pl, hit in skipped[:50]:
+            print(f"  NAME COLLISION [{pl.get('itemId')}] existing id {hit['id']} "
+                  f"'{hit['itemid']}' inactive={hit['inactive']}")
+        if len(skipped) > 50:
+            print(f"  ... and {len(skipped) - 50} more")
+
     if not allow_write:
-        print("\nsanmar child create: DRY RUN -- nothing posted")
+        print(f"\nsanmar child create: DRY RUN -- nothing posted "
+              f"({len(payloads)} would post, {len(skipped)} name collisions skipped)")
         return 0
 
     # externalId -> the item NAME we asked NetSuite for, so a rejection can
@@ -117,6 +137,7 @@ def main() -> int:
 
     print(f"\nsanmar child create: created {created} child(ren); "
           f"already present under another external id: {already}; "
+          f"skipped for name collision: {len(skipped)}; "
           f"failures: {failures}")
     return exit_code("sanmar child create", failures, failures,
                      created + failures)
