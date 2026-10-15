@@ -97,6 +97,11 @@ Omit `--file` and the tool downloads the right file from SFTP automatically.
 Every write path honors `SYNC_DRY_RUN` (default **true**) — flip it to `false`
 only once you've verified payloads.
 
+There is also a login-required **Inventory Count** Suitelet
+(`suitescript/bsg_inventory_count_sl.js`) for keying physical counts from a
+phone, tablet or desktop and posting them as an Inventory Adjustment; see
+[`docs/INVENTORY_COUNT.md`](docs/INVENTORY_COUNT.md).
+
 ---
 
 ## How it's built
