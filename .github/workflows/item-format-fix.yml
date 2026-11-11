@@ -3,7 +3,7 @@ name: Item Format Fix (item writes)
 # One-time corrections that bring EXISTING items up to Andy's item format
 # (sandbox review, 2026-11-11): Display Name without the style code, the
 # Color-then-Size parent name template, the vendor line Purchase Price,
-# Suggested Team Price, and blank Manufacturer / UPC. See
+# and blank Manufacturer / UPC. Price levels are never written. See
 # scripts/item_format_fix.py. Manual dispatch only -- it is not part of the
 # nightly chain. Always dry-run first, then a small max_items batch.
 
@@ -15,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       steps:
-        description: "Comma list: displayname,template,vendorprice,teamprice,manufacturer"
+        description: "Comma list: displayname,template,vendorprice,manufacturer"
         required: true
-        default: "displayname,template,vendorprice,teamprice"
+        default: "displayname,template,vendorprice"
       dry_run:
         description: "Dry run (true = report only, writes nothing)"
         required: true

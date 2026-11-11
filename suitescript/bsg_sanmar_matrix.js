@@ -18,7 +18,7 @@
  *       "department": "Apparel", "class": "Tops : Tees",
  *       "location": "Badger Sporting Goods",
  *       "preferredLocation": "Badger Sporting Goods", "costingMethod": "AVG",
- *       "cost": 3.49, "basePrice": 6.00, "teamPrice": 5.40,
+ *       "cost": 3.49, "basePrice": 6.00,
  *       "manufacturer": "Port & Co", "parentId": "50286", "currency": "US Dollar"
  *   }, ... ] }
  *
@@ -31,8 +31,6 @@
 define(["N/record", "N/search"], (record, search) => {
   const COLOR_LIST = "customlist_bsg_matrix_color";
   const SIZE_LIST = "customlist_bsg_matrix_size";
-  // "Suggested Team Price" -- internal id 4 in sandbox and production alike.
-  const TEAM_PRICE_LEVEL = "4";
 
   const cache = {};
   const memo = (key, fn) => (key in cache ? cache[key] : (cache[key] = fn()));
@@ -194,24 +192,9 @@ define(["N/record", "N/search"], (record, search) => {
         /* price sublist varies by config; reconcile sets it as a fallback */
       }
     }
-    // Suggested Team Price (price level 4) = 90% of Base, sent by the caller
-    // (Andy, 2026-11-11: every pipeline item gets it, like the older items).
-    // About 115,700 of 155,342 pipeline-created items had no value at this
-    // level. The line is found by its price level, never by position, and is
-    // guarded on its own: if this account computes the level from a formula
-    // and refuses a typed value, the rest of the item still saves.
-    if (it.teamPrice !== undefined && it.teamPrice !== null && it.teamPrice !== "") {
-      try {
-        const line = rec.findSublistLineWithValue({
-          sublistId: "price1", fieldId: "pricelevel", value: TEAM_PRICE_LEVEL,
-        });
-        if (line >= 0) {
-          rec.setSublistValue({ sublistId: "price1", fieldId: "price_1_", line: line, value: it.teamPrice });
-        }
-      } catch (e) {
-        /* level not on this item, or formula-driven in this account */
-      }
-    }
+    // Only Base Price is ever written. The other price levels (10% Off, Team,
+    // Team Contracts) are calculated by NetSuite from Base; Andy, 2026-11-11:
+    // "only change/add base price....not price levels".
   }
 
   function createChild(it) {

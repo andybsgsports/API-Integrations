@@ -1,13 +1,17 @@
 """One-time corrections that bring EXISTING items up to Andy's item format.
 
+Price levels are never written here. Andy, 2026-11-11: "only change/add base
+price....not price levels" -- NetSuite calculates 10% Off, Team and Team
+Contracts from Base Price. (An earlier Suggested Team Price step was removed.)
+
 Andy's sandbox review (2026-11-11) of the 155,342 items the pipeline had
 created found them structurally right (names, matrix links, vendor, accounts)
-but off-format in five ways. The create path now births items correctly; this
+but off-format in several ways. The create path now births items correctly; this
 script repairs what is already there. Each step is independent, diff-aware,
 honours ``SYNC_DRY_RUN`` and is capped by ``UPDATE_MAX_ITEMS`` (per step), so
 it can be proven on a small batch before a full run.
 
-Steps (``FORMAT_FIX_STEPS``, comma list; default = the first four):
+Steps (``FORMAT_FIX_STEPS``, comma list; default = the first three):
 
 ``displayname``
     "Display name should not have the style number at the end. match
@@ -22,13 +26,6 @@ Steps (``FORMAT_FIX_STEPS``, comma list; default = the first four):
     Fills the PREFERRED vendor line's blank Purchase Price from the item's
     cost (126,781 blank lines). Fill-blanks-only: a price someone entered on a
     vendor line is never overwritten.
-``teamprice``
-    Suggested Team Price (level 4) = 90% of Base on items that have a Base
-    Price but no Team price (~115,700). Goes through the matrix RESTlet, the
-    only writer that can add a price-level line to an existing item (a REST
-    PATCH can only edit a line that already exists). The first batch is read
-    back; if NetSuite kept none of it the step stops and says so, rather than
-    reporting 115,000 writes that did not happen.
 ``manufacturer``
     Fills blank Manufacturer (and blank UPC, when the feed carries a GTIN) on
     SanMar items the nightly update cannot reach because it matches by UPC.
@@ -40,7 +37,6 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Callable, Iterator
-from decimal import ROUND_HALF_UP, Decimal
 
 from concurrent_writes import write_records
 from run_status import exit_code
@@ -48,7 +44,7 @@ from run_status import exit_code
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 
-DEFAULT_STEPS = ("displayname", "template", "vendorprice", "teamprice")
+DEFAULT_STEPS = ("displayname", "template", "vendorprice")
 ALL_STEPS = (*DEFAULT_STEPS, "manufacturer")
 
 #: Andy's standing rule: a matrix child is named Style-Color-Size, colour
@@ -56,11 +52,8 @@ ALL_STEPS = (*DEFAULT_STEPS, "manufacturer")
 #: child added later by hand on the parent's Matrix subtab came out
 #: Style-Size-Color (3,927 of 5,255 sandbox parents, 2026-11-11).
 MATRIX_NAME_TEMPLATE = "{itemid}-{custitem_bsg_color}-{custitem_bsg_size}"
-BASE_PRICE_LEVEL = 1
-TEAM_PRICE_LEVEL = 4
 DISPLAY_NAME_MAX = 60  # the length the create path has always written
 ID_WINDOW = 50_000     # SuiteQL caps one result set at 100k rows
-RESTLET_BATCH = 25
 
 
 # --- pure rules (unit-tested) -------------------------------------------------
@@ -120,16 +113,6 @@ def template_needs_fix(template: str | None) -> bool:
         return False
     tokens = re.findall(r"\{[^}]+\}", t)
     return sorted(tokens) == sorted(re.findall(r"\{[^}]+\}", MATRIX_NAME_TEMPLATE))
-
-
-def team_price(base: float | str | None) -> float | None:
-    """Suggested Team Price: 90% of Base, to the cent; None without a Base."""
-    if base in (None, ""):
-        return None
-    value = Decimal(str(base))
-    if value <= 0:
-        return None
-    return float((value * Decimal("0.9")).quantize(Decimal("0.01"), ROUND_HALF_UP))
 
 
 def vendor_lines_with_price(lines: list[dict], cost: float | str | None) -> list[dict] | None:
@@ -267,70 +250,6 @@ def fix_vendor_prices(client, allow_write: bool, max_items: int) -> int:
                   "vendor line price")
 
 
-def fix_team_prices(client, cfg, allow_write: bool, max_items: int) -> int:
-    todo: list[tuple[str, str, float]] = []  # (internal id, external id, team price)
-    for r in _scan(
-        client,
-        "SELECT i.id, i.externalid, p.unitprice FROM item i "
-        f"JOIN pricing p ON p.item = i.id AND p.pricelevel = {BASE_PRICE_LEVEL}",
-        "i.externalid IS NOT NULL AND p.unitprice > 0 AND NOT EXISTS ("
-        f"SELECT 1 FROM pricing t WHERE t.item = i.id AND t.pricelevel = {TEAM_PRICE_LEVEL} "
-        "AND t.unitprice > 0)",
-        alias="i",
-    ):
-        price = team_price(r.get("unitprice"))
-        if price is not None:
-            todo.append((str(r["id"]), str(r["externalid"]), price))
-    todo = _capped(todo, max_items, "team price")
-    for rid, ext, price in todo[:5]:
-        print(f"  e.g. item {rid} ({ext}): Suggested Team Price -> {price:.2f}")
-    if not allow_write:
-        print(f"team price: WOULD write (dry run) {len(todo):,}")
-        return 0
-
-    sent = failures = 0
-    for i in range(0, len(todo), RESTLET_BATCH):
-        batch = todo[i:i + RESTLET_BATCH]
-        try:
-            resp = client.call_restlet(
-                cfg.netsuite.matrix_script_id, cfg.netsuite.matrix_deploy_id,
-                {"items": [{"externalId": ext, "teamPrice": price}
-                           for _rid, ext, price in batch]},
-            )
-        except Exception as exc:  # noqa: BLE001
-            failures += len(batch)
-            print(f"  RESTLET CALL FAILED: {str(exc)[:200]}")
-            continue
-        for res in resp.get("results", []):
-            if res.get("status") == "error":
-                failures += 1
-                if failures <= 10:
-                    print(f"  TEAM PRICE FAILED {res.get('externalId')}: "
-                          f"{str(res.get('message') or '')[:140]}")
-            else:
-                sent += 1
-        if i == 0 and not _team_price_stuck(client, [rid for rid, _e, _p in batch]):
-            # The RESTlet guards the price line, so a refused value comes back
-            # as a clean "updated". Believe the catalogue, not the response.
-            print("team price: STOPPED after the first batch -- NetSuite accepted the "
-                  "request but stored no Suggested Team Price. Either the updated "
-                  "RESTlet is not deployed yet, or this account computes price level "
-                  f"{TEAM_PRICE_LEVEL} from a formula and ignores a typed value. "
-                  "Nothing further was sent.")
-            return max(failures, 1)
-    print(f"team price: wrote {sent:,}; failures: {failures:,}")
-    return failures
-
-
-def _team_price_stuck(client, item_ids: list[str]) -> bool:
-    rows = client.suiteql(
-        "SELECT COUNT(*) AS n FROM pricing "
-        f"WHERE pricelevel = {TEAM_PRICE_LEVEL} AND unitprice > 0 "
-        f"AND item IN ({','.join(item_ids)})"
-    )
-    return int((rows[0].get("n") if rows else 0) or 0) > 0
-
-
 def fix_manufacturers(client, cfg, allow_write: bool, max_items: int) -> int:
     # Imported here: only this step needs the SanMar feed (SFTP credentials).
     from sanmar_parent_create import _resolve_feed
@@ -386,7 +305,6 @@ def main() -> int:
         "displayname": lambda: fix_display_names(client, allow_write, max_items),
         "template": lambda: fix_templates(client, allow_write, max_items),
         "vendorprice": lambda: fix_vendor_prices(client, allow_write, max_items),
-        "teamprice": lambda: fix_team_prices(client, cfg, allow_write, max_items),
         "manufacturer": lambda: fix_manufacturers(client, cfg, allow_write, max_items),
     }
     failures = 0

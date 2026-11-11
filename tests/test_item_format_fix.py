@@ -15,7 +15,6 @@ from item_format_fix import (  # noqa: E402
     MATRIX_NAME_TEMPLATE,
     display_target,
     strip_style_suffix,
-    team_price,
     template_needs_fix,
     vendor_lines_with_price,
 )
@@ -76,14 +75,6 @@ def test_only_two_option_templates_in_the_wrong_order_are_rewritten():
     assert not template_needs_fix("{itemid}-{custitem_bsg_size}")
     assert not template_needs_fix("1389660-{custitem_bsg_color}-{custitem_bsg_size}")
     assert not template_needs_fix(None)
-
-
-def test_team_price_is_ninety_percent_of_base_to_the_cent():
-    assert team_price(6.00) == 5.40            # PC54, as the older items carry
-    assert team_price("6.98") == 6.28          # DT2500 Small
-    assert team_price(12.98) == 11.68
-    assert team_price(0.05) == 0.05            # 0.045 rounds half up
-    assert team_price(None) is None and team_price(0) is None
 
 
 def _line(vendor, preferred, price=None, code="DT2500"):
