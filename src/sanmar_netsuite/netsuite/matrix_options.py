@@ -51,6 +51,11 @@ def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _mentions_abbreviation(exc: Exception) -> bool:
+    text = f"{exc} {getattr(exc, 'payload', '')}"
+    return "abbreviation" in text.lower()
+
+
 def normalize_option_name(name: str) -> str:
     """Canonical key for "is this the same option value?".
 
@@ -122,7 +127,7 @@ class MatrixOptionResolver:
         if not self.allow_create:
             return None, "missing"
         try:
-            new_id = self.client.create_record(list_type, {"name": name})
+            new_id = self._create_value(list_type, name)
         except Exception as exc:  # noqa: BLE001 - re-raised with the value named
             detail = getattr(exc, "payload", "")
             raise MatrixOptionError(
@@ -132,6 +137,34 @@ class MatrixOptionResolver:
         log.info("Created %s value %r -> internal id %s", list_type, name, new_id)
         self._cache[key] = new_id
         return new_id, "created"
+
+    def _create_value(self, list_type: str, name: str) -> str:
+        """Create a list value, supplying an Abbreviation when NetSuite asks.
+
+        A name-only create is what has always worked, so it stays the first
+        attempt. But some values come back "Please enter value(s) for:
+        Abbreviation" -- size ``0`` and colour ``Oat`` did every night from
+        2026-11-06, which kept styles MM400x / W960 / W96x from ever being
+        created. On that specific complaint, retry with the name as the
+        abbreviation, then with a shortened, uniquified one (the same fallback
+        ``color_correction_apply.create_color_value`` uses) in case the
+        abbreviation itself collides.
+        """
+        try:
+            return str(self.client.create_record(list_type, {"name": name}))
+        except Exception as exc:  # noqa: BLE001 - inspected, re-raised if unrelated
+            if not _mentions_abbreviation(exc):
+                raise
+        try:
+            return str(self.client.create_record(
+                list_type, {"name": name, "abbreviation": name}
+            ))
+        except Exception as exc:  # noqa: BLE001
+            if not _mentions_abbreviation(exc):
+                raise
+        return str(self.client.create_record(
+            list_type, {"name": name, "abbreviation": f"{name[:12]}~"}
+        ))
 
     def _find(self, list_type: str, name: str) -> str | None:
         # Retired duplicate values are marked inactive (color consolidation);

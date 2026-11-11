@@ -1,0 +1,87 @@
+name: Item Format Fix (item writes)
+
+# One-time corrections that bring EXISTING items up to Andy's item format
+# (sandbox review, 2026-11-11): Display Name without the style code, the
+# Color-then-Size parent name template, the vendor line Purchase Price,
+# Suggested Team Price, and blank Manufacturer / UPC. See
+# scripts/item_format_fix.py. Manual dispatch only -- it is not part of the
+# nightly chain. Always dry-run first, then a small max_items batch.
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "Comma list: displayname,template,vendorprice,teamprice,manufacturer"
+        required: true
+        default: "displayname,template,vendorprice,teamprice"
+      dry_run:
+        description: "Dry run (true = report only, writes nothing)"
+        required: true
+        default: "true"
+      max_items:
+        description: "Cap on item writes PER STEP (0 = no cap)"
+        required: false
+        default: "25"
+
+# All NetSuite item-writers share one concurrency group so they QUEUE
+# instead of running at once -- the sandbox throttles hard (429s) when
+# multiple writers overlap. cancel-in-progress:false = wait, don't kill.
+concurrency:
+  group: netsuite-writes
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Resolve run parameters
+        run: |
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+          [ "$DRY_RUN" = "false" ] || DRY_RUN="true"
+          echo "DRY_RUN=$DRY_RUN" >> "$GITHUB_ENV"
+          echo "MAX_ITEMS=${{ github.event.inputs.max_items || '25' }}" >> "$GITHUB_ENV"
+          echo "Resolved: steps=${{ github.event.inputs.steps }} dry_run=$DRY_RUN max_items=${{ github.event.inputs.max_items || '25' }}"
+      - name: Write .env from repo secrets
+        run: |
+          cat > .env <<EOF2
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          NETSUITE_ACCOUNT_ID=${{ secrets.NETSUITE_ACCOUNT_ID }}
+          NETSUITE_CONSUMER_KEY=${{ secrets.NETSUITE_CONSUMER_KEY }}
+          NETSUITE_CONSUMER_SECRET=${{ secrets.NETSUITE_CONSUMER_SECRET }}
+          NETSUITE_TOKEN_ID=${{ secrets.NETSUITE_TOKEN_ID }}
+          NETSUITE_TOKEN_SECRET=${{ secrets.NETSUITE_TOKEN_SECRET }}
+          NETSUITE_MATRIX_SCRIPT_ID=${{ secrets.NETSUITE_MATRIX_SCRIPT_ID }}
+          NETSUITE_MATRIX_DEPLOY_ID=${{ secrets.NETSUITE_MATRIX_DEPLOY_ID }}
+          SYNC_DRY_RUN=${DRY_RUN}
+          NETSUITE_ALLOW_PRODUCTION_WRITES=false
+          EOF2
+      - name: NetSuite auth preflight (no secrets printed)
+        run: python scripts/ns_auth_check.py
+      - name: Run item format fix
+        env:
+          UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          FORMAT_FIX_STEPS: ${{ github.event.inputs.steps }}
+        run: python scripts/item_format_fix.py
+      - name: Open issue on failure
+        if: failure()
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues" \
+            -d "{\"title\":\"Workflow failed: ${{ github.workflow }}\",\"body\":\"Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

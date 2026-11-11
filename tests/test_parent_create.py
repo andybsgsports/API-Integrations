@@ -109,14 +109,48 @@ def test_missing_weight_is_left_unset_not_zeroed():
     assert _child_payload(_style(), _sku(piece_weight=None))["weight"] is None
 
 
-def test_display_name_keeps_the_style_code_descriptions_drop_it():
-    # Andy's spec (2026-08-05 pilot review): Display Name keeps the style code
-    # ("... Crewneck PC90"); Sales/Purchase Description carry the same title
-    # WITHOUT it -- the marketing copy belongs to the PARENT's Store
-    # Description instead.
+def test_display_name_matches_the_description_no_style_code():
+    # Andy, 2026-11-11 (sandbox review): "Display name should not have the
+    # style number at the end. match description." This replaces the
+    # 2026-08-05 pilot spec that kept the code ("... Crewneck PC90").
     p = _child_payload(_style(), _sku())
-    assert p["displayName"] == "Port & Company Essential Fleece Crewneck PC90"
-    assert p["description"] == "Port & Company Essential Fleece Crewneck"
+    assert p["displayName"] == "Port & Company Essential Fleece Crewneck"
+    assert p["displayName"] == p["description"]
+
+
+def test_child_is_born_with_its_brand_as_manufacturer():
+    # The nightly field update reaches items by UPC only, so a SKU with no
+    # GTIN in the feed never got a Manufacturer (779 sandbox items).
+    assert _child_payload(_style(brand="Port & Company"), _sku())["manufacturer"] \
+        == "Port & Company"
+    assert _child_payload(_style(brand=""), _sku())["manufacturer"] is None
+
+
+class _ParentClient:
+    def __init__(self, refuse_template: bool) -> None:
+        self.refuse_template = refuse_template
+        self.bodies: list[dict] = []
+
+    def create_record(self, record_type: str, body: dict) -> str:
+        self.bodies.append(body)
+        if self.refuse_template and "matrixItemNameTemplate" in body:
+            raise RuntimeError("Invalid field: matrixItemNameTemplate")
+        return "777"
+
+
+def test_parent_is_created_with_the_color_then_size_name_template():
+    from sanmar_parent_create import MATRIX_NAME_TEMPLATE, _create_parent
+    client = _ParentClient(refuse_template=False)
+    assert _create_parent(client, {"itemId": "PC90"}) == "777"
+    assert client.bodies[0]["matrixItemNameTemplate"] == MATRIX_NAME_TEMPLATE
+    assert MATRIX_NAME_TEMPLATE.index("color") < MATRIX_NAME_TEMPLATE.index("size")
+
+
+def test_a_refused_template_never_costs_the_parent():
+    from sanmar_parent_create import _create_parent
+    client = _ParentClient(refuse_template=True)
+    assert _create_parent(client, {"itemId": "PC90"}) == "777"
+    assert "matrixItemNameTemplate" not in client.bodies[-1]
 
 
 def test_child_payload_carries_weight_unit_with_weight():

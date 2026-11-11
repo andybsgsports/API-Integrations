@@ -118,13 +118,15 @@ def clean_html(text: str | None) -> str:
 
 
 def display_name(style_name: str, title: str) -> str:
-    """Name fields keep the style code; description fields drop it.
+    """Display Name = the clean title, the same text as the descriptions.
 
-    A style with no title in the feed gets the bare code -- never the code
-    twice, which is what naive concatenation produces.
+    Andy, 2026-11-11: "Display name should not have the style number at the
+    end. match description." (replaces the 2026-08-05 keep-the-code spec). A
+    style with no title in the feed still gets the bare code -- a name field
+    is never left empty.
     """
     base = (title or "").strip()
-    return f"{base} {style_name}".strip() if base else style_name
+    return base or style_name
 
 
 def child_fields(p: dict) -> dict[str, object]:

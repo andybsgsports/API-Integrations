@@ -71,7 +71,12 @@ def main() -> int:
                 continue
             if max_items and len(payloads) >= max_items:
                 break
-            payloads.append(_child_payload(style, sku, resolver, uom))
+            payload = _child_payload(style, sku, resolver, uom)
+            # The parent this run already resolved (case-insensitively, and
+            # preferring the one that has children). Sent as an id so the
+            # RESTlet cannot re-resolve the bare NAME to an empty duplicate.
+            payload["parentId"] = parent_refs[style.style]
+            payloads.append(payload)
             per_style[style.style] = per_style.get(style.style, 0) + 1
 
     print(f"{len(payloads)} new child(ren) under {len(per_style)} existing "
@@ -90,7 +95,7 @@ def main() -> int:
     # name collided (run 35707265204).
     name_by_ext = {str(pl.get("externalId")): str(pl.get("itemId") or "?")
                    for pl in payloads}
-    created = already = failures = 0
+    created = updated = already = failures = 0
     for i in range(0, len(payloads), RESTLET_BATCH):
         batch = payloads[i:i + RESTLET_BATCH]
         try:
@@ -112,14 +117,21 @@ def main() -> int:
                 ext = str(r.get("externalId"))
                 print(f"  CHILD FAILED {ext} "
                       f"[{name_by_ext.get(ext, '?')}]: {msg[:140]}")
+            elif r.get("status") == "updated":
+                # The RESTlet found this external id already on an item and
+                # only re-applied its fields. That is NOT a creation: counting
+                # it as one made the log claim ~3,600 new children a night
+                # while the catalogue never grew (2026-11-06 .. 11-11).
+                updated += 1
             else:
                 created += 1
 
     print(f"\nsanmar child create: created {created} child(ren); "
+          f"already existed, fields re-applied: {updated}; "
           f"already present under another external id: {already}; "
           f"failures: {failures}")
     return exit_code("sanmar child create", failures, failures,
-                     created + failures)
+                     created + updated + failures)
 
 
 if __name__ == "__main__":
