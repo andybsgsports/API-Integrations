@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from item_format_fix import MATRIX_NAME_TEMPLATE, team_price
+from item_format_fix import MATRIX_NAME_TEMPLATE
 from native_pricing import WEIGHT_UNIT_LB_ID, base_price, weight_display
 from pricing_ownership import VENDOR_SANMAR
 from sanmar_field_update import (
@@ -271,8 +271,6 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
         "upc": sku.gtin,
         "cost": None if regular_cost is None else float(regular_cost),
         "basePrice": base,
-        # Suggested Team Price = 90% of Base (Andy, 2026-11-11).
-        "teamPrice": team_price(base),
         "weight": weight_lb,
         # Weight unit rides with the number and is always pounds -- one
         # consistent unit across the catalogue (see native_pricing).

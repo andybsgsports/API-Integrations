@@ -143,14 +143,14 @@ These rules now apply at creation, and `scripts/item_format_fix.py` (workflow
 | Rule | At creation | Existing items |
 | --- | --- | --- |
 | Display Name = the descriptions' clean title, **no style code on the end** (replaces the 2026-08-05 spec) | `_child_payload`, parent body | step `displayname` |
-| Suggested Team Price (level 4) = 90% of Base | RESTlet `teamPrice` | step `teamprice` |
+| Price levels other than Base | never written; NetSuite calculates them from Base Price (Andy, 2026-11-11) | never written |
 | Vendor line Purchase Price = cost on the preferred vendor line | RESTlet vendor seed | step `vendorprice` (fill-blanks-only) |
 | Parent name template is Color then Size | `_create_parent` | step `template` |
 | Manufacturer = brand, set at birth | RESTlet `manufacturer` | step `manufacturer` (also fills blank UPC from the feed) |
 | Class comes from SanMar's own product category | `class_for_category` (unchanged) | workflow **SanMar Department/Class Fix** |
 
 The RESTlet (`suitescript/bsg_sanmar_matrix.js`) changed, so it must be
-re-uploaded to the File Cabinet before `teamPrice`, `manufacturer`, the vendor
+re-uploaded to the File Cabinet before `manufacturer`, the vendor
 line price and `parentId` take effect. Until then the new payload keys are
 simply ignored; nothing breaks.
 
