@@ -86,13 +86,14 @@ def _resolve_parent_ids(client, names: list[str]) -> dict[str, str]:
             ):
                 counts[str(r["parent"])] = int(r.get("n") or 0)
         for name, hits in ambiguous.items():
-            out[name] = min(
-                hits,
-                key=lambda h, name=name: (
-                    -counts.get(h[0], 0), h[1] != name, int(h[0]),
-                ),
-            )[0]
+            out[name] = min(hits, key=lambda h: _twin_rank(h, name, counts))[0]
     return out
+
+
+def _twin_rank(hit: tuple[str, str], name: str, counts: dict[str, int]) -> tuple[int, bool, int]:
+    """Sort key among same-named parents: most children, exact spelling, oldest."""
+    pid, itemid = hit
+    return (-counts.get(pid, 0), itemid != name, int(pid))
 
 
 def existing_child_combos(client, parent_id: str) -> set[tuple[str, str]]:
