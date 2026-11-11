@@ -133,3 +133,44 @@ The gaps are real and tracked in `vendor_pipeline.PIPELINE_GAPS`:
   anything is created.
 
 Run `python scripts/vendor_pipeline.py --list` to see this live.
+
+## Item format rules (Andy's sandbox review, 2026-11-11)
+
+Andy checked the 155,342 SanMar items in the sandbox against his item format.
+These rules now apply at creation, and `scripts/item_format_fix.py` (workflow
+**Item Format Fix**) corrects items created before them:
+
+| Rule | At creation | Existing items |
+| --- | --- | --- |
+| Display Name = the descriptions' clean title, **no style code on the end** (replaces the 2026-08-05 spec) | `_child_payload`, parent body | step `displayname` |
+| Suggested Team Price (level 4) = 90% of Base | RESTlet `teamPrice` | step `teamprice` |
+| Vendor line Purchase Price = cost on the preferred vendor line | RESTlet vendor seed | step `vendorprice` (fill-blanks-only) |
+| Parent name template is Color then Size | `_create_parent` | step `template` |
+| Manufacturer = brand, set at birth | RESTlet `manufacturer` | step `manufacturer` (also fills blank UPC from the feed) |
+| Class comes from SanMar's own product category | `class_for_category` (unchanged) | workflow **SanMar Department/Class Fix** |
+
+The RESTlet (`suitescript/bsg_sanmar_matrix.js`) changed, so it must be
+re-uploaded to the File Cabinet before `teamPrice`, `manufacturer`, the vendor
+line price and `parentId` take effect. Until then the new payload keys are
+simply ignored; nothing breaks.
+
+### The phantom "created" count
+
+From at least 2026-11-06 the create leg logged ~3,600 children "created" and
+~330 failed every night while the catalogue did not grow. Three causes, all
+fixed:
+
+1. **Updates counted as creations** -- `sanmar_child_create` counted every
+   non-error RESTlet result. It now reports `updated` separately.
+2. **Empty duplicate parents** -- parents were looked up by exact-case name, so
+   `ST650` missed the existing `St650`, a second empty parent was created, and
+   its "missing" children were re-sent nightly. Lookup is now case-insensitive
+   and prefers the parent that has children; the child payload carries that
+   `parentId`. (81 empty parents remain in the sandbox for review.)
+3. **Retired duplicate colours** -- the already-exists check mapped a colour
+   name to ONE list id and could pick an inactive duplicate ("White" 6 vs
+   1384), miss the existing child, and re-create it into a name collision. It
+   now matches every id carrying the (normalised) name.
+
+Also: a list value NetSuite refuses for a missing Abbreviation (size `0`,
+colour `Oat`) is retried with one, which unblocks styles MM400x / W960 / W96x.

@@ -18,7 +18,8 @@
  *       "department": "Apparel", "class": "Tops : Tees",
  *       "location": "Badger Sporting Goods",
  *       "preferredLocation": "Badger Sporting Goods", "costingMethod": "AVG",
- *       "cost": 3.49, "basePrice": 6.00, "currency": "US Dollar"
+ *       "cost": 3.49, "basePrice": 6.00, "teamPrice": 5.40,
+ *       "manufacturer": "Port & Co", "parentId": "50286", "currency": "US Dollar"
  *   }, ... ] }
  *
  * Response: { "results": [ { "externalId", "status": created|updated|error,
@@ -30,6 +31,8 @@
 define(["N/record", "N/search"], (record, search) => {
   const COLOR_LIST = "customlist_bsg_matrix_color";
   const SIZE_LIST = "customlist_bsg_matrix_size";
+  // "Suggested Team Price" -- internal id 4 in sandbox and production alike.
+  const TEAM_PRICE_LEVEL = "4";
 
   const cache = {};
   const memo = (key, fn) => (key in cache ? cache[key] : (cache[key] = fn()));
@@ -96,6 +99,8 @@ define(["N/record", "N/search"], (record, search) => {
     setIf(rec, "purchasedescription", it.description);
     setIf(rec, "vendorname", it.vendorName);
     setIf(rec, "upccode", it.upc);
+    // Native Manufacturer = the brand (Andy: never the distributor).
+    setIf(rec, "manufacturer", it.manufacturer);
     setIf(rec, "incomeaccount", it.incomeAccount && resolveAccount(it.incomeAccount));
     setIf(rec, "cogsaccount", it.cogsAccount && resolveAccount(it.cogsAccount));
     setIf(rec, "assetaccount", it.assetAccount && resolveAccount(it.assetAccount));
@@ -168,6 +173,15 @@ define(["N/record", "N/search"], (record, search) => {
           if (it.vendorName) {
             rec.setSublistValue({ sublistId: "itemvendor", fieldId: "vendorcode", line: 0, value: it.vendorName });
           }
+          // The vendor line's own Purchase Price. The item-level cost was
+          // filled but this was left blank on 126,781 of 167,761 vendor
+          // lines (sandbox, 2026-11-11). Guarded on its own: a refused price
+          // must not undo the vendor + preferred flag set just above.
+          if (it.cost !== undefined && it.cost !== null && it.cost !== "") {
+            try {
+              rec.setSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: 0, value: it.cost });
+            } catch (e) { /* item_format_fix.py --steps vendorprice backfills */ }
+          }
         }
       } catch (e) {
         /* vendors sublist shape varies by config; vendor_sublist.py backfills */
@@ -180,10 +194,31 @@ define(["N/record", "N/search"], (record, search) => {
         /* price sublist varies by config; reconcile sets it as a fallback */
       }
     }
+    // Suggested Team Price (price level 4) = 90% of Base, sent by the caller
+    // (Andy, 2026-11-11: every pipeline item gets it, like the older items).
+    // About 115,700 of 155,342 pipeline-created items had no value at this
+    // level. The line is found by its price level, never by position, and is
+    // guarded on its own: if this account computes the level from a formula
+    // and refuses a typed value, the rest of the item still saves.
+    if (it.teamPrice !== undefined && it.teamPrice !== null && it.teamPrice !== "") {
+      try {
+        const line = rec.findSublistLineWithValue({
+          sublistId: "price1", fieldId: "pricelevel", value: TEAM_PRICE_LEVEL,
+        });
+        if (line >= 0) {
+          rec.setSublistValue({ sublistId: "price1", fieldId: "price_1_", line: line, value: it.teamPrice });
+        }
+      } catch (e) {
+        /* level not on this item, or formula-driven in this account */
+      }
+    }
   }
 
   function createChild(it) {
-    const parentId = resolveParent(it.style);
+    // Prefer the id the caller already resolved: a bare-name search can land
+    // on an EMPTY duplicate parent that differs only by letter case (St650 vs
+    // ST650), which strands the child away from its siblings.
+    const parentId = it.parentId || resolveParent(it.style);
     if (!parentId) throw new Error("parent matrix item not found for style '" + it.style + "'");
     const colorId = resolveOption(COLOR_LIST, it.color);
     const sizeId = resolveOption(SIZE_LIST, it.size);

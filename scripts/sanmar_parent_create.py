@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from item_format_fix import MATRIX_NAME_TEMPLATE, team_price
 from native_pricing import WEIGHT_UNIT_LB_ID, base_price, weight_display
 from pricing_ownership import VENDOR_SANMAR
 from sanmar_field_update import (
@@ -195,6 +196,26 @@ def _uom_ids(client: NetSuiteClient) -> dict[str, str]:
     return out
 
 
+def _create_parent(client, body: dict):
+    """Create a matrix parent with the Color-then-Size name template.
+
+    The template is new to this payload (2026-11-11) and has not yet been
+    proven against a live create, so it must not be able to cost the parent:
+    if NetSuite rejects the body and names the template, create the parent
+    without it -- ``item_format_fix.py --steps template`` sets it afterwards.
+    """
+    try:
+        return client.create_record(
+            "inventoryItem", {**body, "matrixItemNameTemplate": MATRIX_NAME_TEMPLATE}
+        )
+    except Exception as exc:  # noqa: BLE001 - inspected, re-raised if unrelated
+        if "template" not in f"{exc} {getattr(exc, 'payload', '')}".lower():
+            raise
+        print("  NOTE: parent created WITHOUT the name template "
+              f"(NetSuite refused it: {str(exc)[:100]})")
+        return client.create_record("inventoryItem", body)
+
+
 def _child_payload(style, sku, resolver=None, uom=None) -> dict:
     # Colour/size go to the RESTlet as NAMES it resolves by exact match, so a
     # punctuation variant of an existing list value must be sent as the LIST's
@@ -222,19 +243,24 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
     weight_lb, _weight_unit = weight_display(
         None if sku.piece_weight is None else float(sku.piece_weight)
     )
-    # Andy's spec (2026-08-05 pilot review): Display Name keeps the style code
-    # ("Richardson Printed Five-Panel Trucker 112PFP"); Sales/Purchase
-    # Description carry the same title WITHOUT the code. The long marketing
-    # copy goes to the PARENT's Store Description only (children silently
-    # discard store fields, proven live 2026-07-29).
+    # Andy, 2026-11-11 (sandbox review): "Display name should not have the
+    # style number at the end. match description." This REPLACES the
+    # 2026-08-05 pilot spec that kept the code on the Display Name -- Display
+    # Name, Sales Description and Purchase Description are now one and the
+    # same clean title. The long marketing copy goes to the PARENT's Store
+    # Description only (children silently discard store fields, proven live
+    # 2026-07-29).
     clean_title = store_display_name(style.title, style.style)
-    named_title = display_name_with_style(style.title, style.style)
     # Per-colour feed images (Andy, 2026-08-05: included at creation).
     # primary_url() is the FRONT view -> the storefront's searchable image
     # column; back_url() -> custitem_sanmar_front_image_url, which despite its
     # name holds the BACK view (the true front lives on the atlas Image field,
     # populated by the atlas back-fill from the File Cabinet).
     images = _images_for(style, sku.color_name)
+    base = base_price(
+        None if sku.msrp is None else float(sku.msrp),
+        None if sku.map_price is None else float(sku.map_price),
+    )
     return {
         "externalId": child_external_id(sku.unique_key),
         "itemId": f"{style.style}-{color}-{size}",
@@ -244,10 +270,9 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
         "vendorName": style.style,
         "upc": sku.gtin,
         "cost": None if regular_cost is None else float(regular_cost),
-        "basePrice": base_price(
-            None if sku.msrp is None else float(sku.msrp),
-            None if sku.map_price is None else float(sku.map_price),
-        ),
+        "basePrice": base,
+        # Suggested Team Price = 90% of Base (Andy, 2026-11-11).
+        "teamPrice": team_price(base),
         "weight": weight_lb,
         # Weight unit rides with the number and is always pounds -- one
         # consistent unit across the catalogue (see native_pricing).
@@ -269,8 +294,13 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
         "backFlatUrl": sanmar_image_url(images.back_flat_url) if images else None,
         "swatchUrl": sanmar_image_url(images.color_swatch_url) if images else None,
         **(uom or {}),
-        "displayName": named_title[:60],
+        "displayName": clean_title[:60],
         "description": clean_title,
+        # Native Manufacturer = the brand (Port & Co, Sport-Tek, District),
+        # never the distributor. Born with it: the nightly field update finds
+        # items by UPC, so a SKU the feed carries no GTIN for was never
+        # reached and stayed blank (779 items, sandbox, 2026-11-11).
+        "manufacturer": getattr(style, "brand", None) or None,
         "incomeAccount": DEFAULT_INCOME_ACCOUNT,
         "cogsAccount": DEFAULT_COGS_ACCOUNT,
         "assetAccount": DEFAULT_ASSET_ACCOUNT,
@@ -428,7 +458,7 @@ def main() -> int:
                 # parent body only applies at creation, which left the pilot
                 # parents behind on names/store fields/class/units.
                 patch: dict[str, object] = {
-                    "displayName": named_title[:60],
+                    "displayName": clean_title[:60],
                     "salesDescription": clean_title,
                     "purchaseDescription": clean_title,
                     "storeDisplayName": named_title,
@@ -469,12 +499,15 @@ def main() -> int:
                 # item_web_display_fix.py turns isOnline on once an item has a
                 # real image.
                 "isInactive": False, "isOnline": False,
-                # Andy's spec (2026-08-05): name fields keep the style code,
-                # description fields drop it, and the marketing copy goes ONLY
-                # to Store Description. Store fields live on the PARENT -- the
-                # web-store product page -- because NetSuite silently discards
-                # them on matrix children.
-                "displayName": named_title[:60],
+                **({"manufacturer": style.brand}
+                   if getattr(style, "brand", None) else {}),
+                # Andy, 2026-11-11: Display Name matches the descriptions --
+                # no style code on the end (replaces the 2026-08-05 spec). The
+                # Store Display Name, a separate web-store field, is unchanged.
+                # The marketing copy goes ONLY to Store Description. Store
+                # fields live on the PARENT -- the web-store product page --
+                # because NetSuite silently discards them on matrix children.
+                "displayName": clean_title[:60],
                 "salesDescription": clean_title,
                 "purchaseDescription": clean_title,
                 "storeDisplayName": named_title,
@@ -497,7 +530,7 @@ def main() -> int:
             if class_id:
                 body["class"] = {"id": class_id}
             try:
-                pid = client.create_record("inventoryItem", body)
+                pid = _create_parent(client, body)
                 created_parents += 1
                 print(f"  parent created: id {pid or '?'}")
             except Exception as exc:  # noqa: BLE001

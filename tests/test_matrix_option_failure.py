@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from sanmar_netsuite.netsuite.client import NetSuiteError
 from sanmar_netsuite.netsuite.matrix_options import (
+    COLOR_LIST,
     SIZE_LIST,
     MatrixOptionError,
     MatrixOptionResolver,
@@ -103,3 +104,40 @@ def test_main_guards_the_call_so_one_style_cannot_kill_the_leg():
     assert guard.index("collect_new_options(") < guard.index("except Exception")
     assert guard.index("except Exception") < guard.index("failures += 1")
     assert guard.index("failures += 1") < guard.index("continue")
+
+
+class _WantsAbbreviationClient:
+    """Rejects a name-only create the way NetSuite did for size '0' and colour
+    'Oat' (nightly, 2026-11-06 onward); accepts once an abbreviation is sent."""
+
+    def __init__(self, reject_plain_abbreviation: bool = False) -> None:
+        self.bodies: list[dict] = []
+        self.reject_plain = reject_plain_abbreviation
+
+    def suiteql(self, query: str, **kw):
+        return []
+
+    def create_record(self, record_type: str, body: dict) -> str:
+        self.bodies.append(dict(body))
+        abbr = body.get("abbreviation")
+        if abbr is None or (self.reject_plain and abbr == body["name"]):
+            raise NetSuiteError(
+                400, "Bad Request",
+                {"o:errorDetails": [
+                    {"detail": "Please enter value(s) for: Abbreviation."}]},
+            )
+        return "9001"
+
+
+def test_create_retries_with_an_abbreviation_when_netsuite_asks_for_one():
+    client = _WantsAbbreviationClient()
+    resolver = MatrixOptionResolver(client=client, allow_create=True)
+    assert resolver.resolve(COLOR_LIST, "Oat") == ("9001", "created")
+    assert client.bodies == [{"name": "Oat"}, {"name": "Oat", "abbreviation": "Oat"}]
+
+
+def test_create_uniquifies_the_abbreviation_if_the_plain_one_is_refused():
+    client = _WantsAbbreviationClient(reject_plain_abbreviation=True)
+    resolver = MatrixOptionResolver(client=client, allow_create=True)
+    assert resolver.resolve(SIZE_LIST, "0") == ("9001", "created")
+    assert client.bodies[-1] == {"name": "0", "abbreviation": "0~"}
