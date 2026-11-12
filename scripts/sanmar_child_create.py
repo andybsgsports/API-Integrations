@@ -25,7 +25,14 @@ import os
 from pathlib import Path
 
 from run_status import exit_code
-from sanmar_parent_create import _child_payload, _resolve_feed, _uom_ids
+from sanmar_parent_create import (
+    COLOR_LIST,
+    SIZE_LIST,
+    _child_payload,
+    _resolve_feed,
+    _uom_ids,
+    normalize_size,
+)
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
@@ -36,6 +43,38 @@ from sanmar_netsuite.sanmar.parsers import parse_styles
 
 ROOT = Path(__file__).resolve().parents[1]
 RESTLET_BATCH = 25
+
+
+def is_name_taken(message: str | None) -> bool:
+    """Is this RESTlet error "an item with that name already exists"?
+
+    NetSuite refuses a child whose item name is already used by another item
+    (an older hand-made item, or one under a different parent). Re-running
+    cannot fix it and nothing was written, so it is a SKIP for Andy's daily
+    list, not a failure that turns the whole night red (Andy, 2026-11-12:
+    4 of these failed the 2026-11-12 create leg, run 43213713852).
+    """
+    return "uniqueness error" in (message or "").lower()
+
+
+def ensure_options(resolver, sku) -> list[str]:
+    """Make sure this child's colour and size are on the matrix lists.
+
+    The parent-create step has always done this for net-new styles; children
+    added under EXISTING parents skipped it, so a colour new to BSG failed
+    with "color 'Athletic Grey' not in customlist_bsg_matrix_color"
+    (2026-11-12, run 43213713852). Returns the values it created (or, on a
+    dry run, would create). Raises if NetSuite rejects a value.
+    """
+    new: list[str] = []
+    _cid, cstat = resolver.resolve(COLOR_LIST, sku.color_name)
+    if cstat in ("missing", "created"):
+        new.append(f"colour {sku.color_name!r}")
+    size = normalize_size(sku.size)
+    _sid, sstat = resolver.resolve(SIZE_LIST, size)
+    if sstat in ("missing", "created"):
+        new.append(f"size {size!r}")
+    return new
 
 
 def main() -> int:
@@ -63,6 +102,8 @@ def main() -> int:
 
     payloads: list[dict] = []
     per_style: dict[str, int] = {}
+    new_options: set[str] = set()
+    option_failures = 0
     for style in styles:
         if style.style not in parent_refs:
             continue  # net-new parent -> sanmar_parent_create's job
@@ -71,6 +112,13 @@ def main() -> int:
                 continue
             if max_items and len(payloads) >= max_items:
                 break
+            try:
+                new_options.update(ensure_options(resolver, sku))
+            except Exception as exc:  # noqa: BLE001 - one value must not kill the leg
+                option_failures += 1
+                print(f"  OPTION FAILED for {style.style} "
+                      f"[{sku.color_name} / {sku.size}]: {str(exc)[:200]}")
+                continue
             payload = _child_payload(style, sku, resolver, uom)
             # The parent this run already resolved (case-insensitively, and
             # preferring the one that has children). Sent as an id so the
@@ -83,6 +131,9 @@ def main() -> int:
           f"parent(s)" + (f" (capped at {max_items})" if max_items else ""))
     for name, n in sorted(per_style.items(), key=lambda kv: -kv[1])[:10]:
         print(f"    {name}: {n}")
+    if new_options:
+        verb = "created" if allow_write else "would create"
+        print(f"  option value(s) {verb}: {sorted(new_options)}")
 
     if not allow_write:
         print("\nsanmar child create: DRY RUN -- nothing posted")
@@ -95,7 +146,8 @@ def main() -> int:
     # name collided (run 35707265204).
     name_by_ext = {str(pl.get("externalId")): str(pl.get("itemId") or "?")
                    for pl in payloads}
-    created = updated = already = failures = 0
+    created = updated = already = name_taken = 0
+    failures = option_failures
     for i in range(0, len(payloads), RESTLET_BATCH):
         batch = payloads[i:i + RESTLET_BATCH]
         try:
@@ -113,8 +165,14 @@ def main() -> int:
                 if "combination of options already exists" in msg.lower():
                     already += 1
                     continue
-                failures += 1
                 ext = str(r.get("externalId"))
+                if is_name_taken(msg):
+                    name_taken += 1
+                    print(f"  CHILD SKIPPED {ext} "
+                          f"[{name_by_ext.get(ext, '?')}]: an item with that "
+                          f"name already exists")
+                    continue
+                failures += 1
                 print(f"  CHILD FAILED {ext} "
                       f"[{name_by_ext.get(ext, '?')}]: {msg[:140]}")
             elif r.get("status") == "updated":
@@ -129,6 +187,7 @@ def main() -> int:
     print(f"\nsanmar child create: created {created} child(ren); "
           f"already existed, fields re-applied: {updated}; "
           f"already present under another external id: {already}; "
+          f"skipped, item name already exists: {name_taken}; "
           f"failures: {failures}")
     return exit_code("sanmar child create", failures, failures,
                      created + updated + failures)
