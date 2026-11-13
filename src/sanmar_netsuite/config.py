@@ -127,6 +127,10 @@ class NetSuiteConfig:
     price_level_case: str
     price_level_msrp: str
     allow_production_writes: bool = False
+    #: Hard stop for a production dry run: the client refuses every request
+    #: that could change NetSuite (anything but a GET or a SuiteQL query),
+    #: whatever a script's own dry-run handling does. NETSUITE_READ_ONLY=true.
+    read_only: bool = False
     fields: NetSuiteFieldMap = field(default_factory=NetSuiteFieldMap.from_env)
 
     @property
@@ -167,6 +171,7 @@ class NetSuiteConfig:
             price_level_case=_get("NETSUITE_PRICE_LEVEL_CASE"),
             price_level_msrp=_get("NETSUITE_PRICE_LEVEL_MSRP"),
             allow_production_writes=_get_bool("NETSUITE_ALLOW_PRODUCTION_WRITES", False),
+            read_only=_get_bool("NETSUITE_READ_ONLY", False),
             fields=NetSuiteFieldMap.from_env(),
         )
 
