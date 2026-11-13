@@ -44,10 +44,32 @@ overwrite the sandbox ones (the sandbox pipeline should keep working):
 Then point workflows at production by swapping the secret names in the
 "Write .env" step (or parameterize with an `environment` input).
 
+## The production workflow (added 2026-11-13)
+
+`production-pipeline.yml` ("Production Vendor Pipeline (manual)") runs one
+vendor step against production using the `NETSUITE_PROD_*` secrets. Manual
+dispatch only: no schedule, no chain, no item-lifecycle.
+
+- `mode: dry_run` (default) sets `SYNC_DRY_RUN=true` **and**
+  `NETSUITE_READ_ONLY=true`. In read-only mode the client refuses every
+  request that could change NetSuite (anything but a GET or a SuiteQL query;
+  RESTlet calls and SOAP writes included) before it is sent.
+- `mode: live` needs `confirm_live` typed as `LIVE` and the production matrix
+  RESTlet ids in `NETSUITE_PROD_MATRIX_SCRIPT_ID` /
+  `NETSUITE_PROD_MATRIX_DEPLOY_ID` (repository variables or secrets). Caps
+  default to 25 styles / 25 items.
+- The production RESTlet named "BSG Hive Matrix" is a different script. The
+  pipeline needs `suitescript/bsg_sanmar_matrix.js` installed in production
+  (docs/RESTLET_DEPLOY.md).
+
+The sandbox nightly and its secrets are not touched by this workflow.
+
 ## The gate
 
-Every workflow writes `NETSUITE_ALLOW_PRODUCTION_WRITES=false` into `.env`.
-The client refuses writes against a non-`-sb` account while it is false.
+Every sandbox workflow writes `NETSUITE_ALLOW_PRODUCTION_WRITES=false` into
+`.env`. The client refuses to CONNECT to a non-`-sb` account while it is
+false (reads included), so the production workflow sets it to true and relies
+on `NETSUITE_READ_ONLY` to keep a dry run from writing.
 Flipping it to `true` **is** the cutover switch — change it only per-workflow,
 only when that workflow's production ladder (below) is green.
 

@@ -42,7 +42,20 @@ def soap_url(cfg) -> str:
     return f"https://{account}.suitetalk.api.netsuite.com/services/NetSuitePort_{VERSION}"
 
 
+#: SOAP operations that cannot change NetSuite. Everything else is refused
+#: while NETSUITE_READ_ONLY is set (the production dry run).
+READ_ACTIONS = frozenset({
+    "get", "getList", "getAll", "search", "searchMore", "searchMoreWithId",
+    "getSelectValue", "getCustomizationId", "getServerTime", "getDataCenterUrls",
+})
+
+
 def post(cfg, action: str, body_xml: str, extra_ns: str = "") -> str:
+    if getattr(cfg, "read_only", False) and action not in READ_ACTIONS:
+        raise RuntimeError(
+            f"NETSUITE_READ_ONLY is set: refused SOAP {action!r} -- nothing "
+            f"was sent to NetSuite."
+        )
     envelope = f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
