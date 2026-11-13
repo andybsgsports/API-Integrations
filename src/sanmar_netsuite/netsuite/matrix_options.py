@@ -99,6 +99,9 @@ class MatrixOptionResolver:
     _norm_cache: dict[str, dict[str, tuple[str, str]]] = field(
         default_factory=dict, init=False, repr=False
     )
+    _active_norms: dict[str, set[str]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def resolve(self, list_type: str, name: str) -> tuple[str | None, str]:
         """Resolve ``name`` to an internal id.
@@ -238,7 +241,24 @@ class MatrixOptionResolver:
             if active:
                 have_active.add(norm)
         self._norm_cache[list_type] = index
+        self._active_norms[list_type] = have_active
         return index
+
+    def is_retired(self, list_type: str, name: str) -> bool:
+        """Is ``name`` on the list ONLY as inactive value(s)?
+
+        Someone retired that value on purpose (usually a duplicate merged in
+        the colour cleanup). The matrix RESTlet resolves ACTIVE values only,
+        so a child that needs it is rejected with "not in
+        customlist_bsg_matrix_color" -- and it must not be reactivated or
+        re-created behind Andy's back (Andy, 2026-11-13: skip it and list it).
+        A value added during this run is not in the index and is not retired.
+        """
+        norm = normalize_option_name((name or "").strip())
+        if not norm:
+            return False
+        index = self._norm_index(list_type)
+        return norm in index and norm not in self._active_norms.get(list_type, set())
 
     # convenience wrappers for the per-SKU (REST sync) path
     def color_id(self, color_name: str) -> str | None:

@@ -57,6 +57,20 @@ def is_name_taken(message: str | None) -> bool:
     return "uniqueness error" in (message or "").lower()
 
 
+class RetiredOption(Exception):
+    """The child needs a colour or size that is inactive on the BSG list."""
+
+
+def is_option_not_on_list(message: str | None) -> bool:
+    """RESTlet's "colour/size not on the list" rejection.
+
+    ``ensure_options`` has already made sure the value EXISTS, so by the time
+    the RESTlet says this the value is there but inactive -- a skip for
+    Andy's daily list, like ``RetiredOption``.
+    """
+    return "not in customlist_bsg_matrix_" in (message or "").lower()
+
+
 def ensure_options(resolver, sku) -> list[str]:
     """Make sure this child's colour and size are on the matrix lists.
 
@@ -67,10 +81,18 @@ def ensure_options(resolver, sku) -> list[str]:
     dry run, would create). Raises if NetSuite rejects a value.
     """
     new: list[str] = []
+    size = normalize_size(sku.size)
+    # A value someone retired is skipped, never reactivated or re-created
+    # (Andy, 2026-11-13). Six 'Athletic Grey' children hit this in the
+    # sandbox, where the colour cleanup had retired that value (run
+    # 43240364726).
+    if resolver.is_retired(COLOR_LIST, sku.color_name):
+        raise RetiredOption(f"colour {sku.color_name!r} is inactive on the BSG list")
+    if resolver.is_retired(SIZE_LIST, size):
+        raise RetiredOption(f"size {size!r} is inactive on the BSG list")
     _cid, cstat = resolver.resolve(COLOR_LIST, sku.color_name)
     if cstat in ("missing", "created"):
         new.append(f"colour {sku.color_name!r}")
-    size = normalize_size(sku.size)
     _sid, sstat = resolver.resolve(SIZE_LIST, size)
     if sstat in ("missing", "created"):
         new.append(f"size {size!r}")
@@ -103,7 +125,7 @@ def main() -> int:
     payloads: list[dict] = []
     per_style: dict[str, int] = {}
     new_options: set[str] = set()
-    option_failures = 0
+    option_failures = retired = 0
     for style in styles:
         if style.style not in parent_refs:
             continue  # net-new parent -> sanmar_parent_create's job
@@ -114,6 +136,11 @@ def main() -> int:
                 break
             try:
                 new_options.update(ensure_options(resolver, sku))
+            except RetiredOption as exc:
+                retired += 1
+                print(f"  CHILD SKIPPED {style.style} "
+                      f"[{sku.color_name} / {sku.size}]: {exc}")
+                continue
             except Exception as exc:  # noqa: BLE001 - one value must not kill the leg
                 option_failures += 1
                 print(f"  OPTION FAILED for {style.style} "
@@ -172,6 +199,12 @@ def main() -> int:
                           f"[{name_by_ext.get(ext, '?')}]: an item with that "
                           f"name already exists")
                     continue
+                if is_option_not_on_list(msg):
+                    retired += 1
+                    print(f"  CHILD SKIPPED {ext} "
+                          f"[{name_by_ext.get(ext, '?')}]: colour or size is "
+                          f"inactive on the BSG list ({msg[:80]})")
+                    continue
                 failures += 1
                 print(f"  CHILD FAILED {ext} "
                       f"[{name_by_ext.get(ext, '?')}]: {msg[:140]}")
@@ -188,6 +221,7 @@ def main() -> int:
           f"already existed, fields re-applied: {updated}; "
           f"already present under another external id: {already}; "
           f"skipped, item name already exists: {name_taken}; "
+          f"skipped, colour or size inactive: {retired}; "
           f"failures: {failures}")
     return exit_code("sanmar child create", failures, failures,
                      created + updated + failures)
