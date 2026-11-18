@@ -21,6 +21,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
+import price_guard
 import requests
 from pricing_ownership import VENDOR_UA, owns_pricing, read_preferred
 
@@ -328,7 +329,9 @@ def main() -> int:
             if list_price is not None and not owner:
                 deferred += 1
             elif list_price is not None:
-                if not _same(base_by_rid.get(rid), list_price):
+                hold = price_guard.holding()
+                price_guard.record("price", base_by_rid.get(rid), list_price)
+                if not hold and not _same(base_by_rid.get(rid), list_price):
                     body["price"] = {
                         "items": [
                             {
@@ -341,7 +344,8 @@ def main() -> int:
                     }
                 if cost_pct:
                     cost = round(list_price * cost_pct / 100.0, 2)
-                    if not _same(row.get("cost"), cost):
+                    price_guard.record("cost", row.get("cost"), cost)
+                    if not hold and not _same(row.get("cost"), cost):
                         body["cost"] = cost
             stamp(body, row, "ua", claim_source=owner)
             if not body:

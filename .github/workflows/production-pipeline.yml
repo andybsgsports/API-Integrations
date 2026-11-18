@@ -50,6 +50,14 @@ on:
         description: "Cap on item writes"
         required: false
         default: "25"
+      price_hold_override:
+        description: "Only to release a price hold Andy has reviewed: type RELEASE"
+        required: false
+        default: ""
+      write_concurrency:
+        description: "Parallel writes to NetSuite (kept low so staff and other integrations are not throttled)"
+        required: false
+        default: "4"
 
 # Production has its own queue: it must not wait behind, or be cancelled by,
 # sandbox runs, and two production writers must never overlap.
@@ -162,9 +170,24 @@ jobs:
           CREATE_MAX_STYLES: ${{ env.CREATE_MAX_STYLES }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+          # Always on in production: hold Base Price and Purchase Price when
+          # more than a quarter of a vendor's prices move more than 25%
+          # (Andy, 2026-11-12). See scripts/price_guard.py.
+          PRICE_GUARD: "on"
+          PRICE_GUARD_OVERRIDE: ${{ github.event.inputs.price_hold_override }}
+          NETSUITE_WRITE_CONCURRENCY: ${{ github.event.inputs.write_concurrency || '4' }}
+          RUN_SUMMARY_FILE: ${{ runner.temp }}/run_summary.md
         run: |
           python scripts/vendor_pipeline.py \
             --vendor "$VENDOR" --phases "$PHASES"
+
+      - name: Post the daily summary
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_SUMMARY_FILE: ${{ runner.temp }}/run_summary.md
+          SUMMARY_ACCOUNT: Production
+        run: python scripts/post_daily_summary.py
 
       - name: Open issue on failure
         if: failure()
