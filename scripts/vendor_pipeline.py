@@ -91,7 +91,8 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
             "scripts/sanmar_parent_create.py",
             "scripts/sanmar_child_finalize.py",
         ],
-        "update": ["scripts/sanmar_field_update.py"],
+        "update": ["scripts/sanmar_field_update.py",
+                   "scripts/vendor_line_price_sync.py"],
         # atlas_image_backfill runs AFTER the field update because it joins
         # items by custitem_sanmar_unique_key, which the field update stamps
         # (matched by UPC) -- a child created minutes earlier has no key yet.
@@ -108,10 +109,12 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
     },
     "momentec": {
         # No creation path built yet -- see PIPELINE_GAPS below.
-        "update": ["scripts/momentec_backfill.py"],
+        "update": ["scripts/momentec_backfill.py",
+                   "scripts/vendor_line_price_sync.py"],
     },
     "ua": {
-        "update": ["scripts/ua_backfill.py"],
+        "update": ["scripts/ua_backfill.py",
+                   "scripts/vendor_line_price_sync.py"],
     },
     "ss": {
         # Read-only diff of the 195k-SKU catalog: buckets missing SKUs into
@@ -124,7 +127,8 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         # into the nightly chain's ss leg yet: it wants a dry run and a small
         # pilot Andy reviews first, the way SanMar's creation rolled out.
         "create": ["scripts/ss_create.py"],
-        "update": ["scripts/ss_backfill.py"],
+        "update": ["scripts/ss_backfill.py",
+                   "scripts/vendor_line_price_sync.py"],
     },
     "dcos": {
         # dcos_item_create resolves/creates its own option values inline, so
@@ -169,8 +173,14 @@ DCOS_SUPPLIERS = tuple(
 
 #: Vendor -> env the phase scripts expect (supplier selector, mostly).
 VENDOR_ENV: dict[str, dict[str, str]] = {
+    # VENDOR_LINE_SOURCE tells vendor_line_price_sync.py whose Preferred
+    # Vendor lines this leg keeps equal to cost.
+    "sanmar": {"VENDOR_LINE_SOURCE": "sanmar"},
+    "momentec": {"VENDOR_LINE_SOURCE": "momentec"},
+    "ua": {"VENDOR_LINE_SOURCE": "ua"},
     "ss": {"SS_CREATE_BRANDS": os.environ.get("SS_CREATE_BRANDS")
-           or SS_DEFAULT_BRANDS},
+           or SS_DEFAULT_BRANDS,
+           "VENDOR_LINE_SOURCE": "ss"},
 }
 
 #: Default per-vendor-per-night cap on NET-NEW styles created (0 = no cap).
@@ -233,6 +243,12 @@ def _run(script: str, env: dict[str, str], *, label: str = "",
             kept.append(f"exit code {rc}")
         _SUMMARY.append((f"{script}{label}", kept))
     return rc
+
+
+#: Update-phase scripts that set no Base Price or cost of their own, so they
+#: need no price guard check pass. vendor_line_price_sync copies the cost the
+#: guarded script just wrote (or left alone).
+NO_PRICE_GUARD = {"scripts/vendor_line_price_sync.py"}
 
 
 def _guard_enabled(env: dict[str, str]) -> bool:
@@ -302,10 +318,11 @@ def _run_update(script: str, env: dict[str, str], *, label: str = "") -> int:
     _SUMMARY.append((f"{script}{label} price guard", lines))
     if dry:
         return rc
-    live_env = dict(env)
     if hold:
-        live_env["PRICE_GUARD_HOLD"] = "1"
-    return _run(script, live_env, label=label)
+        # Set on the vendor's own env, not a copy, so the scripts that follow
+        # in this phase (vendor_line_price_sync) see the hold too.
+        env["PRICE_GUARD_HOLD"] = "1"
+    return _run(script, env, label=label)
 
 
 def write_summary(vendor: str, phases: tuple[str, ...], worst: int) -> None:
@@ -376,7 +393,7 @@ def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
                     worst = max(worst, _run(
                         script, {**env, "DCOS_SUPPLIER": supplier},
                         label=f" [{supplier}]"))
-            elif phase == "update":
+            elif phase == "update" and script not in NO_PRICE_GUARD:
                 worst = max(worst, _run_update(script, env))
             else:
                 worst = max(worst, _run(script, env))

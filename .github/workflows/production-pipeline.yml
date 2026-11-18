@@ -167,6 +167,9 @@ jobs:
       - name: Run vendor pipeline
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          # The SanMar update stops cleanly at this many minutes (job limit
+          # is 350) and reports what it did not reach; see run_status.rotated.
+          UPDATE_TIME_BUDGET_MIN: "290"
           CREATE_MAX_STYLES: ${{ env.CREATE_MAX_STYLES }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}

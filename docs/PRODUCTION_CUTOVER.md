@@ -91,6 +91,25 @@ The sandbox nightly and its secrets are not touched by this workflow.
 In the sandbox the price guard is off unless a manual run sets
 `price_guard: on` (the check adds a read pass).
 
+## Added 2026-11-18 (second change)
+
+- **Vendor line Purchase Price upkeep** (`scripts/vendor_line_price_sync.py`,
+  last script of the SanMar, Momentec, Under Armour and S&S update steps).
+  Sets the Preferred Vendor line's Purchase Price to the item's cost where it
+  is blank or differs, only on items whose Preferred Vendor is that step's
+  vendor. Other vendor lines are not changed. Capped at 5,000 items per vendor
+  per run (`VENDOR_LINE_MAX_ITEMS`), differing lines before blank ones; skipped
+  while a price hold is active.
+- **SanMar update time budget** (`UPDATE_TIME_BUDGET_MIN`, 290). The update
+  stops cleanly before the 350-minute job limit, prints its totals and how
+  much it did not reach, and starts from a different place each day so the
+  same items are not the ones missed every night.
+- **Fields changed line**. SanMar, S&S, Momentec and Under Armour updates
+  print which fields they changed and on how many items.
+- **SFTP host key pin**. The client reads the server's public key from
+  `data/sanmar_sftp_host_key.b64` when `SANMAR_SFTP_HOST_KEY` is not set. The
+  "SanMar SFTP Host Key Probe" workflow prints the key to put in that file.
+
 ## The gate
 
 Every sandbox workflow writes `NETSUITE_ALLOW_PRODUCTION_WRITES=false` into

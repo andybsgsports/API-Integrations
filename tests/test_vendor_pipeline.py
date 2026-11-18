@@ -72,6 +72,7 @@ def test_run_vendor_runs_phases_in_order(monkeypatch):
         "scripts/sanmar_parent_create.py",
         "scripts/sanmar_child_finalize.py",
         "scripts/sanmar_field_update.py",
+        "scripts/vendor_line_price_sync.py",
         "scripts/atlas_image_backfill.py",
     ]
 
@@ -80,10 +81,12 @@ def test_run_vendor_honours_a_phase_subset(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(vp, "_run", lambda script, env, **kw: calls.append(script) or 0)
     vp.run_vendor("sanmar", phases=("update",))
-    assert calls == ["scripts/sanmar_field_update.py"]
+    assert calls == ["scripts/sanmar_field_update.py",
+                     "scripts/vendor_line_price_sync.py"]
     calls.clear()
     vp.run_vendor("sanmar", phases=("update", "images"))
     assert calls == ["scripts/sanmar_field_update.py",
+                     "scripts/vendor_line_price_sync.py",
                      "scripts/atlas_image_backfill.py"]
 
 

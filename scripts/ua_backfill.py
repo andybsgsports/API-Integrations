@@ -24,6 +24,7 @@ import xml.etree.ElementTree as ET
 import price_guard
 import requests
 from pricing_ownership import VENDOR_UA, owns_pricing, read_preferred
+from run_status import print_field_counts
 
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
@@ -43,6 +44,9 @@ FIELDS = [
     "custitem_ua_part_id", "custitem_ua_style", "custitem_ua_gtin",
     "custitem_ua_qty_available",
 ]
+
+#: field name -> how many items had it changed this run (for the summary).
+FIELD_COUNTS: dict[str, int] = {}
 
 
 def _soap(url: str, action: str, body: str) -> str:
@@ -358,6 +362,8 @@ def main() -> int:
                 upc_filled += 1
             if "price" in body or "cost" in body:
                 priced += 1
+            for _f in body:
+                FIELD_COUNTS[_f] = FIELD_COUNTS.get(_f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -371,6 +377,7 @@ def main() -> int:
                     print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:300]}")
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
+    print_field_counts("ua backfill", FIELD_COUNTS)
     print(f"\nua backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
           f"price/cost updated: {priced}; "
