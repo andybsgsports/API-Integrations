@@ -108,7 +108,12 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         "images": ["scripts/atlas_image_backfill.py"],
     },
     "momentec": {
-        # No creation path built yet -- see PIPELINE_GAPS below.
+        # Parents then children for styles NetSuite does not have, plus
+        # missing colours/sizes under existing parents; resolves its own
+        # option values. NOT in the nightly chain's momentec step yet (the
+        # chain runs "update" only): it wants a dry run and a small pilot
+        # Andy reviews first, the way SanMar's creation rolled out.
+        "create": ["scripts/momentec_create.py"],
         "update": ["scripts/momentec_backfill.py",
                    "scripts/vendor_line_price_sync.py"],
     },
@@ -144,8 +149,9 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
 #: Vendors whose CREATE path doesn't exist yet, and why it isn't a one-liner.
 #: Printed by --list so the gap is visible instead of implied by an empty map.
 PIPELINE_GAPS = {
-    "momentec": "matches on matrix options only (no barcode), so creation needs "
-                "a style->parent mapping built first",
+    "momentec": "create is built (momentec_create.py) but deliberately NOT "
+                "in the chain's momentec step: it wants a dry run and a small "
+                "pilot Andy reviews first.",
     "ua": "DC OneSource parts carry no style grid; parent structure per style "
           "needs deciding before children can be created",
     "ss": "create is built (ss_create.py) but deliberately NOT in the "

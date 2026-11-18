@@ -125,7 +125,7 @@ def main() -> int:
         children = client.suiteql(
             f"SELECT id, parent, itemid{col_sql} FROM item "
             f"WHERE parent IN ({chunk}) AND (externalid LIKE 'SANMAR%' "
-            f"OR externalid LIKE 'SS-%')"
+            f"OR externalid LIKE 'SS-%' OR externalid LIKE 'MTEC-%')"
         )
         for child in children:
             scanned += 1

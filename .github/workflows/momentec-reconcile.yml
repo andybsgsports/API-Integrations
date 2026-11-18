@@ -7,6 +7,18 @@ on:
         description: "Only check the first N styles (0 = all)"
         required: false
         default: "0"
+      create_preview:
+        description: "true = also report what Momentec item creation would add (dry run, writes nothing)"
+        required: false
+        default: "false"
+      create_max_styles:
+        description: "Create preview: cap on new styles reported (0 = all)"
+        required: false
+        default: "0"
+      create_styles:
+        description: "Create preview: comma-separated style numbers to limit to (blank = all)"
+        required: false
+        default: ""
   push:
     branches: ["claude/festive-carson-oj4y8n"]
     paths: [".momentec-reconcile-trigger"]
@@ -47,6 +59,17 @@ jobs:
         env:
           RECONCILE_STYLE_LIMIT: ${{ github.event.inputs.style_limit || '0' }}
         run: python scripts/momentec_reconcile.py
+
+      - name: Preview Momentec item creation (dry run, read-only)
+        if: github.event.inputs.create_preview == 'true'
+        env:
+          # Forced here as well as in .env: the client refuses any request
+          # that could change NetSuite before it is sent.
+          SYNC_DRY_RUN: "true"
+          NETSUITE_READ_ONLY: "true"
+          CREATE_MAX_STYLES: ${{ github.event.inputs.create_max_styles || '0' }}
+          MOMENTEC_CREATE_STYLES: ${{ github.event.inputs.create_styles }}
+        run: python scripts/vendor_pipeline.py --vendor momentec --phases create
 
       - name: Upload mapping CSV
         if: always()
