@@ -153,6 +153,7 @@ def test_an_existing_item_the_feed_cannot_explain_skips_the_style():
             {"id": "902", "itemid": "y", "color": "99", "size": "22", "parent": "900"}]
     plan = mc.plan_style([sku(), sku(size="M")], rows, FakeOptions(), {"20"})
     assert plan["kind"] == "skip" and "could not be matched" in plan["reason"]
+    assert plan["reason"].endswith(": y")   # names the item so it can be found
 
 
 def test_a_closeout_row_still_explains_its_existing_item():

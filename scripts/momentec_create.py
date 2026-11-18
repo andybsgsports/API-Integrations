@@ -270,11 +270,14 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
                            f"different parents" if children
                            else f"{len(parents)} parent item(s) carry this "
                                 f"vendor code and none has children")}
-    unclaimed = len(children - claimed)
+    unclaimed = children - claimed
     if unclaimed:
+        names = sorted(str(r.get("itemid") or r["id"]) for r in rows
+                       if str(r["id"]) in unclaimed)
+        shown = ", ".join(names[:3]) + (" ..." if len(names) > 3 else "")
         return {"kind": "skip", "missing": missing, "parent_id": None,
-                "reason": f"{unclaimed} existing item(s) could not be matched "
-                          f"to the feed"}
+                "reason": f"{len(unclaimed)} existing item(s) could not be "
+                          f"matched to the feed: {shown}"}
     return {"kind": "adopt", "reason": "", "missing": missing,
             "parent_id": parents[0]}
 
