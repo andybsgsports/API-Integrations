@@ -69,12 +69,12 @@ from sanmar_parent_create import (
     resolve_parent_refs,
 )
 
-from momentec_netsuite.adopt import _fetch_style_items, clean_color
+from momentec_netsuite.adopt import clean_color
 from momentec_netsuite.config import get_config
 from momentec_netsuite.feeds import parse_product_data
 from momentec_netsuite.models import MomentecSku
 from sanmar_netsuite.config import get_config as ns_config
-from sanmar_netsuite.netsuite.adopt import OptionMaps
+from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.matrix_options import (
     COLOR_LIST,
@@ -82,7 +82,6 @@ from sanmar_netsuite.netsuite.matrix_options import (
     MatrixOptionResolver,
 )
 from sanmar_netsuite.netsuite.repository import _sql_escape
-from sanmar_netsuite.transform.csv_export import class_for_category
 from sanmar_netsuite.transform.sizes import normalize_size
 
 RESTLET_BATCH = 25
@@ -90,11 +89,17 @@ EXTERNAL_PREFIX = "MTEC-"
 #: Cap on named lines per skip reason, so the report stays readable.
 LIST_MAX = 40
 
-# The feed's middle category segment -> a class keyword the shared mapper
-# knows. Only the unambiguous ones; a sport segment (BASEBALL, SOCCER...) or
-# BOTTOMS says nothing certain about the class, so those stay unmapped and
-# are listed rather than guessed.
-_SEGMENT_KEYWORD = {"tees": "t-shirt"}
+#: Short tokens that are real words, not abbreviations.
+_SHORT_WORDS = {"RED", "TAN", "SKY", "HOT", "ICE", "ASH", "JET", "OAT", "NBA"}
+#: Longer tokens the feed uses as abbreviations or cuts off mid-word.
+_KNOWN_ABBREVIATIONS = {
+    "GRAPH", "CHAR", "HEATH", "ORAN", "OCEA", "THUN", "SGMA", "BKLYN",
+    "BUCCHOBU", "BUCKHBUC", "BUCORBUC", "BUCWHBUC",
+}
+#: Tokens that keep their capitals in Title Case.
+_ACRONYMS = {"NBA"}
+#: The feed cuts a colour name off at this many characters.
+_FEED_COLOR_WIDTH = 30
 
 _WORD = re.compile(r"[A-Za-z][A-Za-z']*")
 
@@ -113,7 +118,9 @@ def title_case(text: str) -> str:
         if any(ch.isdigit() for ch in token):
             out.append(token)
         else:
-            out.append(_WORD.sub(lambda m: m.group(0).capitalize(), token))
+            out.append(_WORD.sub(
+                lambda m: m.group(0) if m.group(0) in _ACRONYMS
+                else m.group(0).capitalize(), token))
     return " ".join(out)
 
 
@@ -122,15 +129,73 @@ def color_name(feed_color: str) -> str:
     return title_case(clean_color(feed_color))
 
 
-def class_path(category: str) -> str:
-    """NetSuite class path for a feed category, or '' when not certain."""
-    tags = [t.strip().lower() for t in (category or "").split("|") if t.strip()]
-    # "FLEECE | BOTTOMS" is a sweatpant, not a sweatshirt: a bottoms tag
-    # overrides the garment-family word, and bottoms has no certain class.
-    if any("bottom" in t for t in tags):
-        return ""
-    tags = [_SEGMENT_KEYWORD.get(t, t) for t in tags]
-    return class_for_category(";".join(tags))
+def abbreviated_color(feed_color: str) -> str:
+    """Why a feed colour is not a clean, spelled-out name ('' when it is).
+
+    The BSG colour list is being cleaned of abbreviations (Dgh, Mgnt...), and
+    the feed has its own: ``BT. ORANGE/WHITE``, ``COL BL/BLACK/WHITE``,
+    ``HTHR GREY``, plus names cut off at the feed's column width. Adding those
+    as new list values would undo that cleanup, and spelling them out would be
+    a guess -- so such a SKU is skipped and listed for Andy.
+    """
+    c = clean_color(feed_color).upper()
+    if "." in c:
+        return "has an abbreviation with a period"
+    if len(c) >= _FEED_COLOR_WIDTH:
+        return "is cut off in the feed"
+    for token in re.split(r"[^A-Z]+", c):
+        if not token:
+            continue
+        if len(token) <= 3 and token not in _SHORT_WORDS:
+            return f"has the abbreviation {token!r}"
+        if token in _KNOWN_ABBREVIATIONS or not re.search(r"[AEIOUY]", token):
+            return f"has the abbreviation {token!r}"
+    return ""
+
+
+def class_path(category: str, name: str = "") -> str:
+    """NetSuite Class for a feed category such as ``Adult | TEES | TOPS FSG``.
+
+    The feed's three segments are audience | family | group. The group says
+    whether it is an on-field uniform piece, and the item name settles shorts
+    against pants. Returns '' where neither is certain (accessories), so the
+    parent is listed rather than guessed.
+    """
+    segs = [t.strip().lower() for t in (category or "").split("|")]
+    family = segs[1] if len(segs) > 1 else ""
+    group = segs[2] if len(segs) > 2 else ""
+    n = (name or "").lower()
+    is_short = "short" in n
+    is_pant = any(w in n for w in ("pant", "knicker", "jogger", "legging", "tight"))
+    if "sock" in n:
+        return "Uniforms : Socks"
+    if family == "headwear":
+        return "Uniforms : Headwear"
+    if family == "bags":
+        return "Bags"
+    if group.startswith(("on-field tops", "on-fld tops")):
+        return "Uniforms : Jersey"
+    if group.startswith(("on-field bottoms", "on-fld bottoms")):
+        return ("Uniforms : Shorts" if is_short
+                else "Uniforms : Pants" if is_pant else "Uniforms")
+    if "bottom" in group or family == "bottoms":
+        return ("Bottoms : Shorts" if is_short
+                else "Bottoms : Pants" if is_pant else "Bottoms")
+    if family == "pullovers":
+        return "Outerwear : Pullovers"
+    if family == "outerwear" or "outerwear" in group:
+        return "Outerwear : Vests" if "vest" in n else "Outerwear : Jackets"
+    if family == "tees":
+        return "Tops : Tees"
+    if family == "polos":
+        return "Tops : Polos"
+    if family == "fleece":
+        if "1/4 zip" in n or "quarter zip" in n:
+            return "Tops : 1/4 Zips"
+        return "Tops : Hoods" if "hood" in n else "Tops : Sweatshirts"
+    if "tops" in group:
+        return "Tops"
+    return ""
 
 
 def style_token(sku: MomentecSku) -> str:
@@ -157,15 +222,24 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
 
     opt_index: dict[tuple[str, str], str] = {}
     children: set[str] = set()
-    parents: list[str] = []
+    parent_rows: list[str] = []
+    parents_of_children: set[str] = set()
     for r in rows:
         rid = str(r["id"])
         color_id, size_id = str(r.get("color") or ""), str(r.get("size") or "")
         if color_id and size_id:
             opt_index.setdefault((color_id, size_id), rid)
             children.add(rid)
+            if str(r.get("parent") or ""):
+                parents_of_children.add(str(r["parent"]))
         else:
-            parents.append(rid)
+            parent_rows.append(rid)
+    # The parent is whichever item the existing children sit under. It often
+    # does not carry the style as its own Vendor Name/Code (160 styles in the
+    # 2026-11-18 sandbox dry run), and where a style has duplicate parents the
+    # one holding the children is the real one. With no children yet, a single
+    # parent row carrying the vendor code is the parent.
+    parents = sorted(parents_of_children) if children else parent_rows
 
     claimed: set[str] = set()
     missing: list[MomentecSku] = []
@@ -191,7 +265,10 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
         return {"kind": "complete", "reason": "", "missing": [], "parent_id": None}
     if len(parents) != 1:
         return {"kind": "skip", "missing": missing, "parent_id": None,
-                "reason": f"{len(parents)} parent item(s) carry this vendor code"}
+                "reason": (f"its existing items sit under {len(parents)} "
+                           f"different parents" if children
+                           else f"{len(parents)} parent item(s) carry this "
+                                f"vendor code and none has children")}
     unclaimed = len(children - claimed)
     if unclaimed:
         return {"kind": "skip", "missing": missing, "parent_id": None,
@@ -199,6 +276,14 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
                           f"to the feed"}
     return {"kind": "adopt", "reason": "", "missing": missing,
             "parent_id": parents[0]}
+
+
+def fetch_style_items(client, style: str) -> list[dict]:
+    """Items carrying ``style`` as Vendor Name/Code, with option ids and parent."""
+    return client.suiteql(
+        f"SELECT id, itemid, parent, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
+        f"FROM item WHERE vendorname = '{_sql_escape(style)}'"
+    )
 
 
 def child_fields(sku: MomentecSku) -> dict[str, object]:
@@ -428,13 +513,14 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
     skipped_styles: list[str] = []
     skipped_skus: list[str] = []
     new_colors: Counter[str] = Counter()
+    abbreviated: Counter[str] = Counter()
     new_sizes: Counter[str] = Counter()
     unmapped_cats: Counter[str] = Counter()
     capped_new = capped_adopt = 0
 
     for token in tokens:
         skus = by_style[token]
-        rows = _fetch_style_items(client, token)
+        rows = fetch_style_items(client, token)
         plan = plan_style(skus, rows, options, statuses)
         kind = plan["kind"]
         if kind == "complete":
@@ -463,8 +549,15 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
         todo: list[MomentecSku] = []
         for sku in plan["missing"]:
             color, size = color_name(sku.color), normalize_size(sku.size)
+            why = abbreviated_color(sku.color)
             if (sku.gtin and sku.gtin in on_file) or (sku.upc and sku.upc in on_file):
                 skipped_skus.append(f"{sku.item_sku}: its UPC is already on another item")
+            elif why and resolver.resolve(COLOR_LIST, color)[1] != "existing":
+                # Already on the BSG list under this exact name: nothing new
+                # is added, so it is used. Otherwise it is listed for Andy.
+                abbreviated[clean_color(sku.color)] += 1
+                skipped_skus.append(
+                    f"{sku.item_sku}: colour {clean_color(sku.color)!r} {why}")
             elif resolver.is_retired(COLOR_LIST, color):
                 skipped_skus.append(
                     f"{sku.item_sku}: colour {color!r} is inactive on the BSG list")
@@ -492,7 +585,7 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
         parent_id = plan["parent_id"]
         if kind == "new":
             styles_new += 1
-            cls = class_path(first.category)
+            cls = class_path(first.category, first.name)
             if not cls:
                 unmapped_cats[first.category] += 1
             if allow_write:
@@ -547,6 +640,11 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
             print(f"\nnew {label} value(s) {verb} the BSG list: {len(counter)}")
             for value, n in counter.most_common(LIST_MAX):
                 print(f"  {value!r} ({n} SKU(s))")
+    if abbreviated:
+        print(f"\ncolour(s) skipped as abbreviated or cut off, for Andy to "
+              f"decide: {len(abbreviated)}")
+        for value, n in abbreviated.most_common(LIST_MAX):
+            print(f"  {value!r} ({n} SKU(s))")
     if unmapped_cats:
         print("\ncategories with no class mapping (parent left without a class):")
         for cat, n in unmapped_cats.most_common(20):

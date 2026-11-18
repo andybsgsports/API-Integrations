@@ -73,12 +73,47 @@ def test_colour_drops_the_brand_tag_and_is_title_case():
     assert mc.color_name("DARK GREEN") == "Dark Green"
 
 
-def test_class_only_where_the_category_is_certain():
-    assert mc.class_path("Adult | TEES | TOPS FSG") == "Tops : Tees"
-    assert mc.class_path("Adult | POLOS | TOPS ASB") == "Tops : Polos"
-    assert mc.class_path("Adult | BASEBALL | ON-FIELD TOPS") == ""
+def test_class_from_category_and_item_name():
+    cp = mc.class_path
+    assert cp("Adult | TEES | TOPS FSG") == "Tops : Tees"
+    assert cp("Adult | POLOS | TOPS ASB") == "Tops : Polos"
+    assert cp("Adult | BASEBALL | ON-FIELD TOPS", "Baseball Jersey") == "Uniforms : Jersey"
+    assert cp("Adult | BASKETBALL | ON-FLD BOTTOMS", "Basketball Shorts") == (
+        "Uniforms : Shorts")
+    assert cp("Youth | BASEBALL | ON-FLD BOTTOMS", "Youth Baseball Knicker") == (
+        "Uniforms : Pants")
     # A fleece BOTTOM is a sweatpant: never classed as a sweatshirt.
-    assert mc.class_path("Adult | FLEECE | BOTTOMS ASB") == ""
+    assert cp("Adult | FLEECE | BOTTOMS ASB", "Closed Bottom Sweatpant") == (
+        "Bottoms : Pants")
+    assert cp("Adult | BOTTOMS | BOTTOMS FSG", "Mesh Shorts With Pockets") == (
+        "Bottoms : Shorts")
+    assert cp("Adult | FLEECE | TOPS ASB", "Fleece Hoodie") == "Tops : Hoods"
+    assert cp("Adult | FLEECE | TOPS ASB", "Fleece Crew") == "Tops : Sweatshirts"
+    assert cp("Adult | PULLOVERS | TOPS ASB") == "Outerwear : Pullovers"
+    assert cp("Misc | HEADWEAR | HEADWEAR ASB") == "Uniforms : Headwear"
+    assert cp("Adult | LIFESTYLE | TOPS ASB") == "Tops"
+    assert cp("Misc | ACCESSORIES | ACCESSORIES FSG") == ""
+
+
+@pytest.mark.parametrize("color", [
+    "BT. ORANGE/WHITE", "COL BL/BLACK/WHITE", "HTHR GREY/LT CHARCOAL",
+    "NBA NY KNICKS ROYAL/BT ORANGE", "PANTHER TEAL/BEIGE/PANTHER TEA",
+    "GRAPH/SAFETY YELLOW (BA)", "BUCKHBUC",
+])
+def test_abbreviated_or_cut_off_colours_are_flagged(color):
+    assert mc.abbreviated_color(color)
+
+
+@pytest.mark.parametrize("color", [
+    "NAVY/WHITE (BA)", "RED", "DARK GREEN/WHITE", "ATHLETIC HEATHER",
+    "NBA MIAMI HEAT BLACK/WHITE", "GRAPHITE/NEON ORANGE/GRAPHITE", "SKY BLUE",
+])
+def test_spelled_out_colours_are_not_flagged(color):
+    assert mc.abbreviated_color(color) == ""
+
+
+def test_nba_keeps_its_capitals():
+    assert mc.color_name("NBA MIAMI HEAT BLACK/WHITE") == "NBA Miami Heat Black/White"
 
 
 def test_a_style_netsuite_does_not_have_is_new():
@@ -99,14 +134,14 @@ PARENT = {"id": "900", "itemid": "1234", "color": None, "size": None}
 
 def test_missing_size_is_added_under_the_existing_parent():
     rows = [PARENT, {"id": "901", "itemid": "1234-Navy-Small",
-                     "color": "11", "size": "21"}]
+                     "color": "11", "size": "21", "parent": "900"}]
     plan = mc.plan_style([sku(), sku(size="M")], rows, FakeOptions(), {"20"})
     assert plan["kind"] == "adopt" and plan["parent_id"] == "900"
     assert [s.size for s in plan["missing"]] == ["M"]
 
 
 def test_nothing_missing_is_complete():
-    rows = [PARENT, {"id": "901", "itemid": "x", "color": "11", "size": "21"}]
+    rows = [PARENT, {"id": "901", "itemid": "x", "color": "11", "size": "21", "parent": "900"}]
     assert mc.plan_style([sku()], rows, FakeOptions(), {"20"})["kind"] == "complete"
 
 
@@ -114,27 +149,50 @@ def test_an_existing_item_the_feed_cannot_explain_skips_the_style():
     # Child 902 is some colour the feed match did not claim: the "missing"
     # SKU could be that same item under another spelling.
     rows = [PARENT,
-            {"id": "901", "itemid": "x", "color": "11", "size": "21"},
-            {"id": "902", "itemid": "y", "color": "99", "size": "22"}]
+            {"id": "901", "itemid": "x", "color": "11", "size": "21", "parent": "900"},
+            {"id": "902", "itemid": "y", "color": "99", "size": "22", "parent": "900"}]
     plan = mc.plan_style([sku(), sku(size="M")], rows, FakeOptions(), {"20"})
     assert plan["kind"] == "skip" and "could not be matched" in plan["reason"]
 
 
 def test_a_closeout_row_still_explains_its_existing_item():
     rows = [PARENT,
-            {"id": "901", "itemid": "x", "color": "11", "size": "21"},
-            {"id": "902", "itemid": "y", "color": "13", "size": "21"}]
+            {"id": "901", "itemid": "x", "color": "11", "size": "21", "parent": "900"},
+            {"id": "902", "itemid": "y", "color": "13", "size": "21", "parent": "900"}]
     feed = [sku(), sku(size="M"), sku(color="BLACK", code="B1", status="50")]
     plan = mc.plan_style(feed, rows, FakeOptions(), {"20"})
     assert plan["kind"] == "adopt"
 
 
-@pytest.mark.parametrize("parents", [0, 2])
-def test_no_single_parent_skips_the_style(parents):
-    rows = [dict(PARENT, id=str(900 + i)) for i in range(parents)]
-    rows.append({"id": "950", "itemid": "x", "color": "11", "size": "21"})
+def test_parent_is_found_through_the_children():
+    # The parent (id 777) does not carry the vendor code, so it is not in the
+    # rows at all; the existing child points at it.
+    rows = [{"id": "901", "itemid": "x", "color": "11", "size": "21",
+             "parent": "777"}]
     plan = mc.plan_style([sku(), sku(size="M")], rows, FakeOptions(), {"20"})
-    assert plan["kind"] == "skip" and "parent item(s)" in plan["reason"]
+    assert plan["kind"] == "adopt" and plan["parent_id"] == "777"
+
+
+def test_duplicate_parents_use_the_one_holding_the_children():
+    rows = [PARENT, dict(PARENT, id="899"),
+            {"id": "901", "itemid": "x", "color": "11", "size": "21",
+             "parent": "899"}]
+    plan = mc.plan_style([sku(), sku(size="M")], rows, FakeOptions(), {"20"})
+    assert plan["kind"] == "adopt" and plan["parent_id"] == "899"
+
+
+def test_children_under_two_parents_skip_the_style():
+    rows = [{"id": "901", "itemid": "x", "color": "11", "size": "21", "parent": "1"},
+            {"id": "902", "itemid": "y", "color": "12", "size": "21", "parent": "2"}]
+    feed = [sku(), sku(color="WHITE", code="W1"), sku(size="M")]
+    plan = mc.plan_style(feed, rows, FakeOptions(), {"20"})
+    assert plan["kind"] == "skip" and "2 different parents" in plan["reason"]
+
+
+def test_two_empty_parents_skip_the_style():
+    rows = [PARENT, dict(PARENT, id="899")]
+    plan = mc.plan_style([sku()], rows, FakeOptions(), {"20"})
+    assert plan["kind"] == "skip" and "none has children" in plan["reason"]
 
 
 def test_child_is_born_in_andys_item_format():
