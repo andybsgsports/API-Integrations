@@ -25,6 +25,24 @@ log = logging.getLogger(__name__)
 # which makes key exchange fail with "no acceptable host key". We pin paramiko
 # to the 3.x line (see pyproject) and additionally offer any of these the
 # installed paramiko still supports.
+#: The server's public host key, base64, committed to the repo. A host key is
+#: public (the server hands it to every client), so it needs no secret; the
+#: SANMAR_SFTP_HOST_KEY setting still wins when it is set.
+PINNED_HOST_KEY_FILE = Path(__file__).resolve().parents[3] / "data" / "sanmar_sftp_host_key.b64"
+
+
+def _pinned_host_key_from_file() -> str:
+    """Base64 host key from the repo file; blank if absent or only comments."""
+    try:
+        for line in PINNED_HOST_KEY_FILE.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                return line
+    except OSError:
+        pass
+    return ""
+
+
 _LEGACY_HOST_KEY_ALGOS = ("ssh-rsa", "ssh-dss")
 
 
@@ -80,7 +98,7 @@ class SanMarSftp:
         Pinning ``SANMAR_SFTP_HOST_KEY`` (base64 of the server key) is strongly
         recommended for production to prevent MITM.
         """
-        raw = self._config.host_key.strip()
+        raw = self._config.host_key.strip() or _pinned_host_key_from_file()
         if not raw:
             log.warning(
                 "SANMAR_SFTP_HOST_KEY not set — accepting server host key without "

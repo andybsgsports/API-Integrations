@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import os
 import re
+import time
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -26,7 +27,7 @@ from native_pricing import (
     weight_display,
 )
 from pricing_ownership import VENDOR_SANMAR, owns_pricing, read_preferred
-from run_status import exit_code
+from run_status import exit_code, print_field_counts, rotated
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -596,7 +597,19 @@ def main() -> int:
     # costs that field rather than the whole record. Reported below -- a
     # silently dropped field is exactly what hid for days.
     dropped: dict[str, int] = {}
-    for i in range(0, len(gtins), 250):
+    # Stop cleanly before the runner's job limit instead of being cut off
+    # mid-write with no totals, and start from a different place each day so a
+    # short night does not skip the same items every time.
+    budget_min = float(os.environ.get("UPDATE_TIME_BUDGET_MIN", "0") or "0")
+    deadline = time.monotonic() + budget_min * 60 if budget_min else None
+    starts = list(range(0, len(gtins), 250))
+    order = [starts[k] for k in rotated(len(starts), date.today().toordinal())]
+    chunks_not_reached = 0
+    field_counts: dict[str, int] = {}
+    for n_done, i in enumerate(order):
+        if deadline is not None and time.monotonic() > deadline:
+            chunks_not_reached = len(order) - n_done
+            break
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         try:
@@ -665,6 +678,8 @@ def main() -> int:
             considered += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
+            for f in body:
+                field_counts[f] = field_counts.get(f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -687,6 +702,15 @@ def main() -> int:
             f"Uncapped depth is only available via SanMar's Web Service / "
             f"PromoStandards inventory API."
         )
+    if chunks_not_reached:
+        print(
+            f"NOTE: sanmar field update stopped at its {budget_min:.0f}-minute "
+            f"time budget with {chunks_not_reached:,} of {len(order):,} "
+            f"chunk(s) not reached (about {chunks_not_reached * 250:,} SKUs). "
+            f"Tomorrow's run starts from a different place, so they are "
+            f"reached within a few days."
+        )
+    print_field_counts("sanmar field update", field_counts)
     if chunks_skipped:
         print(
             f"NOTE: {chunks_skipped} chunk(s) skipped after their SuiteQL read "

@@ -25,6 +25,7 @@ from native_pricing import (
     read_base_prices,
 )
 from pricing_ownership import VENDOR_MOMENTEC, owns_pricing, read_preferred
+from run_status import print_field_counts
 
 from momentec_netsuite.adopt import match_momentec
 from momentec_netsuite.config import get_config
@@ -51,6 +52,9 @@ FIELDS = [
 
 # ASG "Ribbon" values that mean the item is a closeout.
 CLOSEOUT_FIELD = "custitem_mtec_is_closeout"
+
+#: field name -> how many items had it changed this run (for the summary).
+FIELD_COUNTS: dict[str, int] = {}
 
 
 def is_closeout(ribbon: str) -> bool:
@@ -358,6 +362,8 @@ def main() -> int:
                 upc_filled += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
+            for _f in body:
+                FIELD_COUNTS[_f] = FIELD_COUNTS.get(_f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -378,6 +384,7 @@ def main() -> int:
               f"weightUnit left unchanged for these (add them to WEIGHT_UNITS): "
               f"{sorted(UNKNOWN_WEIGHT_UNITS)}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
+    print_field_counts("momentec backfill", FIELD_COUNTS)
     print(f"\nmomentec backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
           f"price/cost/weight updated: {priced}; "

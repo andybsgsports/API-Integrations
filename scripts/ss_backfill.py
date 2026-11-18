@@ -36,7 +36,7 @@ from native_pricing import (
     weight_display,
 )
 from pricing_ownership import VENDOR_SS, owns_pricing, read_preferred
-from run_status import exit_code
+from run_status import exit_code, print_field_counts
 from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -60,6 +60,9 @@ READ_WORKERS = int(os.environ.get("SS_READ_CONCURRENCY", "6") or "6")
 # Styles per batched vendorname lookup (pass 2). NetSuite tolerates large IN
 # lists; 250 matches the chunk size the other writers use.
 STYLE_CHUNK = 250
+
+#: field name -> how many items had it changed this run (for the summary).
+FIELD_COUNTS: dict[str, int] = {}
 
 
 class _Phase:
@@ -575,6 +578,8 @@ def main() -> int:
                     if "weightUnit" in body:
                         print(f"    weightUnit: current={row.get('weightunit')!r} "
                               f"want={weight_unit!r}", flush=True)
+            for _f in body:
+                FIELD_COUNTS[_f] = FIELD_COUNTS.get(_f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -611,6 +616,7 @@ def main() -> int:
     if dropped:
         print(f"NOTE: field(s) dropped after NetSuite rejected them: {dropped}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
+    print_field_counts("ss backfill", FIELD_COUNTS)
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
           f"price/cost/weight updated: {priced}; "

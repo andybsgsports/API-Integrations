@@ -54,3 +54,32 @@ def exit_code(
         )
         return 0
     return 1
+
+
+def print_field_counts(label: str, counts: dict[str, int], top: int = 12) -> None:
+    """One line naming which fields a writer changed, most-changed first.
+
+    A writer that reports "wrote 583 item(s)" every night says nothing about
+    WHAT it keeps writing; this line does (inventory quantities are expected
+    nightly, a price or a name rewritten every night is a bug).
+    """
+    if not counts:
+        return
+    ordered = sorted(counts.items(), key=lambda kv: -kv[1])
+    shown = ", ".join(f"{k} {n:,}" for k, n in ordered[:top])
+    more = f", and {len(ordered) - top} more field(s)" if len(ordered) > top else ""
+    print(f"NOTE: {label} fields changed: {shown}{more}")
+
+
+def rotated(n: int, day_ordinal: int, step: int = 7) -> list[int]:
+    """Indexes 0..n-1 starting from a point that moves every day.
+
+    A pass that is cut off by a time limit always loses its tail. Starting
+    from a different place each day means the part that is lost changes, so
+    every item is reached within a few days instead of the same items never
+    being reached at all.
+    """
+    if n <= 0:
+        return []
+    start = (day_ordinal * max(1, n // step)) % n
+    return list(range(start, n)) + list(range(0, start))
