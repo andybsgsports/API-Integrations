@@ -44,11 +44,16 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
+
+import price_guard
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -172,18 +177,161 @@ VENDOR_ENV: dict[str, dict[str, str]] = {
 DEFAULT_CREATE_MAX_STYLES = "300"
 
 
-def _run(script: str, env: dict[str, str]) -> int:
-    """Run one phase script, streaming its output. Returns its exit code."""
+#: Output lines worth repeating in the run summary: each script's totals line,
+#: everything skipped or failed by name, and warnings / notes / price holds.
+_SUMMARY_LINE = re.compile(
+    r"failures: \d|SKIPPED|FAILED item|^WARNING|^NOTE|PRICE HOLD|PRICE GUARD"
+    r"|WOULD |dropped on "
+)
+#: Cap on named skip / failure lines kept per script so one bad night cannot
+#: produce a summary nobody can read. The totals line always carries the count.
+SUMMARY_MAX_DETAIL = 200
+
+#: Collected for the run summary: (heading, [lines]).
+_SUMMARY: list[tuple[str, list[str]]] = []
+
+
+def _run(script: str, env: dict[str, str], *, label: str = "",
+         summarize: bool = True) -> int:
+    """Run one phase script, streaming its output. Returns its exit code.
+
+    The child runs unbuffered so a job killed by the runner's time limit still
+    shows how far it got (a buffered child lost its whole report when the
+    SanMar update leg hit the 350-minute cap on 2026-11-17 and 2026-11-18).
+    """
     path = ROOT / script
     if not path.exists():
         print(f"  !! {script} not found -- skipping", flush=True)
         return 0
     t0 = time.monotonic()
-    print(f"\n--- {script}", flush=True)
-    proc = subprocess.run([sys.executable, str(path)], env=env, cwd=ROOT, check=False)
-    print(f"--- {script} finished rc={proc.returncode} "
+    print(f"\n--- {script}{label}", flush=True)
+    child_env = {**env, "PYTHONUNBUFFERED": "1"}
+    kept: list[str] = []
+    detail = 0
+    proc = subprocess.Popen(
+        [sys.executable, str(path)], env=child_env, cwd=ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", bufsize=1,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        text = line.rstrip()
+        if "Retryable NetSuite response" in text or not _SUMMARY_LINE.search(text):
+            continue
+        if "failures: " in text or text.startswith(("WARNING", "NOTE")):
+            kept.append(text.strip())
+        elif detail < SUMMARY_MAX_DETAIL:
+            detail += 1
+            kept.append(text.strip())
+    rc = proc.wait()
+    print(f"--- {script} finished rc={rc} "
           f"in {time.monotonic() - t0:,.1f}s", flush=True)
-    return proc.returncode
+    if summarize:
+        if rc:
+            kept.append(f"exit code {rc}")
+        _SUMMARY.append((f"{script}{label}", kept))
+    return rc
+
+
+def _guard_enabled(env: dict[str, str]) -> bool:
+    return env.get("PRICE_GUARD", "").strip().lower() in ("on", "true", "1")
+
+
+def _is_dry(env: dict[str, str]) -> bool:
+    return env.get("SYNC_DRY_RUN", "true").strip().lower() in ("true", "1", "yes")
+
+
+def _run_update(script: str, env: dict[str, str], *, label: str = "") -> int:
+    """Run an update script behind the price guard (see price_guard.py).
+
+    Guard off: one plain run. Guard on: a read-only dry pass collects how far
+    Base Price and Purchase Price would move; if too many move too far the
+    real pass runs with price and cost writes held. A run that is itself a dry
+    run needs only the one pass -- it reports the verdict and writes nothing.
+    """
+    if not _guard_enabled(env):
+        return _run(script, env, label=label)
+
+    fd, report_path = tempfile.mkstemp(prefix="price_guard_", suffix=".json")
+    os.close(fd)
+    os.unlink(report_path)
+    probe_env = {**env, "PRICE_GUARD_REPORT": report_path}
+    probe_env.pop("PRICE_GUARD_HOLD", None)
+    dry = _is_dry(env)
+    if dry:
+        rc = _run(script, probe_env, label=label)
+    else:
+        probe_env.update({"SYNC_DRY_RUN": "true", "NETSUITE_READ_ONLY": "true"})
+        rc = _run(script, probe_env, label=f"{label} (price guard check, no writes)",
+                  summarize=False)
+    try:
+        report = json.loads(Path(report_path).read_text())
+    except (OSError, ValueError):
+        report = None
+    finally:
+        Path(report_path).unlink(missing_ok=True)
+
+    lines: list[str] = []
+    hold = False
+    if report is None:
+        # No verdict is not a pass. Hold prices rather than write them blind.
+        hold = True
+        lines.append("PRICE HOLD: the price guard check produced no report "
+                     f"(exit code {rc}); Base Price and Purchase Price are "
+                     "held for this vendor.")
+    else:
+        lines += [f"PRICE GUARD {x}" for x in price_guard.describe(report)]
+        over = price_guard.tripped(report)
+        released = env.get("PRICE_GUARD_OVERRIDE", "").strip() == "RELEASE"
+        if over and released:
+            lines.append("PRICE GUARD over the limit for "
+                         f"{', '.join(over)}, RELEASED by override: prices "
+                         "are written.")
+        elif over:
+            hold = True
+            lines.append(
+                f"PRICE HOLD: more than {price_guard.MAX_SHARE:.0%} of "
+                f"{' and '.join(over)} values move more than "
+                f"{price_guard.MOVE_PCT:.0%}. Base Price and Purchase Price "
+                "are held for this vendor; every other field is still "
+                "written. Review, then run again with the override to release.")
+    for line in lines:
+        print(line, flush=True)
+    _SUMMARY.append((f"{script}{label} price guard", lines))
+    if dry:
+        return rc
+    live_env = dict(env)
+    if hold:
+        live_env["PRICE_GUARD_HOLD"] = "1"
+    return _run(script, live_env, label=label)
+
+
+def write_summary(vendor: str, phases: tuple[str, ...], worst: int) -> None:
+    """Write what this run added, changed, skipped and held.
+
+    Goes to the GitHub run summary page and, when RUN_SUMMARY_FILE is set, to
+    that file so the workflow can post it to the day's summary issue.
+    """
+    mode = "dry run (nothing written)" if _is_dry(dict(os.environ)) else "live"
+    out = [f"### {vendor}: {', '.join(phases)} ({mode})", ""]
+    for heading, lines in _SUMMARY:
+        out.append(f"**{heading}**")
+        out += [f"- {x}" for x in lines] or ["- no totals line was printed"]
+        out.append("")
+    if worst:
+        out.append(f"Worst exit code: {worst}")
+    text = "\n".join(out) + "\n"
+    for target in (os.environ.get("GITHUB_STEP_SUMMARY"),
+                   os.environ.get("RUN_SUMMARY_FILE")):
+        if not target:
+            continue
+        try:
+            with open(target, "a", encoding="utf-8") as fh:
+                fh.write(text)
+        except OSError as exc:
+            print(f"could not write summary to {target}: {exc}", flush=True)
 
 
 def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
@@ -225,10 +373,16 @@ def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
                 # (dry run 31367785465, live run 31457843380).
                 for supplier in DCOS_SUPPLIERS:
                     print(f"  -- supplier: {supplier}", flush=True)
-                    worst = max(worst, _run(script, {**env, "DCOS_SUPPLIER": supplier}))
+                    worst = max(worst, _run(
+                        script, {**env, "DCOS_SUPPLIER": supplier},
+                        label=f" [{supplier}]"))
+            elif phase == "update":
+                worst = max(worst, _run_update(script, env))
             else:
                 worst = max(worst, _run(script, env))
     print(f"\n=== VENDOR {vendor} complete (worst rc={worst})", flush=True)
+    write_summary(vendor, phases, worst)
+    _SUMMARY.clear()
     return worst
 
 

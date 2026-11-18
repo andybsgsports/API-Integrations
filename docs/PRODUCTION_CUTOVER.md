@@ -64,6 +64,33 @@ dispatch only: no schedule, no chain, no item-lifecycle.
 
 The sandbox nightly and its secrets are not touched by this workflow.
 
+## Production safeguards (added 2026-11-18)
+
+- **Price guard** (`scripts/price_guard.py`, always on in the production
+  workflow). Before an update writes, a read-only pass counts how far Base
+  Price and Purchase Price would move. If more than a quarter of a vendor's
+  existing prices move more than 25%, Base Price and Purchase Price are held
+  for that vendor and the run says `PRICE HOLD`; every other field is still
+  written. Filling a blank price is not a move. Fewer than 20 compared prices
+  never trips it. To release a hold Andy has reviewed, run again with
+  `price_hold_override` typed as `RELEASE`. Covers SanMar, S&S, Momentec and
+  Under Armour (the writers that set price or cost). Expect the first
+  production SanMar update to trip it: Base Price moving to MSRP is a large
+  move on many items, and that first move should be looked at before release.
+- **Daily summary** (`scripts/post_daily_summary.py`). Each production run
+  adds its totals, every item skipped or failed by name, and the price guard
+  result to one GitHub issue per day, "Production pipeline daily summary
+  <date>". The same text is on the run's summary page. The sandbox nightly
+  writes the run summary page only.
+- **Write limit**. Production runs use 4 parallel writes (`write_concurrency`
+  input), not the sandbox's 8, so staff and the other integrations are not
+  throttled.
+- **Output is no longer lost when a job is cut off**: phase scripts run
+  unbuffered.
+
+In the sandbox the price guard is off unless a manual run sets
+`price_guard: on` (the check adds a read pass).
+
 ## The gate
 
 Every sandbox workflow writes `NETSUITE_ALLOW_PRODUCTION_WRITES=false` into

@@ -54,6 +54,10 @@ on:
         description: "Re-post existing children through the RESTlet update path (payload-schema fixes)"
         required: false
         default: "false"
+      price_guard:
+        description: "Price guard (on = check first and hold prices when more than a quarter move over 25%)"
+        required: false
+        default: "off"
       ss_brands:
         description: "S&S: comma-separated brand allowlist for creation (blank = the default list; 'ALL' is not a value -- pass every brand explicitly)"
         required: false
@@ -148,6 +152,9 @@ jobs:
           SS_CREATE_BRANDS: ${{ github.event.inputs.ss_brands || '' }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+          # Off unless asked for on a manual run: the check adds a read pass,
+          # and the sandbox SanMar update already runs close to the job limit.
+          PRICE_GUARD: ${{ github.event.inputs.price_guard || 'off' }}
         run: |
           python scripts/vendor_pipeline.py \
             --vendor "$VENDOR" --phases "$PHASES"
