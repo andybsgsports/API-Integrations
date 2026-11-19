@@ -42,6 +42,7 @@ from __future__ import annotations
 import html
 import os
 import re
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -419,6 +420,26 @@ def store_description(text: str) -> str:
     return "\n".join(f"- {p}" for p in parts)
 
 
+def with_retry(fn, *args, tries: int = 4, wait: float = 30.0):
+    """Call a NetSuite READ again after a pause when it is throttled.
+
+    The client already retries a 429 for a few seconds. In the sandbox a
+    burst of writes (ours, or the nightly's) can outlast that, and one
+    lookup giving up ended whole runs on 2026-11-18 and 2026-11-19. Only for
+    calls that are safe to repeat -- never a create.
+    """
+    for attempt in range(1, tries + 1):
+        try:
+            return fn(*args)
+        except Exception as exc:  # noqa: BLE001
+            if attempt == tries or "429" not in str(exc):
+                raise
+            print(f"  NetSuite busy (429); waiting {wait:.0f}s "
+                  f"(attempt {attempt} of {tries})", flush=True)
+            time.sleep(wait)
+    return None
+
+
 def post_children(client, cfg, payloads: list[dict]
                   ) -> tuple[int, int, int, list[str], list[str]]:
     """Post payloads through the matrix RESTlet.
@@ -473,9 +494,16 @@ def set_class(client, ids: list[str], class_id: str | None) -> int:
     """
     if not class_id or not ids:
         return 0
+    jobs = [(rid, {"class": {"id": str(class_id)}}) for rid in ids]
+    missed: list[str] = []
     _written, failed = write_records(
-        client, "inventoryItem",
-        [(rid, {"class": {"id": str(class_id)}}) for rid in ids])
+        client, "inventoryItem", jobs, workers=2,
+        on_error=lambda rid, _exc: missed.append(rid))
+    if missed:
+        # One more pass for anything throttled the first time.
+        time.sleep(20)
+        again = [(rid, body) for rid, body in jobs if rid in set(missed)]
+        _written, failed = write_records(client, "inventoryItem", again, workers=1)
     if failed:
         print(f"  class not set on {failed} of {len(ids)} child(ren)")
     return failed
@@ -597,7 +625,7 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
 
         # Per-SKU guards: UPC already on another item, retired colour or size.
         try:
-            on_file = _upcs_on_file(client, plan["missing"])
+            on_file = with_retry(_upcs_on_file, client, plan["missing"])
         except Exception as exc:  # noqa: BLE001 - one busy read must not end the run
             skipped_styles.append(
                 f"style {token}: NetSuite could not be read just now "
@@ -635,10 +663,21 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
             if not on_list(resolver, SIZE_LIST, s):
                 new_sizes[s] += 1
         if allow_write:
-            # Create the genuinely new values before any child references them.
-            for sku in todo:
-                resolver.resolve(COLOR_LIST, color_name(sku.color))
-                resolver.resolve(SIZE_LIST, normalize_size(sku.size))
+            # Create the genuinely new values before any child references
+            # them. A value already on the list needs no call at all.
+            try:
+                for value in dict.fromkeys(color_name(k.color) for k in todo):
+                    if not on_list(resolver, COLOR_LIST, value):
+                        with_retry(resolver.resolve, COLOR_LIST, value)
+                for value in dict.fromkeys(normalize_size(k.size) for k in todo):
+                    if not on_list(resolver, SIZE_LIST, value):
+                        with_retry(resolver.resolve, SIZE_LIST, value)
+            except Exception as exc:  # noqa: BLE001
+                skipped_styles.append(
+                    f"style {token}: a colour or size value could not be "
+                    f"added just now ({str(exc)[:60]}); it is picked up on "
+                    f"the next run")
+                continue
 
         first = todo[0]
         print(f"\n=== {kind} {token}: {len(todo)} child(ren) "
@@ -646,7 +685,8 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
               f"{title_case(first.name)!r}")
         parent_id = plan["parent_id"]
         cls = class_path(first.category, first.name)
-        cls_id = _class_id(client, cls) if (cls and allow_write) else None
+        cls_id = (with_retry(_class_id, client, cls)
+                  if (cls and allow_write) else None)
         if kind == "new":
             styles_new += 1
             if not cls:

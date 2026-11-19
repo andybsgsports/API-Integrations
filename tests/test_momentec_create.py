@@ -245,7 +245,8 @@ def test_name_already_taken_is_a_skip_not_a_failure():
 def test_class_is_set_by_id_on_the_created_children(monkeypatch):
     sent: list = []
     monkeypatch.setattr(mc, "write_records",
-                        lambda client, rtype, jobs: (sent.extend(jobs), (len(jobs), 0))[1])
+                        lambda client, rtype, jobs, **kw: (
+                            sent.extend(jobs), (len(jobs), 0))[1])
     assert mc.set_class(object(), ["501", "502"], "16") == 0
     assert sent == [("501", {"class": {"id": "16"}}), ("502", {"class": {"id": "16"}})]
     assert mc.set_class(object(), ["501"], None) == 0 and len(sent) == 2
@@ -286,3 +287,29 @@ def test_on_list_answers_from_the_index():
     assert mc.on_list(r, "colors", "Navy/ White") is True
     assert mc.on_list(r, "colors", "Bt. Orange") is False
     assert mc.on_list(r, "colors", "") is False
+
+
+def test_a_throttled_read_is_tried_again(monkeypatch):
+    monkeypatch.setattr(mc.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def flaky(x):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("429 Too Many Requests")
+        return x * 2
+
+    assert mc.with_retry(flaky, 4) == 8 and calls["n"] == 3
+
+
+def test_other_errors_are_not_retried(monkeypatch):
+    monkeypatch.setattr(mc.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def broken():
+        calls["n"] += 1
+        raise ValueError("bad query")
+
+    with pytest.raises(ValueError):
+        mc.with_retry(broken)
+    assert calls["n"] == 1
