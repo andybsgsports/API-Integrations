@@ -42,9 +42,11 @@ from __future__ import annotations
 import html
 import os
 import re
+import time
 from collections import Counter
 from pathlib import Path
 
+from concurrent_writes import write_records
 from momentec_backfill import (
     BRAND_NAMES,
     _net_cost,
@@ -208,7 +210,8 @@ def creatable(sku: MomentecSku, statuses: set[str]) -> bool:
 
 
 def plan_style(skus: list[MomentecSku], rows: list[dict], options,
-               statuses: set[str]) -> dict:
+               statuses: set[str],
+               color_index: dict[str, tuple[str, str]] | None = None) -> dict:
     """Decide what to do with one style.
 
     ``rows`` are the NetSuite items carrying the style as Vendor Name/Code
@@ -228,11 +231,18 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
     for r in rows:
         rid = str(r["id"])
         color_id, size_id = str(r.get("color") or ""), str(r.get("size") or "")
-        if color_id and size_id:
-            opt_index.setdefault((color_id, size_id), rid)
+        # A child is an item that HAS a parent. Option values alone do not
+        # say so: a matrix parent carries the colours and sizes of all its
+        # children, and reading it as a child made the parent itself the
+        # "item that could not be matched" on ~170 styles (sandbox, 2026-11-19).
+        if str(r.get("parent") or ""):
             children.add(rid)
-            if str(r.get("parent") or ""):
-                parents_of_children.add(str(r["parent"]))
+            parents_of_children.add(str(r["parent"]))
+            # A child with no colour or size value (some legacy items) stays
+            # out of the index: nothing can claim it, so its style is
+            # skipped and it is listed by name instead of being duplicated.
+            if color_id and size_id:
+                opt_index.setdefault((color_id, size_id), rid)
         else:
             parent_rows.append(rid)
     # The parent is whichever item the existing children sit under. It often
@@ -250,7 +260,14 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
             options.size_candidates(sku.size)
             + options.size_candidates(normalize_size(sku.size))))
         hit = None
-        for color_id, _method in options.color_candidates(color, color):
+        color_ids = [cid for cid, _method in options.color_candidates(color, color)]
+        # Also the list value that differs only by spacing or punctuation
+        # ("Khaki/ Black" for KHAKI/BLACK) -- the spelling a child we created
+        # ourselves was given.
+        variant = (color_index or {}).get(normalize_option_name(color_name(sku.color)))
+        if variant and str(variant[0]) not in color_ids:
+            color_ids.append(str(variant[0]))
+        for color_id in color_ids:
             for size_id in size_ids:
                 hit = opt_index.get((color_id, size_id))
                 if hit:
@@ -418,15 +435,38 @@ def store_description(text: str) -> str:
     return "\n".join(f"- {p}" for p in parts)
 
 
-def post_children(client, cfg, payloads: list[dict]) -> tuple[int, int, int, list[str]]:
+def with_retry(fn, *args, tries: int = 4, wait: float = 30.0):
+    """Call a NetSuite READ again after a pause when it is throttled.
+
+    The client already retries a 429 for a few seconds. In the sandbox a
+    burst of writes (ours, or the nightly's) can outlast that, and one
+    lookup giving up ended whole runs on 2026-11-18 and 2026-11-19. Only for
+    calls that are safe to repeat -- never a create.
+    """
+    for attempt in range(1, tries + 1):
+        try:
+            return fn(*args)
+        except Exception as exc:  # noqa: BLE001
+            if attempt == tries or "429" not in str(exc):
+                raise
+            print(f"  NetSuite busy (429); waiting {wait:.0f}s "
+                  f"(attempt {attempt} of {tries})", flush=True)
+            time.sleep(wait)
+    return None
+
+
+def post_children(client, cfg, payloads: list[dict]
+                  ) -> tuple[int, int, int, list[str], list[str]]:
     """Post payloads through the matrix RESTlet.
 
-    Returns ``(created, already_present, failures, name_taken)``. An existing
+    Returns ``(created, already_present, failures, name_taken, ids)`` where
+    ``ids`` are the internal ids of the items created or updated. An existing
     option combination is idempotency; an item name that is already taken is a
     skip for the list (Andy, 2026-11-12), not a failure.
     """
     created = already = failures = 0
     name_taken: list[str] = []
+    ids: list[str] = []
     for i in range(0, len(payloads), RESTLET_BATCH):
         batch = payloads[i:i + RESTLET_BATCH]
         by_ext = {str(p.get("externalId")): p for p in batch}
@@ -442,6 +482,8 @@ def post_children(client, cfg, payloads: list[dict]) -> tuple[int, int, int, lis
         for r in resp.get("results", []):
             if r.get("status") != "error":
                 created += 1
+                if r.get("id"):
+                    ids.append(str(r["id"]))
                 continue
             msg = str(r.get("message") or "")
             low = msg.lower()
@@ -455,7 +497,31 @@ def post_children(client, cfg, payloads: list[dict]) -> tuple[int, int, int, lis
             else:
                 failures += 1
                 print(f"  CHILD FAILED {r.get('externalId')}: {msg[:140]}")
-    return created, already, failures, name_taken
+    return created, already, failures, name_taken, ids
+
+
+def set_class(client, ids: list[str], class_id: str | None) -> int:
+    """Put the Class on freshly created children; returns how many failed.
+
+    Done here, by id, and not through the RESTlet's ``class`` field: its
+    class-by-name lookup fails in NetSuite ("invalid search criteria: parent",
+    sandbox pilot 2026-11-19), which failed every child that carried one.
+    """
+    if not class_id or not ids:
+        return 0
+    jobs = [(rid, {"class": {"id": str(class_id)}}) for rid in ids]
+    missed: list[str] = []
+    _written, failed = write_records(
+        client, "inventoryItem", jobs, workers=2,
+        on_error=lambda rid, _exc: missed.append(rid))
+    if missed:
+        # One more pass for anything throttled the first time.
+        time.sleep(20)
+        again = [(rid, body) for rid, body in jobs if rid in set(missed)]
+        _written, failed = write_records(client, "inventoryItem", again, workers=1)
+    if failed:
+        print(f"  class not set on {failed} of {len(ids)} child(ren)")
+    return failed
 
 
 def _existing_names(client, tokens: list[str]) -> set[str]:
@@ -547,9 +613,11 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
     capped_new = capped_adopt = 0
 
     rows_by_style = fetch_style_items(client, tokens)
+    color_index = resolver._norm_index(COLOR_LIST)
     for token in tokens:
         skus = by_style[token]
-        plan = plan_style(skus, rows_by_style[token], options, statuses)
+        plan = plan_style(skus, rows_by_style[token], options, statuses,
+                          color_index)
         kind = plan["kind"]
         if kind == "complete":
             styles_complete += 1
@@ -574,7 +642,7 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
 
         # Per-SKU guards: UPC already on another item, retired colour or size.
         try:
-            on_file = _upcs_on_file(client, plan["missing"])
+            on_file = with_retry(_upcs_on_file, client, plan["missing"])
         except Exception as exc:  # noqa: BLE001 - one busy read must not end the run
             skipped_styles.append(
                 f"style {token}: NetSuite could not be read just now "
@@ -612,26 +680,38 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
             if not on_list(resolver, SIZE_LIST, s):
                 new_sizes[s] += 1
         if allow_write:
-            # Create the genuinely new values before any child references them.
-            for sku in todo:
-                resolver.resolve(COLOR_LIST, color_name(sku.color))
-                resolver.resolve(SIZE_LIST, normalize_size(sku.size))
+            # Create the genuinely new values before any child references
+            # them. A value already on the list needs no call at all.
+            try:
+                for value in dict.fromkeys(color_name(k.color) for k in todo):
+                    if not on_list(resolver, COLOR_LIST, value):
+                        with_retry(resolver.resolve, COLOR_LIST, value)
+                for value in dict.fromkeys(normalize_size(k.size) for k in todo):
+                    if not on_list(resolver, SIZE_LIST, value):
+                        with_retry(resolver.resolve, SIZE_LIST, value)
+            except Exception as exc:  # noqa: BLE001
+                skipped_styles.append(
+                    f"style {token}: a colour or size value could not be "
+                    f"added just now ({str(exc)[:60]}); it is picked up on "
+                    f"the next run")
+                continue
 
         first = todo[0]
         print(f"\n=== {kind} {token}: {len(todo)} child(ren) "
               f"[{BRAND_NAMES.get(first.brand, first.brand)}] "
               f"{title_case(first.name)!r}")
         parent_id = plan["parent_id"]
+        cls = class_path(first.category, first.name)
+        cls_id = (with_retry(_class_id, client, cls)
+                  if (cls and allow_write) else None)
         if kind == "new":
             styles_new += 1
-            cls = class_path(first.category, first.name)
             if not cls:
                 unmapped_cats[first.category] += 1
             if allow_write:
                 if parent_refs is None:
                     parent_refs = resolve_parent_refs(client)
                 body = parent_body(token, todo, uom, parent_refs)
-                cls_id = _class_id(client, cls) if cls else None
                 if cls_id:
                     body["class"] = {"id": cls_id}
                 try:
@@ -662,7 +742,8 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
                   f"{payloads[0].get('itemId')!r} cost {payloads[0].get('cost')} "
                   f"base {payloads[0].get('basePrice')}")
             continue
-        c, a, f, taken = post_children(client, cfg, payloads)
+        c, a, f, taken, ids = post_children(client, cfg, payloads)
+        set_class(client, ids, cls_id)
         if kind == "new":
             new_children += c
         else:

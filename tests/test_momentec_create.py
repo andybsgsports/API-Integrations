@@ -207,6 +207,7 @@ def test_child_is_born_in_andys_item_format():
     assert p["location"] == p["preferredLocation"] == "Badger Sporting Goods"
     assert p["manufacturer"] == "Augusta Sportswear"
     assert p["parentId"] == "900" and p["vendorName"] == "1234"
+    assert "class" not in p   # the RESTlet's class lookup fails; set by id after
     assert p["fields"]["custitem_mtec_item_sku"] == "1234.N1.S"
     assert p["fields"]["custitem_mtec_size_guide"].startswith("https://")
 
@@ -224,7 +225,7 @@ def test_name_already_taken_is_a_skip_not_a_failure():
     class Client:
         def call_restlet(self, *_a):
             return {"results": [
-                {"externalId": "MTEC-1", "status": "created"},
+                {"externalId": "MTEC-1", "status": "created", "id": 501},
                 {"externalId": "MTEC-2", "status": "error",
                  "message": "This item already exists."},
                 {"externalId": "MTEC-3", "status": "error",
@@ -237,8 +238,18 @@ def test_name_already_taken_is_a_skip_not_a_failure():
             matrix_script_id = matrix_deploy_id = "1"
 
     payloads = [{"externalId": f"MTEC-{i}", "itemId": f"I{i}"} for i in (1, 2, 3, 4)]
-    created, already, failures, taken = mc.post_children(Client(), Cfg, payloads)
-    assert (created, already, failures, taken) == (1, 1, 1, ["I2"])
+    created, already, failures, taken, ids = mc.post_children(Client(), Cfg, payloads)
+    assert (created, already, failures, taken, ids) == (1, 1, 1, ["I2"], ["501"])
+
+
+def test_class_is_set_by_id_on_the_created_children(monkeypatch):
+    sent: list = []
+    monkeypatch.setattr(mc, "write_records",
+                        lambda client, rtype, jobs, **kw: (
+                            sent.extend(jobs), (len(jobs), 0))[1])
+    assert mc.set_class(object(), ["501", "502"], "16") == 0
+    assert sent == [("501", {"class": {"id": "16"}}), ("502", {"class": {"id": "16"}})]
+    assert mc.set_class(object(), ["501"], None) == 0 and len(sent) == 2
 
 
 def test_momentec_has_a_create_phase_that_is_not_in_the_chain():
@@ -276,3 +287,58 @@ def test_on_list_answers_from_the_index():
     assert mc.on_list(r, "colors", "Navy/ White") is True
     assert mc.on_list(r, "colors", "Bt. Orange") is False
     assert mc.on_list(r, "colors", "") is False
+
+
+def test_a_throttled_read_is_tried_again(monkeypatch):
+    monkeypatch.setattr(mc.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def flaky(x):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("429 Too Many Requests")
+        return x * 2
+
+    assert mc.with_retry(flaky, 4) == 8 and calls["n"] == 3
+
+
+def test_other_errors_are_not_retried(monkeypatch):
+    monkeypatch.setattr(mc.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def broken():
+        calls["n"] += 1
+        raise ValueError("bad query")
+
+    with pytest.raises(ValueError):
+        mc.with_retry(broken)
+    assert calls["n"] == 1
+
+
+def test_a_parent_carrying_option_values_is_not_read_as_a_child():
+    # A matrix parent holds every colour and size its children use.
+    parent = {"id": "900", "itemid": "1234", "parent": None,
+              "color": "11, 12", "size": "21, 22"}
+    child = {"id": "901", "itemid": "1234-Navy-Small", "parent": "900",
+             "color": "11", "size": "21"}
+    plan = mc.plan_style([sku(), sku(size="M")], [parent, child],
+                         FakeOptions(), {"20"})
+    assert plan["kind"] == "adopt" and plan["parent_id"] == "900"
+
+
+def test_a_child_under_a_spacing_variant_colour_is_recognised():
+    # The list spells it "Khaki/ Black" (id 77); the feed says KHAKI/BLACK.
+    rows = [PARENT, {"id": "901", "itemid": "1234-Khaki/ Black-Small",
+                     "parent": "900", "color": "77", "size": "21"}]
+    feed = [sku(color="KHAKI/BLACK", code="K1")]
+    index = {"khakiblack": ("77", "Khaki/ Black")}
+    assert mc.plan_style(feed, rows, FakeOptions(), {"20"}, index)["kind"] == (
+        "complete")
+    assert mc.plan_style(feed, rows, FakeOptions(), {"20"})["kind"] == "skip"
+
+
+def test_a_legacy_child_without_option_values_blocks_its_style():
+    rows = [PARENT, {"id": "901", "itemid": "1234-BLK", "parent": "900",
+                     "color": None, "size": None}]
+    plan = mc.plan_style([sku()], rows, FakeOptions(), {"20"})
+    assert plan["kind"] == "skip" and plan["reason"].endswith(": 1234-BLK")
