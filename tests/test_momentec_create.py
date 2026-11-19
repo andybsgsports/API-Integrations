@@ -207,7 +207,7 @@ def test_child_is_born_in_andys_item_format():
     assert p["location"] == p["preferredLocation"] == "Badger Sporting Goods"
     assert p["manufacturer"] == "Augusta Sportswear"
     assert p["parentId"] == "900" and p["vendorName"] == "1234"
-    assert p["class"] == "Tops : Tees"
+    assert "class" not in p   # the RESTlet's class lookup fails; set by id after
     assert p["fields"]["custitem_mtec_item_sku"] == "1234.N1.S"
     assert p["fields"]["custitem_mtec_size_guide"].startswith("https://")
 
@@ -225,7 +225,7 @@ def test_name_already_taken_is_a_skip_not_a_failure():
     class Client:
         def call_restlet(self, *_a):
             return {"results": [
-                {"externalId": "MTEC-1", "status": "created"},
+                {"externalId": "MTEC-1", "status": "created", "id": 501},
                 {"externalId": "MTEC-2", "status": "error",
                  "message": "This item already exists."},
                 {"externalId": "MTEC-3", "status": "error",
@@ -238,8 +238,17 @@ def test_name_already_taken_is_a_skip_not_a_failure():
             matrix_script_id = matrix_deploy_id = "1"
 
     payloads = [{"externalId": f"MTEC-{i}", "itemId": f"I{i}"} for i in (1, 2, 3, 4)]
-    created, already, failures, taken = mc.post_children(Client(), Cfg, payloads)
-    assert (created, already, failures, taken) == (1, 1, 1, ["I2"])
+    created, already, failures, taken, ids = mc.post_children(Client(), Cfg, payloads)
+    assert (created, already, failures, taken, ids) == (1, 1, 1, ["I2"], ["501"])
+
+
+def test_class_is_set_by_id_on_the_created_children(monkeypatch):
+    sent: list = []
+    monkeypatch.setattr(mc, "write_records",
+                        lambda client, rtype, jobs: (sent.extend(jobs), (len(jobs), 0))[1])
+    assert mc.set_class(object(), ["501", "502"], "16") == 0
+    assert sent == [("501", {"class": {"id": "16"}}), ("502", {"class": {"id": "16"}})]
+    assert mc.set_class(object(), ["501"], None) == 0 and len(sent) == 2
 
 
 def test_momentec_has_a_create_phase_that_is_not_in_the_chain():

@@ -45,6 +45,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from concurrent_writes import write_records
 from momentec_backfill import (
     BRAND_NAMES,
     _net_cost,
@@ -365,9 +366,6 @@ def child_payload(sku: MomentecSku, resolver, uom: dict[str, str],
         "taxSchedule": DEFAULT_TAX_SCHEDULE,
         "subsidiary": DEFAULT_SUBSIDIARY,
         "department": DEFAULT_DEPARTMENT,
-        # Same class as the parent gets, set at birth: Momentec's create step
-        # has no separate finalize pass to copy it down afterwards.
-        "class": class_path(sku.category, sku.name) or None,
         "location": DEFAULT_LOCATION,
         "preferredLocation": DEFAULT_LOCATION,
         "fields": child_fields(sku),
@@ -421,15 +419,18 @@ def store_description(text: str) -> str:
     return "\n".join(f"- {p}" for p in parts)
 
 
-def post_children(client, cfg, payloads: list[dict]) -> tuple[int, int, int, list[str]]:
+def post_children(client, cfg, payloads: list[dict]
+                  ) -> tuple[int, int, int, list[str], list[str]]:
     """Post payloads through the matrix RESTlet.
 
-    Returns ``(created, already_present, failures, name_taken)``. An existing
+    Returns ``(created, already_present, failures, name_taken, ids)`` where
+    ``ids`` are the internal ids of the items created or updated. An existing
     option combination is idempotency; an item name that is already taken is a
     skip for the list (Andy, 2026-11-12), not a failure.
     """
     created = already = failures = 0
     name_taken: list[str] = []
+    ids: list[str] = []
     for i in range(0, len(payloads), RESTLET_BATCH):
         batch = payloads[i:i + RESTLET_BATCH]
         by_ext = {str(p.get("externalId")): p for p in batch}
@@ -445,6 +446,8 @@ def post_children(client, cfg, payloads: list[dict]) -> tuple[int, int, int, lis
         for r in resp.get("results", []):
             if r.get("status") != "error":
                 created += 1
+                if r.get("id"):
+                    ids.append(str(r["id"]))
                 continue
             msg = str(r.get("message") or "")
             low = msg.lower()
@@ -458,7 +461,24 @@ def post_children(client, cfg, payloads: list[dict]) -> tuple[int, int, int, lis
             else:
                 failures += 1
                 print(f"  CHILD FAILED {r.get('externalId')}: {msg[:140]}")
-    return created, already, failures, name_taken
+    return created, already, failures, name_taken, ids
+
+
+def set_class(client, ids: list[str], class_id: str | None) -> int:
+    """Put the Class on freshly created children; returns how many failed.
+
+    Done here, by id, and not through the RESTlet's ``class`` field: its
+    class-by-name lookup fails in NetSuite ("invalid search criteria: parent",
+    sandbox pilot 2026-11-19), which failed every child that carried one.
+    """
+    if not class_id or not ids:
+        return 0
+    _written, failed = write_records(
+        client, "inventoryItem",
+        [(rid, {"class": {"id": str(class_id)}}) for rid in ids])
+    if failed:
+        print(f"  class not set on {failed} of {len(ids)} child(ren)")
+    return failed
 
 
 def _existing_names(client, tokens: list[str]) -> set[str]:
@@ -625,16 +645,16 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
               f"[{BRAND_NAMES.get(first.brand, first.brand)}] "
               f"{title_case(first.name)!r}")
         parent_id = plan["parent_id"]
+        cls = class_path(first.category, first.name)
+        cls_id = _class_id(client, cls) if (cls and allow_write) else None
         if kind == "new":
             styles_new += 1
-            cls = class_path(first.category, first.name)
             if not cls:
                 unmapped_cats[first.category] += 1
             if allow_write:
                 if parent_refs is None:
                     parent_refs = resolve_parent_refs(client)
                 body = parent_body(token, todo, uom, parent_refs)
-                cls_id = _class_id(client, cls) if cls else None
                 if cls_id:
                     body["class"] = {"id": cls_id}
                 try:
@@ -665,7 +685,8 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
                   f"{payloads[0].get('itemId')!r} cost {payloads[0].get('cost')} "
                   f"base {payloads[0].get('basePrice')}")
             continue
-        c, a, f, taken = post_children(client, cfg, payloads)
+        c, a, f, taken, ids = post_children(client, cfg, payloads)
+        set_class(client, ids, cls_id)
         if kind == "new":
             new_children += c
         else:
