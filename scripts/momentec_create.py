@@ -235,11 +235,15 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
         # say so: a matrix parent carries the colours and sizes of all its
         # children, and reading it as a child made the parent itself the
         # "item that could not be matched" on ~170 styles (sandbox, 2026-11-19).
-        if str(r.get("parent") or "") and color_id and size_id:
-            opt_index.setdefault((color_id, size_id), rid)
+        if str(r.get("parent") or ""):
             children.add(rid)
             parents_of_children.add(str(r["parent"]))
-        elif not str(r.get("parent") or ""):
+            # A child with no colour or size value (some legacy items) stays
+            # out of the index: nothing can claim it, so its style is
+            # skipped and it is listed by name instead of being duplicated.
+            if color_id and size_id:
+                opt_index.setdefault((color_id, size_id), rid)
+        else:
             parent_rows.append(rid)
     # The parent is whichever item the existing children sit under. It often
     # does not carry the style as its own Vendor Name/Code (160 styles in the

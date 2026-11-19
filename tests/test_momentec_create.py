@@ -335,3 +335,10 @@ def test_a_child_under_a_spacing_variant_colour_is_recognised():
     assert mc.plan_style(feed, rows, FakeOptions(), {"20"}, index)["kind"] == (
         "complete")
     assert mc.plan_style(feed, rows, FakeOptions(), {"20"})["kind"] == "skip"
+
+
+def test_a_legacy_child_without_option_values_blocks_its_style():
+    rows = [PARENT, {"id": "901", "itemid": "1234-BLK", "parent": "900",
+                     "color": None, "size": None}]
+    plan = mc.plan_style([sku()], rows, FakeOptions(), {"20"})
+    assert plan["kind"] == "skip" and plan["reason"].endswith(": 1234-BLK")
