@@ -365,6 +365,9 @@ def child_payload(sku: MomentecSku, resolver, uom: dict[str, str],
         "taxSchedule": DEFAULT_TAX_SCHEDULE,
         "subsidiary": DEFAULT_SUBSIDIARY,
         "department": DEFAULT_DEPARTMENT,
+        # Same class as the parent gets, set at birth: Momentec's create step
+        # has no separate finalize pass to copy it down afterwards.
+        "class": class_path(sku.category, sku.name) or None,
         "location": DEFAULT_LOCATION,
         "preferredLocation": DEFAULT_LOCATION,
         "fields": child_fields(sku),

@@ -207,6 +207,7 @@ def test_child_is_born_in_andys_item_format():
     assert p["location"] == p["preferredLocation"] == "Badger Sporting Goods"
     assert p["manufacturer"] == "Augusta Sportswear"
     assert p["parentId"] == "900" and p["vendorName"] == "1234"
+    assert p["class"] == "Tops : Tees"
     assert p["fields"]["custitem_mtec_item_sku"] == "1234.N1.S"
     assert p["fields"]["custitem_mtec_size_guide"].startswith("https://")
 
