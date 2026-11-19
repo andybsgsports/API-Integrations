@@ -80,6 +80,7 @@ from sanmar_netsuite.netsuite.matrix_options import (
     COLOR_LIST,
     SIZE_LIST,
     MatrixOptionResolver,
+    normalize_option_name,
 )
 from sanmar_netsuite.netsuite.repository import _sql_escape
 from sanmar_netsuite.transform.sizes import normalize_size
@@ -269,21 +270,48 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
                            f"different parents" if children
                            else f"{len(parents)} parent item(s) carry this "
                                 f"vendor code and none has children")}
-    unclaimed = len(children - claimed)
+    unclaimed = children - claimed
     if unclaimed:
+        names = sorted(str(r.get("itemid") or r["id"]) for r in rows
+                       if str(r["id"]) in unclaimed)
+        shown = ", ".join(names[:3]) + (" ..." if len(names) > 3 else "")
         return {"kind": "skip", "missing": missing, "parent_id": None,
-                "reason": f"{unclaimed} existing item(s) could not be matched "
-                          f"to the feed"}
+                "reason": f"{len(unclaimed)} existing item(s) could not be "
+                          f"matched to the feed: {shown}"}
     return {"kind": "adopt", "reason": "", "missing": missing,
             "parent_id": parents[0]}
 
 
-def fetch_style_items(client, style: str) -> list[dict]:
-    """Items carrying ``style`` as Vendor Name/Code, with option ids and parent."""
-    return client.suiteql(
-        f"SELECT id, itemid, parent, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
-        f"FROM item WHERE vendorname = '{_sql_escape(style)}'"
-    )
+def fetch_style_items(client, tokens: list[str]) -> dict[str, list[dict]]:
+    """style -> items carrying it as Vendor Name/Code (option ids and parent).
+
+    One query per 40 styles, not one per style: the first sandbox dry run
+    spent 37 minutes on ~1,900 single lookups while the nightly was writing,
+    and the second died when one of them was throttled past its retries.
+    """
+    out: dict[str, list[dict]] = {t: [] for t in tokens}
+    by_upper = {t.upper(): t for t in tokens}
+    for i in range(0, len(tokens), 40):
+        chunk = tokens[i:i + 40]
+        in_list = ", ".join(f"'{_sql_escape(t)}'" for t in chunk)
+        for r in client.suiteql(
+            f"SELECT id, itemid, parent, vendorname, {COLOR_FIELD} AS color, "
+            f"{SIZE_FIELD} AS size FROM item WHERE vendorname IN ({in_list})"
+        ):
+            key = by_upper.get(str(r.get("vendorname") or "").upper())
+            if key is not None:
+                out[key].append(r)
+    return out
+
+
+def on_list(resolver, list_type: str, name: str) -> bool:
+    """Is ``name`` already a value on the list (any spelling variant)?
+
+    Answered from the resolver's one-query-per-list index, never a query per
+    name.
+    """
+    key = normalize_option_name((name or "").strip())
+    return bool(key) and key in resolver._norm_index(list_type)
 
 
 def child_fields(sku: MomentecSku) -> dict[str, object]:
@@ -518,10 +546,10 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
     unmapped_cats: Counter[str] = Counter()
     capped_new = capped_adopt = 0
 
+    rows_by_style = fetch_style_items(client, tokens)
     for token in tokens:
         skus = by_style[token]
-        rows = fetch_style_items(client, token)
-        plan = plan_style(skus, rows, options, statuses)
+        plan = plan_style(skus, rows_by_style[token], options, statuses)
         kind = plan["kind"]
         if kind == "complete":
             styles_complete += 1
@@ -545,14 +573,20 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
             continue
 
         # Per-SKU guards: UPC already on another item, retired colour or size.
-        on_file = _upcs_on_file(client, plan["missing"])
+        try:
+            on_file = _upcs_on_file(client, plan["missing"])
+        except Exception as exc:  # noqa: BLE001 - one busy read must not end the run
+            skipped_styles.append(
+                f"style {token}: NetSuite could not be read just now "
+                f"({str(exc)[:60]}); it is picked up on the next run")
+            continue
         todo: list[MomentecSku] = []
         for sku in plan["missing"]:
             color, size = color_name(sku.color), normalize_size(sku.size)
             why = abbreviated_color(sku.color)
             if (sku.gtin and sku.gtin in on_file) or (sku.upc and sku.upc in on_file):
                 skipped_skus.append(f"{sku.item_sku}: its UPC is already on another item")
-            elif why and resolver.resolve(COLOR_LIST, color)[1] != "existing":
+            elif why and not on_list(resolver, COLOR_LIST, color):
                 # Already on the BSG list under this exact name: nothing new
                 # is added, so it is used. Otherwise it is listed for Andy.
                 abbreviated[clean_color(sku.color)] += 1
@@ -573,10 +607,15 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
 
         for sku in todo:
             c, s = color_name(sku.color), normalize_size(sku.size)
-            if resolver.resolve(COLOR_LIST, c)[1] in ("missing", "created"):
+            if not on_list(resolver, COLOR_LIST, c):
                 new_colors[c] += 1
-            if resolver.resolve(SIZE_LIST, s)[1] in ("missing", "created"):
+            if not on_list(resolver, SIZE_LIST, s):
                 new_sizes[s] += 1
+        if allow_write:
+            # Create the genuinely new values before any child references them.
+            for sku in todo:
+                resolver.resolve(COLOR_LIST, color_name(sku.color))
+                resolver.resolve(SIZE_LIST, normalize_size(sku.size))
 
         first = todo[0]
         print(f"\n=== {kind} {token}: {len(todo)} child(ren) "

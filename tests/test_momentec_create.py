@@ -153,6 +153,7 @@ def test_an_existing_item_the_feed_cannot_explain_skips_the_style():
             {"id": "902", "itemid": "y", "color": "99", "size": "22", "parent": "900"}]
     plan = mc.plan_style([sku(), sku(size="M")], rows, FakeOptions(), {"20"})
     assert plan["kind"] == "skip" and "could not be matched" in plan["reason"]
+    assert plan["reason"].endswith(": y")   # names the item so it can be found
 
 
 def test_a_closeout_row_still_explains_its_existing_item():
@@ -245,3 +246,33 @@ def test_momentec_has_a_create_phase_that_is_not_in_the_chain():
     nightly = (Path(__file__).resolve().parents[1]
                / ".github/workflows/nightly-pipeline.yml").read_text()
     assert 'NEXT="momentec";    NEXT_PHASES="update"' in nightly
+
+
+def test_styles_are_fetched_in_batches_not_one_by_one():
+    queries: list[str] = []
+
+    class Client:
+        def suiteql(self, q):
+            queries.append(q)
+            return [{"id": "1", "itemid": "x", "parent": "9", "vendorname": "a2",
+                     "color": "11", "size": "21"}] if "'A2'" in q else []
+
+    tokens = [f"A{i}" for i in range(90)]
+    out = mc.fetch_style_items(Client(), tokens)
+    assert len(queries) == 3                      # 90 styles, 40 per query
+    assert [r["id"] for r in out["A2"]] == ["1"]  # matched whatever the case
+    assert out["A5"] == []
+
+
+def test_on_list_answers_from_the_index():
+    class Resolver:
+        calls = 0
+
+        def _norm_index(self, _list):
+            Resolver.calls += 1
+            return {"navywhite": ("1", "Navy/White")}
+
+    r = Resolver()
+    assert mc.on_list(r, "colors", "Navy/ White") is True
+    assert mc.on_list(r, "colors", "Bt. Orange") is False
+    assert mc.on_list(r, "colors", "") is False
