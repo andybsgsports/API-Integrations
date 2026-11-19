@@ -1,0 +1,50 @@
+name: Vendor Colour Map Export (read-only)
+
+# For the BSG colour list cleanup: writes the vendors' own colour names (and
+# their short codes) for the styles asked for, from the SanMar and S&S
+# catalogues, to a CSV artifact. NetSuite is not contacted at all.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      styles:
+        description: "Comma-separated style numbers"
+        required: true
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Write .env (vendor catalogue credentials only)
+        run: |
+          cat > .env <<EOF2
+          SANMAR_SFTP_USERNAME=${{ secrets.SANMAR_SFTP_USERNAME }}
+          SANMAR_SFTP_PASSWORD=${{ secrets.SANMAR_SFTP_PASSWORD }}
+          SS_API_ACCOUNT_NUMBER=${{ secrets.SS_API_ACCOUNT_NUMBER }}
+          SS_API_KEY=${{ secrets.SS_API_KEY }}
+          EOF2
+      - name: Download S&S catalog
+        continue-on-error: true
+        run: ss-sync download
+      - name: Export colour names
+        env:
+          COLOR_MAP_STYLES: ${{ github.event.inputs.styles }}
+        run: python scripts/color_map_export.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vendor-color-map
+          path: data/vendor_color_map.csv
+          if-no-files-found: error
