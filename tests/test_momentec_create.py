@@ -313,3 +313,25 @@ def test_other_errors_are_not_retried(monkeypatch):
     with pytest.raises(ValueError):
         mc.with_retry(broken)
     assert calls["n"] == 1
+
+
+def test_a_parent_carrying_option_values_is_not_read_as_a_child():
+    # A matrix parent holds every colour and size its children use.
+    parent = {"id": "900", "itemid": "1234", "parent": None,
+              "color": "11, 12", "size": "21, 22"}
+    child = {"id": "901", "itemid": "1234-Navy-Small", "parent": "900",
+             "color": "11", "size": "21"}
+    plan = mc.plan_style([sku(), sku(size="M")], [parent, child],
+                         FakeOptions(), {"20"})
+    assert plan["kind"] == "adopt" and plan["parent_id"] == "900"
+
+
+def test_a_child_under_a_spacing_variant_colour_is_recognised():
+    # The list spells it "Khaki/ Black" (id 77); the feed says KHAKI/BLACK.
+    rows = [PARENT, {"id": "901", "itemid": "1234-Khaki/ Black-Small",
+                     "parent": "900", "color": "77", "size": "21"}]
+    feed = [sku(color="KHAKI/BLACK", code="K1")]
+    index = {"khakiblack": ("77", "Khaki/ Black")}
+    assert mc.plan_style(feed, rows, FakeOptions(), {"20"}, index)["kind"] == (
+        "complete")
+    assert mc.plan_style(feed, rows, FakeOptions(), {"20"})["kind"] == "skip"

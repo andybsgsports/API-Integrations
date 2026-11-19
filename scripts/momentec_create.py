@@ -210,7 +210,8 @@ def creatable(sku: MomentecSku, statuses: set[str]) -> bool:
 
 
 def plan_style(skus: list[MomentecSku], rows: list[dict], options,
-               statuses: set[str]) -> dict:
+               statuses: set[str],
+               color_index: dict[str, tuple[str, str]] | None = None) -> dict:
     """Decide what to do with one style.
 
     ``rows`` are the NetSuite items carrying the style as Vendor Name/Code
@@ -230,12 +231,15 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
     for r in rows:
         rid = str(r["id"])
         color_id, size_id = str(r.get("color") or ""), str(r.get("size") or "")
-        if color_id and size_id:
+        # A child is an item that HAS a parent. Option values alone do not
+        # say so: a matrix parent carries the colours and sizes of all its
+        # children, and reading it as a child made the parent itself the
+        # "item that could not be matched" on ~170 styles (sandbox, 2026-11-19).
+        if str(r.get("parent") or "") and color_id and size_id:
             opt_index.setdefault((color_id, size_id), rid)
             children.add(rid)
-            if str(r.get("parent") or ""):
-                parents_of_children.add(str(r["parent"]))
-        else:
+            parents_of_children.add(str(r["parent"]))
+        elif not str(r.get("parent") or ""):
             parent_rows.append(rid)
     # The parent is whichever item the existing children sit under. It often
     # does not carry the style as its own Vendor Name/Code (160 styles in the
@@ -252,7 +256,14 @@ def plan_style(skus: list[MomentecSku], rows: list[dict], options,
             options.size_candidates(sku.size)
             + options.size_candidates(normalize_size(sku.size))))
         hit = None
-        for color_id, _method in options.color_candidates(color, color):
+        color_ids = [cid for cid, _method in options.color_candidates(color, color)]
+        # Also the list value that differs only by spacing or punctuation
+        # ("Khaki/ Black" for KHAKI/BLACK) -- the spelling a child we created
+        # ourselves was given.
+        variant = (color_index or {}).get(normalize_option_name(color_name(sku.color)))
+        if variant and str(variant[0]) not in color_ids:
+            color_ids.append(str(variant[0]))
+        for color_id in color_ids:
             for size_id in size_ids:
                 hit = opt_index.get((color_id, size_id))
                 if hit:
@@ -598,9 +609,11 @@ def main() -> int:  # noqa: PLR0912, PLR0915 - one ordered pass, like ss_create
     capped_new = capped_adopt = 0
 
     rows_by_style = fetch_style_items(client, tokens)
+    color_index = resolver._norm_index(COLOR_LIST)
     for token in tokens:
         skus = by_style[token]
-        plan = plan_style(skus, rows_by_style[token], options, statuses)
+        plan = plan_style(skus, rows_by_style[token], options, statuses,
+                          color_index)
         kind = plan["kind"]
         if kind == "complete":
             styles_complete += 1
