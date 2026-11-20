@@ -99,9 +99,57 @@ def test_a_price_hold_reaches_the_sync_that_follows(monkeypatch):
     assert seen[-1] == ("scripts/vendor_line_price_sync.py", "1")
 
 
-def test_subsidiary_is_carried_when_known():
-    line = dict(_line(512, True, price="46.75"), subsidiary="4")
-    out = vl.synced_lines([line], 44)
-    assert out[0]["subsidiary"] == {"id": "4"}
-    assert out[0]["purchasePrice"] == 44
-    assert "itemVendorPrice" not in out[0]
+class _Cfg:
+    matrix_script_id = "s"
+    matrix_deploy_id = "d"
+
+
+class _Restlet:
+    def __init__(self, supports=True, fail_ids=()):
+        self.supports = supports
+        self.fail_ids = set(fail_ids)
+        self.calls = []
+
+    def call_restlet(self, script_id, deploy_id, body):
+        self.calls.append(body)
+        if not self.supports:
+            return {"results": []}
+        return {"action": "vendorPrices", "results": [
+            {"id": it["id"], "status": "error", "message": "found 2"}
+            if it["id"] in self.fail_ids else {"id": it["id"], "status": "updated"}
+            for it in body["vendorPrices"]]}
+
+
+def _priced(n):
+    return [{"id": i, "vendor": 576, "price": 44.0} for i in range(1, n + 1)]
+
+
+def test_restlet_prices_batches_and_counts():
+    client = _Restlet(fail_ids={7})
+    out = vl.restlet_prices(client, _Cfg(), _priced(60), None, "x")
+    assert out == (59, 1, 1, 0)
+    assert [len(c["vendorPrices"]) for c in client.calls] == [25, 25, 10]
+    assert all(c["action"] == "vendorPrices" and "items" not in c for c in client.calls)
+
+
+def test_restlet_prices_older_restlet_is_not_a_failure(capsys):
+    client = _Restlet(supports=False)
+    assert vl.restlet_prices(client, _Cfg(), _priced(60), None, "x") == (0, 0, 0, 60)
+    assert len(client.calls) == 1
+    assert "does not have the vendorPrices action" in capsys.readouterr().out
+
+
+def test_restlet_prices_not_configured():
+    class _None:
+        matrix_script_id = ""
+        matrix_deploy_id = ""
+
+    client = _Restlet()
+    assert vl.restlet_prices(client, _None(), _priced(3), None, "x") == (0, 0, 0, 3)
+    assert client.calls == []
+
+
+def test_restlet_prices_stops_at_the_deadline():
+    client = _Restlet()
+    out = vl.restlet_prices(client, _Cfg(), _priced(60), 1.0, "x")
+    assert out == (25, 0, 0, 35)

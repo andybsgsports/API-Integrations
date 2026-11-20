@@ -25,6 +25,12 @@
  * Response: { "results": [ { "externalId", "status": created|updated|error,
  *                            "id", "message" } ] }
  *
+ * Second action, vendor line purchase prices (added 2026-11-20):
+ *   { "action": "vendorPrices",
+ *     "vendorPrices": [ { "id": 94809, "vendor": 576, "price": 44 }, ... ] }
+ * Response: { "action": "vendorPrices", "results": [ { "id",
+ *             "status": updated|unchanged|error, "old", "price", "message" } ] }
+ *
  * @NApiVersion 2.1
  * @NScriptType Restlet
  */
@@ -223,7 +229,52 @@ define(["N/record", "N/search"], (record, search) => {
     return externalId ? firstId("item", [["externalid", "is", externalId]]) : null;
   }
 
+  // Set the purchase price on ONE existing vendor line of an item. The REST
+  // record API cannot do this once the line has a price: the price lives in a
+  // nested per-currency price line and a PATCH of purchasePrice is accepted
+  // and ignored (sandbox runs 44668710929 and 44669765243, 2026-11-20).
+  // Changes nothing else, never adds or removes a vendor line.
+  function setVendorPrice(it) {
+    const id = parseInt(it.id, 10);
+    const vendor = parseInt(it.vendor, 10);
+    const price = Number(it.price);
+    if (!id || !vendor || !isFinite(price) || price <= 0) {
+      return { id: it.id, status: "error", message: "needs id, vendor and a price above 0" };
+    }
+    const rec = record.load({ type: record.Type.INVENTORY_ITEM, id: id });
+    const hits = [];
+    const n = rec.getLineCount({ sublistId: "itemvendor" });
+    for (let i = 0; i < n; i++) {
+      const v = parseInt(rec.getSublistValue({ sublistId: "itemvendor", fieldId: "vendor", line: i }), 10);
+      if (v === vendor) hits.push(i);
+    }
+    if (hits.length !== 1) {
+      return { id: id, status: "error", message: "expected one line for vendor " + vendor + ", found " + hits.length };
+    }
+    const old = parseFloat(rec.getSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: hits[0] }));
+    if (isFinite(old) && Math.abs(old - price) < 0.005) {
+      return { id: id, status: "unchanged", old: old };
+    }
+    rec.setSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: hits[0], value: price });
+    rec.save({ enableSourcing: false, ignoreMandatoryFields: true });
+    return { id: id, status: "updated", old: isFinite(old) ? old : null, price: price };
+  }
+
   function post(body) {
+    if (body && body.action === "vendorPrices") {
+      // A separate key from "items" on purpose: an older copy of this script
+      // then sees no items and does nothing, instead of trying to create them.
+      return {
+        action: "vendorPrices",
+        results: (body.vendorPrices || []).map((it) => {
+          try {
+            return setVendorPrice(it);
+          } catch (e) {
+            return { id: it.id, status: "error", message: e.message || String(e) };
+          }
+        }),
+      };
+    }
     const items = (body && body.items) || [];
     const results = items.map((it) => {
       try {
