@@ -19,6 +19,15 @@ COLORS = {"navy": "11", "white": "12", "black": "13"}
 SIZES = {"small": "21", "medium": "22", "s": "21", "m": "22"}
 
 
+@pytest.fixture(autouse=True)
+def _all_vendor_fields(monkeypatch):
+    """These tests cover the full field set (VENDOR_CUSTOM_FIELDS=all); the
+    default, minimal set is covered in test_field_policy.py."""
+    import field_policy
+
+    monkeypatch.setattr(field_policy, "MODE", "all")
+
+
 class FakeOptions:
     available = True
 

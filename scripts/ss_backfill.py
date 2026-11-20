@@ -28,6 +28,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import field_policy
 from concurrent_writes import write_records
 from native_pricing import (
     add_native_diffs,
@@ -466,11 +467,15 @@ def main() -> int:
     ids = sorted(matched)
     # custitem_sanmar_style / custitem_mtec_item_sku are read for the
     # pricing-ownership ranking fallback (higher-ranked feeds than S&S).
-    cols = ", ".join(
-        FIELDS + SEEN_FIELDS + ["custitem_sanmar_style", "custitem_mtec_item_sku"]
-    )
     # Tick the On Sale checkbox only once the field exists in NetSuite.
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
+    requested = (
+        FIELDS + SEEN_FIELDS + ["custitem_sanmar_style", "custitem_mtec_item_sku"]
+        + ([on_sale_field] if on_sale_field else [])
+    )
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report("ss backfill", requested, custom_cols)
+    cols = field_policy.select(custom_cols)
     considered = written = unchanged = upc_filled = priced = failures = 0
     deferred = chunks_skipped = 0
     on_sale_count = 0
@@ -503,7 +508,7 @@ def main() -> int:
         # Skip the chunk -- diff-aware, so the next run picks it up.
         try:
             rows = client.suiteql(
-                f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
+                f"SELECT id, upccode, cost, weight, weightunit, manufacturer{cols} "
                 f"FROM item WHERE id IN ({in_list})"
             )
         except Exception as exc:  # noqa: BLE001
@@ -548,6 +553,7 @@ def main() -> int:
             else:
                 deferred += 1
             stamp(body, row, "ss", claim_source=owner)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue

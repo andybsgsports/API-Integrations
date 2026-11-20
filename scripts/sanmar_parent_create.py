@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import field_policy
 from item_format_fix import MATRIX_NAME_TEMPLATE
 from native_pricing import WEIGHT_UNIT_LB_ID, base_price, weight_display
 from pricing_ownership import VENDOR_SANMAR
@@ -216,6 +217,13 @@ def _create_parent(client, body: dict):
         return client.create_record("inventoryItem", body)
 
 
+
+def _kept_url(field: str, raw: str) -> str | None:
+    """The absolute image URL for ``field``, or None when the field is dropped."""
+    if not raw or not field_policy.keep(field):
+        return None
+    return sanmar_image_url(raw)
+
 def _child_payload(style, sku, resolver=None, uom=None) -> dict:
     # Colour/size go to the RESTlet as NAMES it resolves by exact match, so a
     # punctuation variant of an existing list value must be sent as the LIST's
@@ -286,11 +294,17 @@ def _child_payload(style, sku, resolver=None, uom=None) -> dict:
         # sanmar_image_url on every view: URL-type fields reject relative
         # paths and the whole record dies with them (the 2026-08-05
         # zero-write night).
-        "shopImageUrl": sanmar_image_url(images.primary_url()) if images else None,
-        "backImageUrl": sanmar_image_url(images.back_url()) if images else None,
-        "frontFlatUrl": sanmar_image_url(images.front_flat_url) if images else None,
-        "backFlatUrl": sanmar_image_url(images.back_flat_url) if images else None,
-        "swatchUrl": sanmar_image_url(images.color_swatch_url) if images else None,
+        # Each is sent only while its field is still kept (field_policy).
+        "shopImageUrl": _kept_url("custitem_bsgshop_image_url",
+                                  images.primary_url() if images else ""),
+        "backImageUrl": _kept_url("custitem_sanmar_front_image_url",
+                                  images.back_url() if images else ""),
+        "frontFlatUrl": _kept_url("custitem_sanmar_front_flat_url",
+                                  images.front_flat_url if images else ""),
+        "backFlatUrl": _kept_url("custitem_sanmar_back_flat_url",
+                                 images.back_flat_url if images else ""),
+        "swatchUrl": _kept_url("custitem_sanmar_swatch_url",
+                               images.color_swatch_url if images else ""),
         **(uom or {}),
         "displayName": clean_title[:60],
         "description": clean_title,

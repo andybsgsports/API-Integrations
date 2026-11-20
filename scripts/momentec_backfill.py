@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+import field_policy
 from native_pricing import (
     WEIGHT_UNIT_LB,
     WEIGHT_UNIT_OZ,
@@ -273,7 +274,10 @@ def main() -> int:
     if missing:
         print(f"WARNING: custom field(s) not present in account -- skipping "
               f"read+write for these (create them, then re-run): {missing}")
-    cols = ", ".join(present + SEEN_FIELDS)
+    requested = ["custitem_ss_brand", "custitem_sanmar_style"] + present + SEEN_FIELDS
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report("momentec backfill", requested, custom_cols)
+    cols = field_policy.select(custom_cols)
     considered = written = unchanged = upc_filled = priced = failures = 0
     deferred = 0
     for i in range(0, len(ids), 250):
@@ -282,8 +286,7 @@ def main() -> int:
         rows = client.suiteql(
             # custitem_sanmar_style feeds the pricing-ownership ranking
             # fallback (SanMar outranks Momentec).
-            f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
-            f"custitem_ss_brand, custitem_sanmar_style, {cols} "
+            f"SELECT id, upccode, cost, weight, weightunit, manufacturer{cols} "
             f"FROM item WHERE id IN ({in_list})"
         )
         base_by_rid = read_base_prices(client, in_list)
@@ -352,6 +355,7 @@ def main() -> int:
                 if cur_co != closeout:
                     body[CLOSEOUT_FIELD] = closeout
             stamp(body, row, "momentec", claim_source=owner)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue
