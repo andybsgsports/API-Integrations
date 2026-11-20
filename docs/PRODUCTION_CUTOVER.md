@@ -82,9 +82,10 @@ The sandbox nightly and its secrets are not touched by this workflow.
   result to one GitHub issue per day, "Production pipeline daily summary
   <date>". The same text is on the run's summary page. The sandbox nightly
   writes the run summary page only.
-- **Write limit**. Production runs use 4 parallel writes (`write_concurrency`
-  input), not the sandbox's 8, so staff and the other integrations are not
-  throttled.
+- **Write limit**. Production runs use 2 parallel writes (`write_concurrency`
+  input), not the sandbox's 8. The production integration record allows 4
+  requests at once; 2 leaves half for staff and the other integrations
+  (Andy, 2026-11-20).
 - **Output is no longer lost when a job is cut off**: phase scripts run
   unbuffered.
 
