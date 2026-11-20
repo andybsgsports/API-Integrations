@@ -34,7 +34,7 @@
  * @NApiVersion 2.1
  * @NScriptType Restlet
  */
-define(["N/record", "N/search"], (record, search) => {
+define(["N/record", "N/search", "N/query"], (record, search, query) => {
   const COLOR_LIST = "customlist_bsg_matrix_color";
   const SIZE_LIST = "customlist_bsg_matrix_size";
 
@@ -255,9 +255,31 @@ define(["N/record", "N/search"], (record, search) => {
     if (isFinite(old) && Math.abs(old - price) < 0.005) {
       return { id: id, status: "unchanged", old: old };
     }
-    rec.setSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: hits[0], value: price });
+    // With Multiple Currencies on, a priced line keeps its price in the
+    // line's Vendor Prices subrecord, one row per currency. Setting
+    // purchaseprice on the line itself saves without error and changes
+    // nothing (sandbox run 44670777975), so the row is what gets written.
+    const sub = rec.getSublistSubrecord({ sublistId: "itemvendor", fieldId: "itemvendorprice", line: hits[0] });
+    const rows = sub.getLineCount({ sublistId: "itemvendorpricelines" });
+    if (rows > 1) {
+      return { id: id, status: "error", message: "vendor line has " + rows + " currency rows; not changed" };
+    }
+    if (rows === 1) {
+      sub.setSublistValue({ sublistId: "itemvendorpricelines", fieldId: "vendorprice", line: 0, value: price });
+    } else {
+      rec.setSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: hits[0], value: price });
+    }
     rec.save({ enableSourcing: false, ignoreMandatoryFields: true });
-    return { id: id, status: "updated", old: isFinite(old) ? old : null, price: price };
+    // Never report "updated" unless the database really shows the new price.
+    const after = query.runSuiteQL({
+      query: "SELECT purchaseprice FROM itemvendor WHERE item = ? AND vendor = ?",
+      params: [id, vendor],
+    }).asMappedResults();
+    const now = after.length === 1 ? Number(after[0].purchaseprice) : NaN;
+    if (!isFinite(now) || Math.abs(now - price) >= 0.005) {
+      return { id: id, status: "error", message: "saved, but the line reads " + now + ", not " + price };
+    }
+    return { id: id, status: "updated", old: isFinite(old) ? old : null, price: now };
   }
 
   function post(body) {
