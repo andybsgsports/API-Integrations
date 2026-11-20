@@ -17,6 +17,9 @@ than another's:
 
 from __future__ import annotations
 
+import os
+import time
+
 #: Absolute floor for "small" -- below this, a 429 set is noise at any volume.
 MIN_TOLERATED = 50
 #: ...and above the floor, it must also be under this share of the attempts.
@@ -83,3 +86,23 @@ def rotated(n: int, day_ordinal: int, step: int = 7) -> list[int]:
         return []
     start = (day_ordinal * max(1, n // step)) % n
     return list(range(start, n)) + list(range(0, start))
+
+
+def leg_deadline() -> float | None:
+    """Wall-clock time (epoch seconds) this workflow leg must stop writing by.
+
+    ``vendor_pipeline.py`` sets ``LEG_DEADLINE_EPOCH`` once, from
+    ``LEG_TIME_BUDGET_MIN``, when the leg starts, so every script in the leg
+    measures against the same clock. A step that is still writing when the
+    job limit arrives is cancelled with nothing reported; one that stops at
+    the deadline says what it did not reach and the next run carries on.
+    """
+    raw = os.environ.get("LEG_DEADLINE_EPOCH", "").strip()
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def past_deadline(deadline: float | None) -> bool:
+    return deadline is not None and time.time() >= deadline

@@ -32,7 +32,7 @@ from pricing_ownership import (
     VENDOR_SS,
     VENDOR_UA,
 )
-from run_status import exit_code
+from run_status import exit_code, leg_deadline, past_deadline
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
@@ -45,6 +45,8 @@ VENDOR_IDS = {
 }
 ID_WINDOW = 50_000     # SuiteQL caps one result set at 100k rows
 DEFAULT_MAX = 5_000
+#: Writes go out in slices this size so the leg deadline is checked between them.
+WRITE_SLICE = 500
 LABEL = "vendor line price"
 
 
@@ -176,7 +178,18 @@ def main() -> int:
             print(f"  FAILED item {rid}: {str(exc)[:150]} "
                   f":: {str(getattr(exc, 'payload', ''))[:200]}")
 
-    written, failures = write_records(client, "inventoryItem", jobs, on_error=_on_err)
+    deadline = leg_deadline()
+    written = failures = 0
+    for i in range(0, len(jobs), WRITE_SLICE):
+        if past_deadline(deadline):
+            print(f"NOTE: {LABEL} ({source}): stopped at the leg time budget with "
+                  f"{len(jobs) - i:,} of {len(jobs):,} line(s) not reached; the "
+                  f"next run carries on from the lines still off.")
+            break
+        w, f = write_records(client, "inventoryItem", jobs[i : i + WRITE_SLICE],
+                             on_error=_on_err)
+        written += w
+        failures += f
     print(f"{LABEL} ({source}): wrote {written:,} item(s); failures: {failures:,}")
     return exit_code(f"{LABEL} ({source})", failures, other[0], written + failures)
 

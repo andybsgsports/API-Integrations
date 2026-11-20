@@ -12,6 +12,7 @@ Network calls retry with exponential backoff on transient errors.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 from urllib.parse import urlencode
@@ -86,6 +87,9 @@ class NetSuiteClient:
         self._config = config
         self._timeout = timeout
         self._session = requests.Session()
+        # 429s seen by each thread, so a concurrent writer can tell whether
+        # ITS last call was throttled (see concurrent_writes.AdaptiveGate).
+        self._throttle = threading.local()
 
     def _new_auth(self) -> OAuth1:
         """Build a fresh OAuth1 signer for one request.
@@ -142,10 +146,16 @@ class NetSuiteClient:
             headers=merged_headers,
             timeout=self._timeout,
         )
+        if resp.status_code == 429:
+            self._throttle.count = getattr(self._throttle, "count", 0) + 1
         if resp.status_code == 429 or resp.status_code >= 500:
             log.warning("Retryable NetSuite response %s for %s %s", resp.status_code, method, url)
             raise _RetryableHTTP(f"{resp.status_code} {resp.reason}")
         return resp
+
+    def throttle_count(self) -> int:
+        """How many 429 responses the calling thread has received so far."""
+        return getattr(self._throttle, "count", 0)
 
     def _is_read(self, method: str, url: str) -> bool:
         """A request that cannot change NetSuite: a GET to the record/query

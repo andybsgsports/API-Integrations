@@ -23,7 +23,9 @@ on:
   # item-lifecycle (Andy approved the dry-run report 2026-08-10) -- it runs
   # LAST so every vendor has restamped its feed heartbeats first.
   schedule:
-    - cron: "0 4 * * *"
+    # Off the top of the hour: GitHub delays on-the-hour schedules the most
+    # (this one started about 8 hours late every day, 2026-11-14 to 11-19).
+    - cron: "17 4 * * *"
   workflow_dispatch:
     inputs:
       vendor:
@@ -149,6 +151,13 @@ jobs:
           # The SanMar update stops cleanly at this many minutes (job limit
           # is 350) and reports what it did not reach; see run_status.rotated.
           UPDATE_TIME_BUDGET_MIN: "290"
+          # Every script in the leg stops writing by this many minutes (job
+          # limit is 350) and says what it did not reach; see
+          # run_status.leg_deadline.
+          LEG_TIME_BUDGET_MIN: "335"
+          # Sandbox only: the vendor line backlog is about 159,000 lines, so
+          # allow more per night. The leg deadline above still bounds it.
+          VENDOR_LINE_MAX_ITEMS: "20000"
           CREATE_MAX_STYLES: ${{ env.CREATE_MAX_STYLES }}
           CREATE_REFRESH_STYLES: ${{ github.event.inputs.refresh_existing || 'false' }}
           # Blank = use the allowlist baked into vendor_pipeline.SS_DEFAULT_BRANDS.

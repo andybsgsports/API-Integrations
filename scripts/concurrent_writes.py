@@ -11,9 +11,11 @@ shared mutable state.
 
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import threading
+import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -24,6 +26,114 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # yet validated under load -- if the next runs' logs show sustained 429s,
 # dial back via NETSUITE_WRITE_CONCURRENCY.
 DEFAULT_WORKERS = int(os.environ.get("NETSUITE_WRITE_CONCURRENCY", "8") or "8")
+
+# The account's real concurrent-request limit is not known in advance and is
+# shared with staff and other integrations. On 2026-11-19 the SanMar update ran
+# 8 writers and took 24,044 throttle (429) responses for about 57,500 writes;
+# each one parks a writer for 2 to 16 seconds. The gate below starts at the
+# configured number of writers, steps down when writes are throttled, and tries
+# one more writer again after a run of clean writes, so a run settles at what
+# the account will actually take. NETSUITE_WRITE_ADAPTIVE=off restores the
+# fixed number.
+ADAPTIVE = os.environ.get("NETSUITE_WRITE_ADAPTIVE", "on").strip().lower() not in (
+    "off", "0", "false", "no")
+
+
+class AdaptiveGate:
+    """Limits how many writes are in flight, moving with the throttling seen."""
+
+    #: After a step down, ignore further throttles for this long: the writes
+    #: already in flight were sent under the old limit.
+    COOLDOWN_S = 5.0
+    #: Clean writes in a row before trying one more writer.
+    PROBE_AFTER = 200
+    #: A failed probe doubles the wait before the next one, up to this.
+    PROBE_MAX = 6400
+
+    def __init__(self, max_workers: int, *, clock: Callable[[], float] = time.monotonic):
+        self.max = max(1, max_workers)
+        self.limit = self.max
+        self._active = 0
+        self._clean = 0
+        self._probe_after = self.PROBE_AFTER
+        self._probing = False
+        self._last_cut = float("-inf")
+        self._clock = clock
+        self._cond = threading.Condition()
+        self.throttled = 0
+        self.writes = 0
+        self.lowest = self.max
+
+    def __enter__(self) -> AdaptiveGate:
+        with self._cond:
+            while self._active >= self.limit:
+                self._cond.wait()
+            self._active += 1
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        with self._cond:
+            self._active -= 1
+            self._cond.notify_all()
+
+    def record(self, throttled: bool) -> None:
+        """Report one finished write: was it throttled along the way?"""
+        with self._cond:
+            self.writes += 1
+            if throttled:
+                self.throttled += 1
+                self._clean = 0
+                now = self._clock()
+                if now - self._last_cut >= self.COOLDOWN_S and self.limit > 1:
+                    if self._probing:
+                        self._probe_after = min(self.PROBE_MAX, self._probe_after * 2)
+                    self.limit -= 1
+                    self.lowest = min(self.lowest, self.limit)
+                    self._last_cut = now
+                self._probing = False
+                return
+            self._clean += 1
+            if self._clean >= self._probe_after and self.limit < self.max:
+                self.limit += 1
+                self._clean = 0
+                self._probing = True
+                self._cond.notify_all()
+            elif self._probing and self._clean >= self.limit * 4:
+                self._probing = False  # the extra writer held
+
+
+# One gate per client for the life of the process: the writers call
+# write_records once per chunk, and what was learned about the account's limit
+# in one chunk must carry into the next.
+_GATES: dict[int, AdaptiveGate] = {}
+_GATES_LOCK = threading.Lock()
+
+
+def _gate_for(client, workers: int) -> AdaptiveGate:
+    with _GATES_LOCK:
+        gate = _GATES.get(id(client))
+        if gate is None or gate.max != workers:
+            gate = _GATES[id(client)] = AdaptiveGate(workers)
+        return gate
+
+
+def throttle_report() -> str | None:
+    """One line on how the write concurrency moved, or None if never throttled."""
+    gates = [g for g in _GATES.values() if g.throttled]
+    if not gates:
+        return None
+    return "; ".join(
+        f"started at {g.max}, lowest {g.lowest}, ended at {g.limit}, "
+        f"{g.throttled:,} of {g.writes:,} write(s) throttled at least once"
+        for g in gates)
+
+
+@atexit.register
+def _print_throttle_report() -> None:
+    line = throttle_report()
+    if line:
+        print(f"NOTE: write concurrency: {line}", flush=True)
+
 
 # NetSuite validates a PATCH as a unit: one unacceptable field rejects the whole
 # record, taking every other field on it down too. That turned a single bad
@@ -81,8 +191,20 @@ def write_records(
     # Worker threads share the counter, and "read, add one, store" is not
     # atomic -- without this, concurrent drops of the same field lose counts.
     drop_lock = threading.Lock()
+    count_429 = getattr(client, "throttle_count", None)
+    gate = _gate_for(client, n) if ADAPTIVE and callable(count_429) else None
 
     def _do(job: tuple[str, dict]) -> str:
+        if gate is None:
+            return _write(job)
+        before = count_429()
+        try:
+            with gate:
+                return _write(job)
+        finally:
+            gate.record(count_429() > before)
+
+    def _write(job: tuple[str, dict]) -> str:
         rid, body = job
         try:
             client.update_record(record_type, rid, body)
