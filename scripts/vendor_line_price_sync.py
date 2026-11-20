@@ -47,6 +47,8 @@ ID_WINDOW = 50_000     # SuiteQL caps one result set at 100k rows
 DEFAULT_MAX = 5_000
 #: Writes go out in slices this size so the leg deadline is checked between them.
 WRITE_SLICE = 500
+#: Currency of the vendor price lines (1 = US Dollar; every BSG vendor is USD).
+PRICE_CURRENCY_ID = "1"
 LABEL = "vendor line price"
 
 
@@ -93,6 +95,15 @@ def synced_lines(lines: list[dict], cost: object) -> list[dict] | None:
         price = _num(line.get("purchaseprice"))
         if preferred and needs_sync(line.get("purchaseprice"), c):
             body["purchasePrice"] = c
+            if price is not None:
+                # A line that already has a price keeps it in a nested price
+                # line per currency, and NetSuite shows that one: setting
+                # purchasePrice alone left 94 Under Armour lines unchanged run
+                # after run (probe run 44668710929, 2026-11-20). A blank line
+                # has no price line yet and takes purchasePrice directly.
+                body["itemVendorPrice"] = {"itemvendorpricelines": {"items": [
+                    {"vendorcurrency": {"id": PRICE_CURRENCY_ID}, "vendorprice": c}
+                ]}}
             changed = True
         elif price is not None:
             body["purchasePrice"] = price

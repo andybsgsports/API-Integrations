@@ -97,3 +97,15 @@ def test_a_price_hold_reaches_the_sync_that_follows(monkeypatch):
     vp.run_vendor("momentec", phases=("update",))
     vp._SUMMARY.clear()
     assert seen[-1] == ("scripts/vendor_line_price_sync.py", "1")
+
+
+def test_differing_line_also_sets_the_nested_price_line():
+    lines = vl.synced_lines([_line(512, True, price="46.75")], 44)
+    assert lines[0]["purchasePrice"] == 44
+    assert lines[0]["itemVendorPrice"] == {"itemvendorpricelines": {"items": [
+        {"vendorcurrency": {"id": "1"}, "vendorprice": 44.0}]}}
+
+
+def test_blank_line_does_not_send_a_price_line():
+    lines = vl.synced_lines([_line(512, True)], 44)
+    assert "itemVendorPrice" not in lines[0]
