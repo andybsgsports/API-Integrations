@@ -32,7 +32,7 @@ from pricing_ownership import (
     VENDOR_SS,
     VENDOR_UA,
 )
-from run_status import exit_code
+from run_status import exit_code, leg_deadline, past_deadline
 
 from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.client import NetSuiteClient
@@ -45,6 +45,8 @@ VENDOR_IDS = {
 }
 ID_WINDOW = 50_000     # SuiteQL caps one result set at 100k rows
 DEFAULT_MAX = 5_000
+#: Writes go out in slices this size so the leg deadline is checked between them.
+WRITE_SLICE = 500
 LABEL = "vendor line price"
 
 
@@ -126,6 +128,7 @@ def main() -> int:
     top = int((top_rows[0].get("m") if top_rows else 0) or 0)
     candidates: list[tuple[str, bool]] = []
     cost_by_item: dict[str, object] = {}
+    samples: list[str] = []
     for lo in range(0, top + 1, ID_WINDOW):
         for r in client.suiteql(
             "SELECT iv.item, iv.purchaseprice, i.cost FROM itemvendor iv "
@@ -139,6 +142,9 @@ def main() -> int:
                 continue
             rid = str(r["item"])
             candidates.append((rid, _num(r.get("purchaseprice")) is None))
+            if _num(r.get("purchaseprice")) is not None and len(samples) < 5:
+                samples.append(f"item {rid}: line {r.get('purchaseprice')} vs "
+                               f"cost {r.get('cost')}")
             cost_by_item[rid] = r.get("cost")
 
     differ = sum(1 for _, blank in candidates if not blank)
@@ -146,6 +152,10 @@ def main() -> int:
     print(f"{LABEL} ({source}): {len(candidates):,} preferred line(s) off from "
           f"cost ({differ:,} differ, {len(candidates) - differ:,} blank); "
           f"{len(todo):,} this run" + (f" (cap {cap:,})" if cap else ""))
+    for line in samples:
+        # A line that differs night after night is one the write cannot fix
+        # (for example a cost with more decimals than the line stores).
+        print(f"  differs: {line}")
 
     jobs: list[tuple[str, dict]] = []
     for i in range(0, len(todo), 250):
@@ -176,7 +186,18 @@ def main() -> int:
             print(f"  FAILED item {rid}: {str(exc)[:150]} "
                   f":: {str(getattr(exc, 'payload', ''))[:200]}")
 
-    written, failures = write_records(client, "inventoryItem", jobs, on_error=_on_err)
+    deadline = leg_deadline()
+    written = failures = 0
+    for i in range(0, len(jobs), WRITE_SLICE):
+        if past_deadline(deadline):
+            print(f"NOTE: {LABEL} ({source}): stopped at the leg time budget with "
+                  f"{len(jobs) - i:,} of {len(jobs):,} line(s) not reached; the "
+                  f"next run carries on from the lines still off.")
+            break
+        w, f = write_records(client, "inventoryItem", jobs[i : i + WRITE_SLICE],
+                             on_error=_on_err)
+        written += w
+        failures += f
     print(f"{LABEL} ({source}): wrote {written:,} item(s); failures: {failures:,}")
     return exit_code(f"{LABEL} ({source})", failures, other[0], written + failures)
 

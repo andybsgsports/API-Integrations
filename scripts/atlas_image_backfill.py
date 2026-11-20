@@ -44,6 +44,9 @@ from sanmar_netsuite.sanmar.sftp_client import SanMarSftp
 from ss_activewear_netsuite.config import get_config as ss_config
 
 FIELD = "custitem_atlas_item_image"
+#: Failed image uploads tolerated per run: this many, or this share if larger.
+UPLOAD_FAILURES_TOLERATED = 5
+UPLOAD_FAILURE_SHARE = 0.05
 FOLDER_NAME = "Supplier Item Images"
 # UPC -> Champro product image, from the user-supplied champrosports.com export
 # (data/champro_images.csv). Per-color images, matched to items by barcode.
@@ -368,10 +371,19 @@ def main() -> int:
         f"no feed image: {nourl}; upload failures: {upload_failures}; "
         f"write failures: {failures}"
     )
-    # An upload failure is never transient throttling (the File Cabinet SOAP
-    # path has its own error modes), so it stays fatal on its own.
-    if upload_failures:
+    # One image a supplier no longer serves used to fail the whole leg (run
+    # 44586932101, 2026-11-19: 1 failed upload out of 94). A few failed
+    # uploads are reported and retried next run, since the item's image field
+    # is still empty; a larger share means the upload path itself is broken
+    # and stays fatal.
+    attempted_uploads = len(file_id_by_url) + upload_failures
+    if upload_failures > max(UPLOAD_FAILURES_TOLERATED,
+                             int(attempted_uploads * UPLOAD_FAILURE_SHARE)):
         return 1
+    if upload_failures:
+        print(f"NOTE: atlas image backfill: {upload_failures} of "
+              f"{attempted_uploads} image upload(s) failed; those items keep an "
+              f"empty image and are retried next run.")
     return exit_code("atlas image backfill", failures, _fail_other[0],
                      written + failures)
 

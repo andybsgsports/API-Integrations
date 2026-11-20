@@ -372,6 +372,10 @@ def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
 
     env = dict(os.environ)
     env.setdefault("CREATE_MAX_STYLES", DEFAULT_CREATE_MAX_STYLES)
+    budget = float(env.get("LEG_TIME_BUDGET_MIN", "0") or "0")
+    if budget and not env.get("LEG_DEADLINE_EPOCH"):
+        # One deadline for every script in this leg (run_status.leg_deadline).
+        env["LEG_DEADLINE_EPOCH"] = f"{time.time() + budget * 60:.0f}"
     env.update(VENDOR_ENV.get(vendor, {}))
 
     print(f"\n{'=' * 62}\n=== VENDOR: {vendor}  "
