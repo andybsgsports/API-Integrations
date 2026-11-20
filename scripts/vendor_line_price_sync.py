@@ -23,6 +23,7 @@ holding this vendor's prices.
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import price_guard
 from concurrent_writes import write_records
@@ -47,6 +48,13 @@ ID_WINDOW = 50_000     # SuiteQL caps one result set at 100k rows
 DEFAULT_MAX = 5_000
 #: Writes go out in slices this size so the leg deadline is checked between them.
 WRITE_SLICE = 500
+#: A line that already has a price keeps it in a nested price line, and the
+#: REST record API accepts a PATCH of purchasePrice and ignores it (94 Under
+#: Armour lines unchanged run after run; sandbox runs 44668710929 and
+#: 44669765243, 2026-11-20). Those lines go to the matrix RESTlet's
+#: "vendorPrices" action instead, this many items per call.
+RESTLET_BATCH = 25
+RESTLET_WORKERS = 3
 LABEL = "vendor line price"
 
 
@@ -98,6 +106,71 @@ def synced_lines(lines: list[dict], cost: object) -> list[dict] | None:
             body["purchasePrice"] = price
         out.append(body)
     return out if changed else None
+
+
+def restlet_prices(client, ns_cfg, priced: list[dict], deadline: float | None,
+                   label: str) -> tuple[int, int, int, int]:
+    """Send already-priced lines to the RESTlet. Returns
+    ``(written, failed, failed_not_throttling, not_attempted)``."""
+    if not priced:
+        return 0, 0, 0, 0
+    script_id = getattr(ns_cfg, "matrix_script_id", "")
+    deploy_id = getattr(ns_cfg, "matrix_deploy_id", "")
+    if not script_id or not deploy_id:
+        print(f"NOTE: {label}: {len(priced):,} line(s) already have a price and "
+              f"need the matrix RESTlet, which is not configured; not attempted.")
+        return 0, 0, 0, len(priced)
+    batches = [priced[i : i + RESTLET_BATCH] for i in range(0, len(priced), RESTLET_BATCH)]
+    # One call first: an older copy of the RESTlet answers without the action.
+    first = client.call_restlet(script_id, deploy_id,
+                                {"action": "vendorPrices", "vendorPrices": batches[0]})
+    if first.get("action") != "vendorPrices":
+        print(f"NOTE: {label}: {len(priced):,} line(s) already have a price, and "
+              f"the RESTlet in this account does not have the vendorPrices action "
+              f"yet (push suitescript/bsg_sanmar_matrix.js); not attempted.")
+        return 0, 0, 0, len(priced)
+    written = failed = other = skipped = 0
+    shown = [0]
+
+    def _tally(results: list[dict]) -> None:
+        nonlocal written, failed, other
+        for r in results:
+            if r.get("status") in ("updated", "unchanged"):
+                written += 1
+            else:
+                failed += 1
+                other += 1
+                shown[0] += 1
+                if shown[0] <= 10:
+                    print(f"  FAILED item {r.get('id')}: {str(r.get('message'))[:200]}")
+
+    def _call(batch: list[dict]) -> list[dict]:
+        resp = client.call_restlet(script_id, deploy_id,
+                                   {"action": "vendorPrices", "vendorPrices": batch})
+        return resp.get("results") or []
+
+    _tally(first.get("results") or [])
+    rest = batches[1:]
+    for i in range(0, len(rest), RESTLET_WORKERS * 4):
+        if past_deadline(deadline):
+            skipped = sum(len(b) for b in rest[i:])
+            print(f"NOTE: {label}: stopped at the leg time budget with {skipped:,} "
+                  f"already-priced line(s) not reached.")
+            break
+        group = rest[i : i + RESTLET_WORKERS * 4]
+        with ThreadPoolExecutor(max_workers=RESTLET_WORKERS) as ex:
+            futs = {ex.submit(_call, b): b for b in group}
+            for fut, batch in futs.items():
+                try:
+                    _tally(fut.result())
+                except Exception as exc:  # noqa: BLE001 - one batch, keep going
+                    failed += len(batch)
+                    if "429" not in str(exc):
+                        other += len(batch)
+                    shown[0] += 1
+                    if shown[0] <= 10:
+                        print(f"  FAILED batch of {len(batch)}: {str(exc)[:200]}")
+    return written, failed, other, skipped
 
 
 def pick(candidates: list[tuple[str, bool]], cap: int) -> list[str]:
@@ -158,6 +231,7 @@ def main() -> int:
         print(f"  differs: {line}")
 
     jobs: list[tuple[str, dict]] = []
+    priced: list[dict] = []   # lines that already have a price: RESTlet only
     for i in range(0, len(todo), 250):
         chunk = todo[i : i + 250]
         by_item: dict[str, list[dict]] = {}
@@ -168,12 +242,21 @@ def main() -> int:
             by_item.setdefault(str(r["item"]), []).append(r)
         for rid in chunk:
             lines = synced_lines(by_item.get(rid, []), cost_by_item.get(rid))
-            if lines:
+            if not lines:
+                continue
+            had_price = any(
+                _is_preferred(r) and _num(r.get("purchaseprice")) is not None
+                for r in by_item.get(rid, []))
+            if had_price:
+                priced.append({"id": int(rid), "vendor": int(vendor_id),
+                               "price": _num(cost_by_item.get(rid))})
+            else:
                 jobs.append((rid, {"itemVendor": {"items": lines}}))
 
     if not allow_write:
-        print(f"{LABEL} ({source}): WOULD write (dry run) {len(jobs):,} item(s); "
-              f"failures: 0")
+        print(f"{LABEL} ({source}): WOULD write (dry run) "
+              f"{len(jobs) + len(priced):,} item(s) ({len(priced):,} through the "
+              f"RESTlet); failures: 0")
         return 0
     shown = [0]
     other = [0]
@@ -198,7 +281,28 @@ def main() -> int:
                              on_error=_on_err)
         written += w
         failures += f
-    print(f"{LABEL} ({source}): wrote {written:,} item(s); failures: {failures:,}")
+    r_written, r_failed, r_other, r_skipped = restlet_prices(
+        client, cfg.netsuite, priced, deadline, f"{LABEL} ({source})")
+    written += r_written
+    failures += r_failed
+    other[0] += r_other
+    print(f"{LABEL} ({source}): wrote {written:,} item(s) ({r_written:,} through "
+          f"the RESTlet); failures: {failures:,}"
+          + (f"; not attempted: {r_skipped:,}" if r_skipped else ""))
+    check = [str(p["id"]) for p in priced[:100]] + [rid for rid, _ in jobs[:100]]
+    still = 0
+    for i in range(0, len(check), 100):
+        for r in client.suiteql(
+            "SELECT iv.item, iv.purchaseprice, i.cost FROM itemvendor iv "
+            "JOIN item i ON i.id = iv.item "
+            f"WHERE iv.item IN ({', '.join(check[i : i + 100])}) "
+            f"AND iv.preferredvendor = 'T' AND iv.vendor = {vendor_id}"
+        ):
+            if needs_sync(r.get("purchaseprice"), r.get("cost")):
+                still += 1
+    if check:
+        print(f"{LABEL} ({source}): read back {len(check):,} written item(s); "
+              f"{still:,} still differ from cost")
     return exit_code(f"{LABEL} ({source})", failures, other[0], written + failures)
 
 
