@@ -128,6 +128,7 @@ def main() -> int:
     top = int((top_rows[0].get("m") if top_rows else 0) or 0)
     candidates: list[tuple[str, bool]] = []
     cost_by_item: dict[str, object] = {}
+    samples: list[str] = []
     for lo in range(0, top + 1, ID_WINDOW):
         for r in client.suiteql(
             "SELECT iv.item, iv.purchaseprice, i.cost FROM itemvendor iv "
@@ -141,6 +142,9 @@ def main() -> int:
                 continue
             rid = str(r["item"])
             candidates.append((rid, _num(r.get("purchaseprice")) is None))
+            if _num(r.get("purchaseprice")) is not None and len(samples) < 5:
+                samples.append(f"item {rid}: line {r.get('purchaseprice')} vs "
+                               f"cost {r.get('cost')}")
             cost_by_item[rid] = r.get("cost")
 
     differ = sum(1 for _, blank in candidates if not blank)
@@ -148,6 +152,10 @@ def main() -> int:
     print(f"{LABEL} ({source}): {len(candidates):,} preferred line(s) off from "
           f"cost ({differ:,} differ, {len(candidates) - differ:,} blank); "
           f"{len(todo):,} this run" + (f" (cap {cap:,})" if cap else ""))
+    for line in samples:
+        # A line that differs night after night is one the write cannot fix
+        # (for example a cost with more decimals than the line stores).
+        print(f"  differs: {line}")
 
     jobs: list[tuple[str, dict]] = []
     for i in range(0, len(todo), 250):
