@@ -99,13 +99,9 @@ def test_a_price_hold_reaches_the_sync_that_follows(monkeypatch):
     assert seen[-1] == ("scripts/vendor_line_price_sync.py", "1")
 
 
-def test_differing_line_also_sets_the_nested_price_line():
-    lines = vl.synced_lines([_line(512, True, price="46.75")], 44)
-    assert lines[0]["purchasePrice"] == 44
-    assert lines[0]["itemVendorPrice"] == {"itemvendorpricelines": {"items": [
-        {"vendorcurrency": {"id": "1"}, "vendorprice": 44.0}]}}
-
-
-def test_blank_line_does_not_send_a_price_line():
-    lines = vl.synced_lines([_line(512, True)], 44)
-    assert "itemVendorPrice" not in lines[0]
+def test_subsidiary_is_carried_when_known():
+    line = dict(_line(512, True, price="46.75"), subsidiary="4")
+    out = vl.synced_lines([line], 44)
+    assert out[0]["subsidiary"] == {"id": "4"}
+    assert out[0]["purchasePrice"] == 44
+    assert "itemVendorPrice" not in out[0]

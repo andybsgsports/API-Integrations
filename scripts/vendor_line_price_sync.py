@@ -47,8 +47,13 @@ ID_WINDOW = 50_000     # SuiteQL caps one result set at 100k rows
 DEFAULT_MAX = 5_000
 #: Writes go out in slices this size so the leg deadline is checked between them.
 WRITE_SLICE = 500
-#: Currency of the vendor price lines (1 = US Dollar; every BSG vendor is USD).
-PRICE_CURRENCY_ID = "1"
+#: A line that already has a price keeps it in a nested price line, and
+#: NetSuite shows that one: a plain PATCH of purchasePrice left 94 Under Armour
+#: lines unchanged run after run, and adding a price line is refused
+#: ("Currency must be unique"; runs 44668710929 and 44668877456, 2026-11-20).
+#: Rewriting the item's vendor lines as a whole drops the old price line, so
+#: the new purchasePrice takes. Every line is carried over.
+REPLACE_SUFFIX = "?replace=itemVendor"
 LABEL = "vendor line price"
 
 
@@ -90,20 +95,13 @@ def synced_lines(lines: list[dict], cost: object) -> list[dict] | None:
             "vendor": {"id": str(line["vendor"])},
             "preferredVendor": preferred,
         }
+        if str(line.get("subsidiary") or "").strip():
+            body["subsidiary"] = {"id": str(line["subsidiary"])}
         if str(line.get("vendorcode") or "").strip():
             body["vendorCode"] = str(line["vendorcode"])
         price = _num(line.get("purchaseprice"))
         if preferred and needs_sync(line.get("purchaseprice"), c):
             body["purchasePrice"] = c
-            if price is not None:
-                # A line that already has a price keeps it in a nested price
-                # line per currency, and NetSuite shows that one: setting
-                # purchasePrice alone left 94 Under Armour lines unchanged run
-                # after run (probe run 44668710929, 2026-11-20). A blank line
-                # has no price line yet and takes purchasePrice directly.
-                body["itemVendorPrice"] = {"itemvendorpricelines": {"items": [
-                    {"vendorcurrency": {"id": PRICE_CURRENCY_ID}, "vendorprice": c}
-                ]}}
             changed = True
         elif price is not None:
             body["purchasePrice"] = price
@@ -173,14 +171,18 @@ def main() -> int:
         chunk = todo[i : i + 250]
         by_item: dict[str, list[dict]] = {}
         for r in client.suiteql(
-            "SELECT item, vendor, vendorcode, preferredvendor, purchaseprice "
+            "SELECT item, vendor, subsidiary, vendorcode, preferredvendor, purchaseprice "
             f"FROM itemvendor WHERE item IN ({', '.join(chunk)})"
         ):
             by_item.setdefault(str(r["item"]), []).append(r)
         for rid in chunk:
             lines = synced_lines(by_item.get(rid, []), cost_by_item.get(rid))
             if lines:
-                jobs.append((rid, {"itemVendor": {"items": lines}}))
+                had_price = any(
+                    _is_preferred(r) and _num(r.get("purchaseprice")) is not None
+                    for r in by_item.get(rid, []))
+                jobs.append((rid + (REPLACE_SUFFIX if had_price else ""),
+                             {"itemVendor": {"items": lines}}))
 
     if not allow_write:
         print(f"{LABEL} ({source}): WOULD write (dry run) {len(jobs):,} item(s); "
@@ -194,7 +196,7 @@ def main() -> int:
         if "429" not in str(exc):
             other[0] += 1
         if shown[0] <= 10:
-            print(f"  FAILED item {rid}: {str(exc)[:150]} "
+            print(f"  FAILED item {rid.split('?')[0]}: {str(exc)[:150]} "
                   f":: {str(getattr(exc, 'payload', ''))[:200]}")
 
     deadline = leg_deadline()
@@ -210,6 +212,20 @@ def main() -> int:
         written += w
         failures += f
     print(f"{LABEL} ({source}): wrote {written:,} item(s); failures: {failures:,}")
+    check = [rid.split("?")[0] for rid, _ in jobs[:200]]
+    still = 0
+    for i in range(0, len(check), 100):
+        for r in client.suiteql(
+            "SELECT iv.item, iv.purchaseprice, i.cost FROM itemvendor iv "
+            "JOIN item i ON i.id = iv.item "
+            f"WHERE iv.item IN ({', '.join(check[i : i + 100])}) "
+            f"AND iv.preferredvendor = 'T' AND iv.vendor = {vendor_id}"
+        ):
+            if needs_sync(r.get("purchaseprice"), r.get("cost")):
+                still += 1
+    if check:
+        print(f"{LABEL} ({source}): read back {len(check):,} written item(s); "
+              f"{still:,} still differ from cost")
     return exit_code(f"{LABEL} ({source})", failures, other[0], written + failures)
 
 
