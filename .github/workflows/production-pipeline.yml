@@ -55,9 +55,9 @@ on:
         required: false
         default: ""
       write_concurrency:
-        description: "Parallel writes to NetSuite (kept low so staff and other integrations are not throttled)"
+        description: "Parallel writes to NetSuite (this integration is allowed 4 at once; 2 leaves half for staff and other integrations)"
         required: false
-        default: "4"
+        default: "2"
 
 # Production has its own queue: it must not wait behind, or be cancelled by,
 # sandbox runs, and two production writers must never overlap.
@@ -182,7 +182,7 @@ jobs:
           # (Andy, 2026-11-12). See scripts/price_guard.py.
           PRICE_GUARD: "on"
           PRICE_GUARD_OVERRIDE: ${{ github.event.inputs.price_hold_override }}
-          NETSUITE_WRITE_CONCURRENCY: ${{ github.event.inputs.write_concurrency || '4' }}
+          NETSUITE_WRITE_CONCURRENCY: ${{ github.event.inputs.write_concurrency || '2' }}
           RUN_SUMMARY_FILE: ${{ runner.temp }}/run_summary.md
         run: |
           python scripts/vendor_pipeline.py \
