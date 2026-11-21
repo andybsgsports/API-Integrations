@@ -175,6 +175,19 @@ class MatchRow:
 
 
 @dataclass
+class NsChild:
+    """One existing NetSuite child item under a style the feed carries."""
+
+    ns_id: str
+    style: str
+    itemid: str
+    color_id: str = ""
+    size_id: str = ""
+    upc: str = ""
+    inactive: bool = False
+
+
+@dataclass
 class ReconcileReport:
     rows: list[MatchRow] = field(default_factory=list)
     dup_parents: dict[str, list[str]] = field(default_factory=dict)
@@ -185,6 +198,14 @@ class ReconcileReport:
     # values matched via abbreviation/heuristic whose Name should become the
     # full color (renaming a list value cascades to every item using it).
     color_renames: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Existing NetSuite child items no feed SKU matched (the link report says
+    # why: which colour and size they carry).
+    unclaimed: list[NsChild] = field(default_factory=list)
+    # Every existing child a feed SKU did match, keyed by item id.
+    claimed_items: dict[str, NsChild] = field(default_factory=dict)
+    # Feed SKUs whose colour and size fit more than one NetSuite item:
+    # unique_key -> every candidate item id. The first one is the match.
+    ambiguous: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def matched(self) -> list[MatchRow]:
@@ -226,6 +247,13 @@ def _fetch_style_items(client, style: str) -> list[dict]:
     safe = _sql_escape(style)
     try:
         return client.suiteql(
+            f"SELECT id, itemid, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size, "
+            f"upccode, isinactive FROM item WHERE vendorname = '{safe}'"
+        )
+    except Exception:  # noqa: BLE001 - extra columns unreadable -> core only
+        pass
+    try:
+        return client.suiteql(
             f"SELECT id, itemid, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
             f"FROM item WHERE vendorname = '{safe}'"
         )
@@ -262,11 +290,18 @@ def match_existing(
         opt_index: dict[tuple[str, str], list[str]] = {}
         children: set[str] = set()
         others: list[str] = []
+        detail: dict[str, NsChild] = {}
         for r in rows:
             rid = str(r["id"])
             itemid = str(r.get("itemid", ""))
             color_id = str(r.get("color") or "")
             size_id = str(r.get("size") or "")
+            detail[rid] = NsChild(
+                ns_id=rid, style=style.style, itemid=itemid,
+                color_id=color_id, size_id=size_id,
+                upc=str(r.get("upccode") or "").strip(),
+                inactive=str(r.get("isinactive") or "").upper() in {"T", "TRUE"},
+            )
             parsed = split_color_size(itemid, style.style)
             if color_id and size_id:
                 opt_index.setdefault((color_id, size_id), []).append(rid)
@@ -311,6 +346,8 @@ def match_existing(
                     if hit:
                         row.ns_id = hit[0]
                         row.method = method
+                        if len(hit) > 1:
+                            report.ambiguous[sku.unique_key] = list(hit)
                         # Matched via abbreviation/heuristic => the list value's
                         # Name isn't the full color yet; propose the rename.
                         cur_name, _ = options.color_info.get(color_id, ("", ""))
@@ -336,11 +373,18 @@ def match_existing(
                     if ids:
                         row.ns_id = ids[0]
                         row.method = method
+                        if len(ids) > 1:
+                            report.ambiguous[sku.unique_key] = list(ids)
                         break
             if row.ns_id:
                 claimed.add(row.ns_id)
             report.rows.append(row)
 
         report.ns_children_claimed += len(claimed & children)
+        for rid in sorted(children, key=lambda x: (len(x), x)):
+            if rid in claimed:
+                report.claimed_items[rid] = detail[rid]
+            else:
+                report.unclaimed.append(detail[rid])
 
     return report

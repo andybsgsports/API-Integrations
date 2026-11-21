@@ -27,7 +27,7 @@ on:
         required: true
         default: "sanmar"
       phases:
-        description: "Comma-separated: discover,options,create,update"
+        description: "Comma-separated: discover,options,create,update. Or link = read-only Sanmar match report."
         required: true
         default: "discover,options,create"
       mode:
@@ -187,6 +187,15 @@ jobs:
         run: |
           python scripts/vendor_pipeline.py \
             --vendor "$VENDOR" --phases "$PHASES"
+
+      - name: Attach the link report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanmar-link-report
+          path: data/sanmar_link_*.csv
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Post the daily summary
         if: always()

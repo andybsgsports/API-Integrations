@@ -67,6 +67,11 @@ VENDOR_ORDER = ["sanmar", "momentec", "ua", "ss", "dcos", "champro-csv"]
 #: job budget (see the SanMar note in PIPELINES).
 PHASES = ("discover", "options", "create", "update", "images")
 
+#: Phases that run only when asked for by name -- never part of the default
+#: run or the nightly chain. ``link`` is the read-only report that matches
+#: existing items to feed SKUs before anything is linked (Andy, 2026-11-20).
+ON_REQUEST_PHASES = ("link",)
+
 #: Per-vendor phase -> script(s). A phase absent from a vendor's map has no
 #: implementation for that vendor yet; the pipeline says so out loud and moves
 #: on rather than pretending the phase ran.
@@ -106,6 +111,9 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         # and a leg killed by the cap never reaches the dispatch step -- so
         # every vendor after SanMar would silently lose the night.
         "images": ["scripts/atlas_image_backfill.py"],
+        # Read-only: which existing items match a feed size and colour, and
+        # why the rest do not. On request only (ON_REQUEST_PHASES).
+        "link": ["scripts/sanmar_link_report.py"],
     },
     "momentec": {
         # Parents then children for styles NetSuite does not have, plus
@@ -197,7 +205,7 @@ DEFAULT_CREATE_MAX_STYLES = "300"
 #: everything skipped or failed by name, and warnings / notes / price holds.
 _SUMMARY_LINE = re.compile(
     r"failures: \d|SKIPPED|FAILED item|^WARNING|^NOTE|PRICE HOLD|PRICE GUARD"
-    r"|WOULD |dropped on "
+    r"|WOULD |dropped on |^LINK REPORT"
 )
 #: Cap on named skip / failure lines kept per script so one bad night cannot
 #: produce a summary nobody can read. The totals line always carries the count.
@@ -434,9 +442,10 @@ def main() -> int:
         return 0
 
     phases = tuple(p.strip() for p in args.phases.split(",") if p.strip())
-    bad = [p for p in phases if p not in PHASES]
+    valid = PHASES + ON_REQUEST_PHASES
+    bad = [p for p in phases if p not in valid]
     if bad:
-        print(f"unknown phase(s): {bad}; valid: {', '.join(PHASES)}")
+        print(f"unknown phase(s): {bad}; valid: {', '.join(valid)}")
         return 1
 
     vendors = VENDOR_ORDER if args.vendor == "all" else [args.vendor]
