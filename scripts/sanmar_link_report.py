@@ -144,7 +144,7 @@ def describe(report: ReconcileReport, a: dict,
     out = [
         f"existing NetSuite items under Sanmar style numbers: {total_ns:,}",
         f"matched to a feed size and colour: {report.ns_children_claimed:,}",
-        f"  clean, ready to link (one item, one feed SKU"
+        "  clean, ready to link (one item, one feed SKU"
         + (", Sanmar vendor line present" if vendor_items is not None else "")
         + f"): {len(a['clean']):,}",
         f"  matched but no Sanmar vendor line (may be another vendor's "
