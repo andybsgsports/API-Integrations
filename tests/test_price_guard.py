@@ -179,3 +179,28 @@ def test_summary_is_written_to_the_file(tmp_path, monkeypatch):
     text = out.read_text()
     assert "sanmar: update (dry run (nothing written))" in text
     assert "- a: wrote 1 item(s); failures: 0" in text
+
+
+# --- production 2026-11-21: run mode lived only in .env --------------------
+
+def test_run_mode_is_read_from_dotenv(tmp_path):
+    f = tmp_path / ".env"
+    f.write_text("SYNC_DRY_RUN=false\nNETSUITE_READ_ONLY=false\nOTHER=x\n")
+    env: dict[str, str] = {}
+    vp.load_run_mode(env, str(f))
+    assert env == {"SYNC_DRY_RUN": "false", "NETSUITE_READ_ONLY": "false"}
+    assert vp._is_dry(env) is False
+    # The process environment wins, as it does for the scripts.
+    env = {"SYNC_DRY_RUN": "true"}
+    vp.load_run_mode(env, str(f))
+    assert env["SYNC_DRY_RUN"] == "true"
+
+
+def test_unknown_mode_still_checks_then_holds(monkeypatch):
+    """No SYNC_DRY_RUN in the runner's env must never mean 'skip the hold'."""
+    calls: list = []
+    monkeypatch.setattr(vp, "_run", _fake_run(BAD, calls))
+    vp._run_update("x.py", {"PRICE_GUARD": "on"})
+    check, real = calls
+    assert check["SYNC_DRY_RUN"] == "true" and check["NETSUITE_READ_ONLY"] == "true"
+    assert real["PRICE_GUARD_HOLD"] == "1"

@@ -276,6 +276,28 @@ def _is_dry(env: dict[str, str]) -> bool:
     return env.get("SYNC_DRY_RUN", "true").strip().lower() in ("true", "1", "yes")
 
 
+#: Settings the scripts read from ``.env`` that this runner must see too.
+_RUN_MODE_KEYS = ("SYNC_DRY_RUN", "NETSUITE_READ_ONLY")
+
+
+def load_run_mode(env: dict[str, str], dotenv_path: str | None = None) -> None:
+    """Copy the run mode from ``.env`` into ``env`` where the process has none.
+
+    The workflows write SYNC_DRY_RUN to ``.env``, which the scripts load but
+    this runner did not. On the first live production update (2026-11-21) the
+    runner therefore took a live run for a dry run, ran one pass, and the
+    price hold was never applied: prices were written on 25 items.
+    """
+    try:
+        from dotenv import dotenv_values
+    except ImportError:  # pragma: no cover - dotenv is a hard dependency
+        return
+    values = dotenv_values(dotenv_path) if dotenv_path else dotenv_values()
+    for key in _RUN_MODE_KEYS:
+        if key not in env and values.get(key) is not None:
+            env[key] = str(values[key])
+
+
 def _run_update(script: str, env: dict[str, str], *, label: str = "") -> int:
     """Run an update script behind the price guard (see price_guard.py).
 
@@ -292,7 +314,10 @@ def _run_update(script: str, env: dict[str, str], *, label: str = "") -> int:
     os.unlink(report_path)
     probe_env = {**env, "PRICE_GUARD_REPORT": report_path}
     probe_env.pop("PRICE_GUARD_HOLD", None)
-    dry = _is_dry(env)
+    # Only a run that is known to be dry takes the single pass. With the mode
+    # unknown, do the check pass and the real pass: if the run turns out to be
+    # dry the second pass writes nothing, and if it is live the hold applies.
+    dry = "SYNC_DRY_RUN" in env and _is_dry(env)
     if dry:
         rc = _run(script, probe_env, label=label)
     else:
@@ -348,7 +373,9 @@ def write_summary(vendor: str, phases: tuple[str, ...], worst: int) -> None:
     Goes to the GitHub run summary page and, when RUN_SUMMARY_FILE is set, to
     that file so the workflow can post it to the day's summary issue.
     """
-    mode = "dry run (nothing written)" if _is_dry(dict(os.environ)) else "live"
+    seen = dict(os.environ)
+    load_run_mode(seen)
+    mode = "dry run (nothing written)" if _is_dry(seen) else "live"
     out = [f"### {vendor}: {', '.join(phases)} ({mode})", ""]
     for heading, lines in _SUMMARY:
         out.append(f"**{heading}**")
@@ -382,6 +409,7 @@ def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
         return 1
 
     env = dict(os.environ)
+    load_run_mode(env)
     env.setdefault("CREATE_MAX_STYLES", DEFAULT_CREATE_MAX_STYLES)
     budget = float(env.get("LEG_TIME_BUDGET_MIN", "0") or "0")
     if budget and not env.get("LEG_DEADLINE_EPOCH"):
