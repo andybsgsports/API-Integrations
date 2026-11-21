@@ -620,7 +620,7 @@ def main() -> int:
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         try:
             rows = client.suiteql(
-                f"SELECT id, upccode, cost, weight, weightunit, manufacturer"
+                f"SELECT id, itemid, upccode, cost, weight, weightunit, manufacturer"
                 f"{cols} FROM item WHERE upccode IN ({in_list})"
             )
         except Exception as exc:  # noqa: BLE001 - sustained throttling shouldn't crash
