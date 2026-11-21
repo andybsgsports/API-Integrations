@@ -24,7 +24,9 @@ Env knobs: ``RECONCILE_STYLE_LIMIT`` (0 = all styles; small N for a sample).
 from __future__ import annotations
 
 import csv
+import difflib
 import os
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -184,6 +186,55 @@ def describe(report: ReconcileReport, a: dict,
     return [f"{LABEL}: {line}" for line in out]
 
 
+def _plain(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.casefold())
+
+
+def suggest(ns_color: str, feed_colors: list[str]) -> tuple[str, str]:
+    """Best feed colour for an unmatched NetSuite colour, and why.
+
+    A suggestion for a person to confirm -- never used to link anything.
+    """
+    if not feed_colors:
+        return "", "No Unmatched Sanmar Color Left In This Style"
+    want = _plain(ns_color)
+    same = [c for c in feed_colors if _plain(c) == want]
+    if same:
+        return same[0], "Same Name Apart From Spacing Or Punctuation"
+    inside = [c for c in feed_colors
+              if want and (want in _plain(c) or _plain(c) in want)]
+    if len(inside) == 1:
+        return inside[0], "One Name Contains The Other"
+    if inside:
+        return "", "More Than One Sanmar Color Contains This Name"
+    close = difflib.get_close_matches(
+        want, [_plain(c) for c in feed_colors], n=1, cutoff=0.75)
+    if close:
+        pick = next(c for c in feed_colors if _plain(c) == close[0])
+        return pick, "Similar Spelling"
+    return "", "No Obvious Match"
+
+
+def color_pairs(report: ReconcileReport, a: dict) -> list[list]:
+    """One row per style and unmatched NetSuite colour, with a suggestion."""
+    feed: dict[str, set[str]] = {}
+    for r in report.unmatched:
+        feed.setdefault(r.style, set()).add(r.color_name)
+    ns: dict[tuple[str, str], int] = {}
+    for item, reason in a["unclaimed_rows"]:
+        if item.inactive or not item.color_id or not reason.startswith("colour"):
+            continue
+        name = a["color_name"].get(item.color_id, item.color_id)
+        ns[(item.style, name)] = ns.get((item.style, name), 0) + 1
+    rows = []
+    for (style, name), n in sorted(ns.items()):
+        options = sorted(feed.get(style, set()))
+        pick, why = suggest(name, options)
+        rows.append([style, name, n, pick, why,
+                     "; ".join(c for c in options if c != pick)])
+    return rows
+
+
 def write_csvs(report: ReconcileReport, a: dict,
                vendor_items: set[str] | None, out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -231,6 +282,15 @@ def write_csvs(report: ReconcileReport, a: dict,
                 "" if vendor_items is None
                 else ("Yes" if item.ns_id in vendor_items else "No"),
                 reason])
+    paths.append(p)
+
+    p = out_dir / "sanmar_link_color_pairs.csv"
+    with p.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["Style", "NetSuite Color (Unmatched)", "Items",
+                    "Suggested Sanmar Color", "Why",
+                    "Other Unmatched Sanmar Colors In This Style"])
+        w.writerows(color_pairs(report, a))
     paths.append(p)
     return paths
 

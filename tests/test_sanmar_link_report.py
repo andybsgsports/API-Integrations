@@ -120,7 +120,8 @@ def test_csvs_written(tmp_path):
                       _item("103", "PC61-Mgrn-Small", "2", "10")]}
     styles = [_style("PC61", _sku("PC61", "Black", "S", "k1"))]
     report, a, vend = _run(items, styles, ["101"])
-    matched, unmatched = lr.write_csvs(report, a, vend, tmp_path)
+    matched, unmatched, pairs = lr.write_csvs(report, a, vend, tmp_path)
+    assert pairs.read_text().startswith("Style,")
     assert "Clean" in matched.read_text()
     assert "Mgrn" in unmatched.read_text()
 
@@ -145,3 +146,25 @@ def test_inactive_named_items_are_not_clean():
     styles = [_style("L709", _sku("L709", "Black", "S", "k1"))]
     _report, a, _ = _run(items, styles, ["301"])
     assert a["clean"] == [] and a["retired"] == ["301"]
+
+
+def test_suggest_color():
+    assert lr.suggest("Red", ["True Red", "Navy"]) == (
+        "True Red", "One Name Contains The Other")
+    assert lr.suggest("Red", ["True Red", "Deep Red"])[0] == ""
+    assert lr.suggest("Forrest Green", ["Forest Green"]) == (
+        "Forest Green", "Similar Spelling")
+    assert lr.suggest("J.Navy", ["J. Navy"])[1].startswith("Same Name")
+    assert lr.suggest("Mgrn", ["Black"]) == ("", "No Obvious Match")
+    assert lr.suggest("Red", [])[0] == ""
+
+
+def test_color_pairs_rows():
+    items = {"PC61": [_item("101", "PC61-Black-Small", "1", "10"),
+                      _item("103", "PC61-Navy-Small", "3", "10")]}
+    styles = [_style("PC61", _sku("PC61", "Black", "S", "k1"),
+                     _sku("PC61", "True Navy", "S", "k2"),
+                     _sku("PC61", "Red", "S", "k3"))]
+    report, a, _ = _run(items, styles, ["101", "103"])
+    assert lr.color_pairs(report, a) == [
+        ["PC61", "Navy", 1, "True Navy", "One Name Contains The Other", "Red"]]
