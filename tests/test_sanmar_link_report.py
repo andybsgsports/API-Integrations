@@ -138,3 +138,10 @@ def test_link_runs_only_on_request():
     assert vp.ON_REQUEST_PHASES == ("link",)
     assert vp.PIPELINES["sanmar"]["link"] == ["scripts/sanmar_link_report.py"]
     assert vp._SUMMARY_LINE.search("LINK REPORT: not matched: 4")
+
+
+def test_inactive_named_items_are_not_clean():
+    items = {"L709": [_item("301", "INACTIVE-L709-Black-Small", "1", "10")]}
+    styles = [_style("L709", _sku("L709", "Black", "S", "k1"))]
+    _report, a, _ = _run(items, styles, ["301"])
+    assert a["clean"] == [] and a["retired"] == ["301"]
