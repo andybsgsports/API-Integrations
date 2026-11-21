@@ -27,7 +27,7 @@ on:
         required: true
         default: "sanmar"
       phases:
-        description: "Comma-separated: discover,options,create,update. Or link = read-only Sanmar match report."
+        description: "Comma-separated: discover,options,create,update. Or link = read-only Sanmar match report; link-apply = link clean matches (capped by max_items)."
         required: true
         default: "discover,options,create"
       mode:

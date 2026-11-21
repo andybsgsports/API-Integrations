@@ -70,7 +70,7 @@ PHASES = ("discover", "options", "create", "update", "images")
 #: Phases that run only when asked for by name -- never part of the default
 #: run or the nightly chain. ``link`` is the read-only report that matches
 #: existing items to feed SKUs before anything is linked (Andy, 2026-11-20).
-ON_REQUEST_PHASES = ("link",)
+ON_REQUEST_PHASES = ("link", "link-apply")
 
 #: Per-vendor phase -> script(s). A phase absent from a vendor's map has no
 #: implementation for that vendor yet; the pipeline says so out loud and moves
@@ -114,6 +114,9 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         # Read-only: which existing items match a feed size and colour, and
         # why the rest do not. On request only (ON_REQUEST_PHASES).
         "link": ["scripts/sanmar_link_report.py"],
+        # Stamps the UPC and Sanmar unique key on clean matches only, capped
+        # by MAX_ITEMS. On request only; writes only in live mode.
+        "link-apply": ["scripts/sanmar_link_apply.py"],
     },
     "momentec": {
         # Parents then children for styles NetSuite does not have, plus
@@ -205,7 +208,7 @@ DEFAULT_CREATE_MAX_STYLES = "300"
 #: everything skipped or failed by name, and warnings / notes / price holds.
 _SUMMARY_LINE = re.compile(
     r"failures: \d|SKIPPED|FAILED item|^WARNING|^NOTE|PRICE HOLD|PRICE GUARD"
-    r"|WOULD |dropped on |^LINK REPORT"
+    r"|WOULD |dropped on |^LINK REPORT|^LINK APPLY"
 )
 #: Cap on named skip / failure lines kept per script so one bad night cannot
 #: produce a summary nobody can read. The totals line always carries the count.

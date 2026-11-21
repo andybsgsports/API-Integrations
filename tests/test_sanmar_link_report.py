@@ -135,7 +135,7 @@ def test_script_has_no_write_call():
 
 def test_link_runs_only_on_request():
     assert "link" not in vp.PHASES
-    assert vp.ON_REQUEST_PHASES == ("link",)
+    assert vp.ON_REQUEST_PHASES == ("link", "link-apply")
     assert vp.PIPELINES["sanmar"]["link"] == ["scripts/sanmar_link_report.py"]
     assert vp._SUMMARY_LINE.search("LINK REPORT: not matched: 4")
 
