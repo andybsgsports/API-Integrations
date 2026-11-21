@@ -13,9 +13,20 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from sanmar_parent_create import _child_payload  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _all_vendor_fields(monkeypatch):
+    """These tests cover the full field set (VENDOR_CUSTOM_FIELDS=all); the
+    default, minimal set is covered in test_field_policy.py."""
+    import field_policy
+
+    monkeypatch.setattr(field_policy, "MODE", "all")
 
 
 def _style(**over):

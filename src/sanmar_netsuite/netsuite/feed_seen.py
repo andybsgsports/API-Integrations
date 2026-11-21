@@ -20,10 +20,14 @@ SOURCE_FIELD = "custitem_feed_source"
 LAST_SEEN_FIELD = "custitem_feed_last_seen"
 FIELDS = [SOURCE_FIELD, LAST_SEEN_FIELD]
 
-#: Refresh the last-seen stamp once it's this old (days).
-STALE_AFTER_DAYS = 3
+#: Refresh the last-seen stamp once it's this old (days). Andy, 2026-11-20:
+#: 14, up from 3. At 160,000 SanMar items a 3-day refresh is about 53,000
+#: writes a night just to move a date; 14 days is about 11,000.
+STALE_AFTER_DAYS = 14
 #: Inactivate an item once its stamp is this old (days) -- item_lifecycle.py.
-GRACE_DAYS = 7
+#: 30, up from 7: it has to stay well past the refresh interval, or an item
+#: still in the feed would look dropped between two refreshes.
+GRACE_DAYS = 30
 
 # SuiteQL returns dates in the account's display format; this sandbox uses
 # US M/D/YYYY. ISO is what we PATCH, so accept it back too.

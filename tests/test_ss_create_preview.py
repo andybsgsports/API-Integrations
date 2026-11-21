@@ -11,6 +11,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from collections import Counter
@@ -21,6 +23,15 @@ from ss_create_preview import (
     combo_key,
     excluded_brands,
 )
+
+
+@pytest.fixture(autouse=True)
+def _all_vendor_fields(monkeypatch):
+    """These tests cover the full field set (VENDOR_CUSTOM_FIELDS=all); the
+    default, minimal set is covered in test_field_policy.py."""
+    import field_policy
+
+    monkeypatch.setattr(field_policy, "MODE", "all")
 
 
 def test_combo_key_normalises_colour_variants():

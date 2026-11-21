@@ -19,6 +19,7 @@ from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
+import field_policy
 from concurrent_writes import write_records
 from native_pricing import (
     add_native_diffs,
@@ -544,15 +545,16 @@ def main() -> int:
     client = NetSuiteClient(cfg.netsuite)
     # Use the On Sale / Closeout checkboxes only once they exist in NetSuite
     # (self-enabling).
-    on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
-    closeout_field = CLOSEOUT_FIELD if _field_exists(client, CLOSEOUT_FIELD) else ""
-    shop_image_field = (
-        SHOP_IMAGE_FIELD if _field_exists(client, SHOP_IMAGE_FIELD) else ""
-    )
+    def _active(field: str) -> str:
+        return field if field_policy.keep(field) and _field_exists(client, field) else ""
+
+    on_sale_field = _active(ON_SALE_FIELD)
+    closeout_field = _active(CLOSEOUT_FIELD)
+    shop_image_field = _active(SHOP_IMAGE_FIELD)
     if shop_image_field:
         print(f"shop image field active: {shop_image_field}")
     view_image_fields = {
-        f: attr for f, attr in VIEW_IMAGE_FIELDS.items() if _field_exists(client, f)
+        f: attr for f, attr in VIEW_IMAGE_FIELDS.items() if _active(f)
     }
     if view_image_fields:
         print(f"view image fields active: {sorted(view_image_fields)}")
@@ -572,12 +574,16 @@ def main() -> int:
     ]
     if store_cols:
         print(f"store fields active: {store_cols}")
-    cols = ", ".join(
-        FIELD_ORDER + SEEN_FIELDS + store_cols
+    requested = (
+        ["custitem_ss_brand"] + FIELD_ORDER + SEEN_FIELDS
+        + ([on_sale_field] if on_sale_field else [])
         + ([closeout_field] if closeout_field else [])
         + ([shop_image_field] if shop_image_field else [])
         + sorted(view_image_fields)
     )
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report("sanmar field update", requested, custom_cols)
+    cols = field_policy.select(custom_cols + store_cols)
     gtins = sorted(payloads)
     considered = written = unchanged = priced = failures = deferred = 0
     _fail_shown = [0]
@@ -614,8 +620,8 @@ def main() -> int:
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         try:
             rows = client.suiteql(
-                f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
-                f"custitem_ss_brand, {cols} FROM item WHERE upccode IN ({in_list})"
+                f"SELECT id, upccode, cost, weight, weightunit, manufacturer"
+                f"{cols} FROM item WHERE upccode IN ({in_list})"
             )
         except Exception as exc:  # noqa: BLE001 - sustained throttling shouldn't crash
             # the whole run and discard every chunk already written; skip this
@@ -670,6 +676,7 @@ def main() -> int:
                 if cur_co != want_co:
                     body[closeout_field] = want_co
             stamp(body, row, "sanmar", claim_source=owner)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue

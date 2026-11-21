@@ -46,6 +46,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
+import field_policy
 from concurrent_writes import write_records
 from momentec_backfill import (
     BRAND_NAMES,
@@ -346,7 +347,9 @@ def child_fields(sku: MomentecSku) -> dict[str, object]:
                                     if sku.case_pack_qty.isdigit() else None),
         "custitem_mtec_size_guide": guide,
     }
-    return {k: v for k, v in out.items() if v not in (None, "")}
+    # Only the fields the pipeline still keeps (field_policy).
+    return {k: v for k, v in out.items()
+            if v not in (None, "") and field_policy.keep(k)}
 
 
 def child_payload(sku: MomentecSku, resolver, uom: dict[str, str],

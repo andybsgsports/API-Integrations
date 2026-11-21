@@ -32,6 +32,31 @@ the sandbox build is fresh — follow it in order; do not skip the ladder.
 4. **`custitem_atlas_item_image`** exists in production (it ships with the
    SuiteSuccess Advanced Inventory bundle); verify with `atlas_field_probe.py`.
 
+## Which custom fields production needs (2026-11-20)
+
+Andy, 2026-11-20: the pipeline keeps NetSuite's own fields current (cost and
+the vendor line price, Base Price, weight, UPC, names and descriptions, the
+item image, new styles / sizes / colours) plus On Sale and Feed Last Seen. The
+vendor reference fields (quantities, MAP / MSRP / case prices, status and
+closeout flags, image links) are no longer written; see
+`scripts/field_policy.py`. `VENDOR_CUSTOM_FIELDS=all` restores them.
+
+So production does not need the 114-field setup in prerequisite 2. A vendor
+step skips any kept field the account does not have, and needs only:
+
+| For | Fields |
+|---|---|
+| Every vendor | `custitem_bsg_on_sale` (Check Box), `custitem_feed_last_seen` (Date), `custitem_feed_source` (Free-Form Text) |
+| SanMar | `custitem_sanmar_unique_key`, `custitem_sanmar_style` (Free-Form Text) |
+| S&S | `custitem_ss_sku`, `custitem_ss_style`, `custitem_ss_brand` (Free-Form Text) |
+| Momentec | `custitem_mtec_item_sku`, `custitem_mtec_style` (Free-Form Text) |
+| Under Armour and the other DC OneSource vendors | `custitem_<vendor>_part_id`, `custitem_<vendor>_style` (Free-Form Text) |
+
+The vendor identifiers are how the Preferred Vendor ranking, the image step
+and the description step tell which feed an item belongs to. They are written
+once and never change. Without them a step still runs; those later steps just
+cannot place the item.
+
 ## Credential swap
 
 Production credentials go in **new** GitHub Actions secrets — do not

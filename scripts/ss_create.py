@@ -36,6 +36,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+import field_policy
 from native_pricing import base_price, weight_display
 from pricing_ownership import VENDOR_SS
 from run_status import exit_code
@@ -153,7 +154,10 @@ def child_fields(p: dict) -> dict[str, object]:
                        ("weight", "custitem_ss_weight")):
         if p.get(key) not in (None, ""):
             out[field] = p[key]
-    return {k: v for k, v in out.items() if v not in (None, "")}
+    # Only the fields the pipeline still keeps (field_policy): the S&S SKU and
+    # brand by default, not the reference data.
+    return {k: v for k, v in out.items()
+            if v not in (None, "") and field_policy.keep(k)}
 
 
 def _num(p: dict, key: str) -> float | None:

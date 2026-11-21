@@ -23,6 +23,7 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import field_policy
 import requests
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -523,13 +524,16 @@ def main() -> int:
         extra_fields = champro_doc_urls(client, ns_config().netsuite.account_id)
         if extra_fields:
             print(f"champro reference-doc links: {sorted(extra_fields)}")
-    cols = ", ".join(fields + list(extra_fields) + SEEN_FIELDS)
+    requested = ["custitem_ss_brand"] + fields + list(extra_fields) + SEEN_FIELDS
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report(f"{key} backfill", requested, custom_cols)
+    cols = field_policy.select(custom_cols)
     considered = written = unchanged = upc_filled = failures = 0
     for i in range(0, len(ids), 250):
         chunk = ids[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(x)}'" for x in chunk)
         for row in client.suiteql(
-            f"SELECT id, upccode, manufacturer, custitem_ss_brand, {cols} "
+            f"SELECT id, upccode, manufacturer{cols} "
             f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
@@ -545,6 +549,7 @@ def main() -> int:
                     and not _same(row.get("manufacturer"), sup["label"])):
                 body["manufacturer"] = sup["label"]
             stamp(body, row, key)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue
