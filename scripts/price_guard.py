@@ -27,6 +27,7 @@ toward how many prices were looked at.
 from __future__ import annotations
 
 import atexit
+import csv
 import json
 import os
 from pathlib import Path
@@ -46,6 +47,14 @@ _stats: dict[str, dict[str, int]] = {
 }
 
 
+#: Every price or cost that would change this run: (kind, item id, item name,
+#: current, new). Written next to the report so a person can review a hold.
+_moves: list[tuple[str, str, str, float | None, float]] = []
+MOVES_FILE = Path("data/price_guard_moves.csv")
+SAMPLES = 10
+_LABEL = {"price": "Base Price", "cost": "Purchase Price"}
+
+
 def _num(value: object) -> float | None:
     try:
         n = float(str(value).strip())
@@ -59,8 +68,11 @@ def holding() -> bool:
     return os.environ.get("PRICE_GUARD_HOLD", "").strip() == "1"
 
 
-def record(kind: str, current: object, new: object) -> None:
-    """Count one item's current -> new value for ``kind`` (price or cost)."""
+def record(kind: str, current: object, new: object, *, ref: object = "",
+           name: object = "") -> None:
+    """Count one item's current -> new value for ``kind`` (price or cost).
+
+    ``ref`` (item id) and ``name`` only label the review list of moves."""
     new_n = _num(new)
     if new_n is None:
         return
@@ -68,10 +80,58 @@ def record(kind: str, current: object, new: object) -> None:
     cur_n = _num(current)
     if cur_n is None or cur_n <= 0:
         s["filled_blank"] += 1
+        _moves.append((kind, str(ref or ""), str(name or ""), None, new_n))
         return
     s["compared"] += 1
     if abs(new_n - cur_n) / cur_n > MOVE_PCT:
         s["moved_big"] += 1
+    if abs(new_n - cur_n) >= 0.005:
+        _moves.append((kind, str(ref or ""), str(name or ""), cur_n, new_n))
+
+
+def _pct(cur: float | None, new: float) -> float | None:
+    return None if not cur else (new - cur) / cur
+
+
+def sample_lines(moves=None, n: int = SAMPLES) -> list[str]:
+    """The largest moves up and down for each kind, for the run log."""
+    moves = _moves if moves is None else moves
+    out = []
+    for k in KINDS:
+        rows = [m for m in moves if m[0] == k and m[3]]
+        rows.sort(key=lambda m: _pct(m[3], m[4]))
+        picks = [("down", rows[:n]), ("up", rows[::-1][:n])]
+        for direction, chosen in picks:
+            for _k, ref, name, cur, new in chosen:
+                pct = _pct(cur, new)
+                if (direction == "down") != (pct < 0):
+                    continue
+                out.append(
+                    f"PRICE GUARD sample ({_LABEL[k]}, largest {direction}): "
+                    f"item {ref} {name}: {cur:,.2f} -> {new:,.2f} ({pct:+.0%})")
+    return out
+
+
+def _write_moves() -> None:
+    if not _moves:
+        return
+    try:
+        MOVES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        fresh = not MOVES_FILE.exists()
+        with MOVES_FILE.open("a", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh)
+            if fresh:
+                w.writerow(["Field", "NetSuite Item Id", "NetSuite Item",
+                            "Current", "New", "Change", "Percent Change"])
+            for k, ref, name, cur, new in _moves:
+                pct = _pct(cur, new)
+                w.writerow([
+                    _LABEL[k], ref, name,
+                    "" if cur is None else f"{cur:.2f}", f"{new:.2f}",
+                    "" if cur is None else f"{new - cur:.2f}",
+                    "" if pct is None else f"{pct:.4f}"])
+    except OSError as exc:
+        print(f"price guard: could not write {MOVES_FILE}: {exc}")
 
 
 def snapshot() -> dict[str, dict[str, int]]:
@@ -82,12 +142,16 @@ def reset() -> None:
     for v in _stats.values():
         for key in v:
             v[key] = 0
+    _moves.clear()
 
 
 def _dump() -> None:
     path = os.environ.get("PRICE_GUARD_REPORT")
     if not path:
         return
+    _write_moves()
+    for line in sample_lines():
+        print(line)
     merged = snapshot()
     p = Path(path)
     # One vendor step can run several scripts or suppliers into the same

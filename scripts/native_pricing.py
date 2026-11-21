@@ -131,11 +131,13 @@ def add_native_diffs(
     # holding this vendor (see price_guard.py) neither is written.
     hold = price_guard.holding()
     if price is not None:
-        price_guard.record("price", base_by_rid.get(rid), price)
+        price_guard.record("price", base_by_rid.get(rid), price,
+                           ref=rid, name=row.get("itemid"))
         if not hold and not same(base_by_rid.get(rid), price):
             body["price"] = base_price_body(price)
     if cost is not None:
-        price_guard.record("cost", row.get("cost"), cost)
+        price_guard.record("cost", row.get("cost"), cost,
+                           ref=rid, name=row.get("itemid"))
         if not hold and not same(row.get("cost"), cost):
             body["cost"] = cost
     if weight is not None and not same(row.get("weight"), weight):
