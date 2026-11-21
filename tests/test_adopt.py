@@ -182,3 +182,63 @@ def test_unmatched_missing_and_dup_parents():
     assert len(report.unmatched) == 2
     assert report.dup_parents.get("2000") == ["1", "2"]
     assert "NOPE" in report.missing_styles
+
+
+# --- production link report follow-ups (2026-11-20) ------------------------
+
+_COLORS = [{"id": "1", "name": "Black/White", "abbreviation": ""},
+           {"id": "2", "name": "Black", "abbreviation": ""}]
+_SIZES = [{"id": "10", "name": "Large"}, {"id": "11", "name": "Osfa"},
+          {"id": "12", "name": "Large Tall"}, {"id": "13", "name": "One Size"}]
+
+
+def test_slash_spacing_matches():
+    from sanmar_netsuite.netsuite.adopt import color_key
+    assert color_key("Black/ White") == color_key("black / white") == "black/white"
+    client = FakeClient(_COLORS, _SIZES, {"ST104": [
+        {"id": "5", "itemid": "ST104-Black/White-Large", "color": "1", "size": "10"}]})
+    report = match_existing(
+        client, [_style("ST104", _sku("ST104", "Black/ White", "BlackWhite", "L", "k1"))])
+    assert report.rows[0].ns_id == "5"
+    assert report.rows[0].method == "option:name-spacing"
+    assert report.color_renames == {}
+
+
+def test_one_size_matches_osfa():
+    client = FakeClient(_COLORS, _SIZES, {"CP80": [
+        {"id": "6", "itemid": "CP80-Black-OSFA", "color": "2", "size": "11"}]})
+    report = match_existing(
+        client, [_style("CP80", _sku("CP80", "Black", "Black", "OSFA", "k1"))])
+    assert report.rows[0].ns_id == "6"
+
+
+def test_parent_item_is_never_the_match():
+    client = FakeClient(_COLORS, _SIZES, {"J763": [
+        {"id": "1", "itemid": "J763", "color": "2", "size": "10"},
+        {"id": "2", "itemid": "J763-Black-Large", "color": "2", "size": "10"}]})
+    report = match_existing(
+        client, [_style("J763", _sku("J763", "Black", "Black", "L", "k1"))])
+    assert report.rows[0].ns_id == "2"
+    assert report.ambiguous == {}
+    assert report.ns_children_total == 1
+    assert report.unclaimed == []
+
+
+def test_tall_only_style_matches_plain_size():
+    items = {"TST350": [
+        {"id": "7", "itemid": "TST350-Black-Large", "color": "2", "size": "10"}]}
+    report = match_existing(
+        FakeClient(_COLORS, _SIZES, items),
+        [_style("TST350", _sku("TST350", "Black", "Black", "LT", "k1"))])
+    assert report.rows[0].ns_id == "7"
+    assert report.rows[0].method == "option:tall-style"
+
+
+def test_tall_fallback_not_used_for_mixed_style():
+    items = {"PC61": [
+        {"id": "8", "itemid": "PC61-Black-Large", "color": "2", "size": "10"}]}
+    report = match_existing(
+        FakeClient(_COLORS, _SIZES, items),
+        [_style("PC61", _sku("PC61", "Black", "Black", "L", "k1"),
+                _sku("PC61", "Black", "Black", "LT", "k2"))])
+    assert [r.ns_id for r in report.rows] == ["8", None]

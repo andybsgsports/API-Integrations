@@ -89,8 +89,14 @@ def analyse(report: ReconcileReport, options: OptionMaps,
 
     clean: list[str] = []
     not_sanmar: list[str] = []
+    retired: list[str] = []
     for ns_id in seen:
         if ns_id in doubled_items or ns_id in ambiguous_items:
+            continue
+        item = report.claimed_items.get(ns_id)
+        if item and (item.inactive
+                     or item.itemid.upper().startswith("INACTIVE")):
+            retired.append(ns_id)
             continue
         if vendor_items is not None and ns_id not in vendor_items:
             not_sanmar.append(ns_id)
@@ -126,7 +132,7 @@ def analyse(report: ReconcileReport, options: OptionMaps,
     missing = set(report.missing_styles)
     new_style = sum(1 for r in report.unmatched if r.style in missing)
     return {
-        "clean": clean, "not_sanmar": not_sanmar, "double": double,
+        "clean": clean, "not_sanmar": not_sanmar, "retired": retired, "double": double,
         "reasons": reasons, "colors": colors, "sizes": sizes,
         "unclaimed_rows": unclaimed_rows, "color_name": color_name,
         "size_name": size_name, "seen": seen,
@@ -151,6 +157,7 @@ def describe(report: ReconcileReport, a: dict,
         f"item sharing the style number): {len(a['not_sanmar']):,}"
         if vendor_items is not None else
         "  Sanmar vendor line check: not available this run",
+        f"  matched but inactive or named INACTIVE: {len(a['retired']):,}",
         f"  more than one NetSuite item fits the same feed SKU: "
         f"{len(report.ambiguous):,}",
         f"  two feed SKUs landed on the same item: {len(a['double']):,}",
@@ -182,6 +189,7 @@ def write_csvs(report: ReconcileReport, a: dict,
     out_dir.mkdir(parents=True, exist_ok=True)
     clean = set(a["clean"])
     not_sanmar = set(a["not_sanmar"])
+    retired = set(a["retired"])
     paths = []
 
     p = out_dir / "sanmar_link_matched.csv"
@@ -196,6 +204,8 @@ def write_csvs(report: ReconcileReport, a: dict,
                 status = "Second feed SKU on the same item"
             elif r.unique_key in report.ambiguous:
                 status = "More than one NetSuite item fits"
+            elif r.ns_id in retired:
+                status = "Inactive or named INACTIVE"
             elif r.ns_id in not_sanmar:
                 status = "No Sanmar vendor line"
             elif r.ns_id in clean:
