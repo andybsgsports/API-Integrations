@@ -26,9 +26,11 @@ Everything here is read-only; it produces a report + mapping the caller acts on.
 
 from __future__ import annotations
 
+import csv
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..models import StyleRecord
 from ..transform.sizes import normalize_size
@@ -98,6 +100,32 @@ def color_key(name: str) -> str:
     Production link report, 2026-11-20: every unmatched slash colour was this.
     """
     return re.sub(r"\s*/\s*", "/", " ".join(name.split())).casefold()
+
+
+#: Colour pairings a person has confirmed, one row per style: the NetSuite
+#: colour on the existing items and the SanMar colour they really are.
+PAIRINGS_FILE = Path(__file__).resolve().parents[3] / "data" / (
+    "sanmar_confirmed_color_pairings.csv")
+
+
+def load_confirmed_pairings(path: Path | None = None) -> dict[tuple[str, str], str]:
+    """``(style, sanmar colour key) -> NetSuite colour name`` from the file.
+
+    Only ever applied inside the named style, so a pairing for one style can
+    never change how another style matches."""
+    path = path or PAIRINGS_FILE
+    out: dict[tuple[str, str], str] = {}
+    try:
+        with path.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                style = (row.get("style") or "").strip()
+                ns = (row.get("netsuite_color") or "").strip()
+                sm = (row.get("sanmar_color") or "").strip()
+                if style and ns and sm:
+                    out[(style.upper(), color_key(sm))] = ns
+    except OSError:
+        pass
+    return out
 
 
 #: Size names the BSG list carries under more than one spelling. A feed size
@@ -296,7 +324,8 @@ def _fetch_style_items(client, style: str) -> list[dict]:
 
 
 def match_existing(
-    client, styles: Iterable[StyleRecord], *, style_limit: int = 0
+    client, styles: Iterable[StyleRecord], *, style_limit: int = 0,
+    pairings: dict[tuple[str, str], str] | None = None,
 ) -> ReconcileReport:
     """Match every SKU to an existing NetSuite item (option ids, then names)."""
     report = ReconcileReport()
@@ -305,6 +334,7 @@ def match_existing(
         style_list = style_list[:style_limit]
 
     options = OptionMaps(client)
+    pairings = load_confirmed_pairings() if pairings is None else pairings
 
     # Every full color SanMar uses, for the rename guard: a list value whose
     # current name is one of these is a real color, not an abbreviation.
@@ -388,7 +418,14 @@ def match_existing(
                              if v not in size_ids]
                     via_tall = bool(extra)
                     size_ids = size_ids + extra
-                for color_id, method in options.color_candidates(
+                confirmed_ns = pairings.get(
+                    (style.style.upper(), color_key(sku.color_name)))
+                confirmed = [
+                    (vid, "option:confirmed")
+                    for vid in options.color_by_name.get(
+                        (confirmed_ns or "").lower(), [])
+                ]
+                for color_id, method in confirmed + options.color_candidates(
                     sku.color_name, sku.mainframe_color
                 ):
                     hit = None
@@ -407,7 +444,8 @@ def match_existing(
                         # Name isn't the full color yet; propose the rename.
                         cur_name, _ = options.color_info.get(color_id, ("", ""))
                         if (
-                            cur_name.strip().lower()
+                            method != "option:confirmed"
+                            and cur_name.strip().lower()
                             != sku.color_name.strip().lower()
                             and rename_is_safe(
                                 cur_name, sku.color_name, feed_colors
