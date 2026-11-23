@@ -52,7 +52,31 @@ _stats: dict[str, dict[str, int]] = {
 _moves: list[tuple[str, str, str, float | None, float]] = []
 MOVES_FILE = Path("data/price_guard_moves.csv")
 SAMPLES = 10
-_LABEL = {"price": "Base Price", "cost": "Purchase Price"}
+_LABEL = {"price": "Base Price", "cost": "Purchase Price",
+          "kept": "Base Price (Kept, Feed Is Lower)"}
+
+
+def no_decrease() -> bool:
+    """True when an existing Base Price is never lowered by the feed."""
+    return os.environ.get("BASE_PRICE_NO_DECREASE", "").strip().lower() in (
+        "1", "true", "on", "yes")
+
+
+def keeps_higher(current: object, new: object) -> bool:
+    """True when ``new`` is below the item's current Base Price and the
+    no-decrease rule is on."""
+    if not no_decrease():
+        return False
+    cur_n, new_n = _num(current), _num(new)
+    return (cur_n is not None and cur_n > 0 and new_n is not None
+            and new_n < cur_n - 0.005)
+
+
+def record_kept(current: object, new: object, *, ref: object = "",
+                name: object = "") -> None:
+    """List a Base Price that was left alone because the feed is lower."""
+    _moves.append(("kept", str(ref or ""), str(name or ""),
+                   _num(current), _num(new)))
 
 
 def _num(value: object) -> float | None:
@@ -152,6 +176,10 @@ def _dump() -> None:
     _write_moves()
     for line in sample_lines():
         print(line)
+    kept = sum(1 for m in _moves if m[0] == "kept")
+    if kept:
+        print(f"NOTE: price guard: {kept:,} Base Price(s) kept because the "
+              "feed's price is lower; listed in the price move list")
     merged = snapshot()
     p = Path(path)
     # One vendor step can run several scripts or suppliers into the same

@@ -130,7 +130,13 @@ def add_native_diffs(
     # Every price and cost is counted for the price guard; while the guard is
     # holding this vendor (see price_guard.py) neither is written.
     hold = price_guard.holding()
-    if price is not None:
+    if price is not None and price_guard.keeps_higher(base_by_rid.get(rid), price):
+        # The feed's price is lower than the Base Price already on the item.
+        # A price set above MSRP may be deliberate, so it is listed for review
+        # and left alone (Andy, 2026-11-23).
+        price_guard.record_kept(base_by_rid.get(rid), price,
+                                ref=rid, name=row.get("itemid"))
+    elif price is not None:
         price_guard.record("price", base_by_rid.get(rid), price,
                            ref=rid, name=row.get("itemid"))
         if not hold and not same(base_by_rid.get(rid), price):

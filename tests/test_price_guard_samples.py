@@ -33,3 +33,34 @@ def test_moves_and_samples(tmp_path, monkeypatch):
     assert "Base Price,3,blank,,15.00,," in text
     pg.reset()
     assert pg._moves == []
+
+
+def test_base_price_is_not_lowered_when_rule_is_on(monkeypatch):
+    import native_pricing as np_
+
+    def same(a, b):
+        return a not in (None, "") and abs(float(a) - float(b)) < 0.005
+
+    pg.reset()
+    monkeypatch.setenv("BASE_PRICE_NO_DECREASE", "on")
+    body: dict = {}
+    np_.add_native_diffs(body, {"itemid": "5000-Black-S", "cost": "3"},
+                         {"1": "33.00"}, "1", price=6.22, cost=None,
+                         weight=None, same=same)
+    assert "price" not in body
+    assert pg.snapshot()["price"] == {
+        "compared": 0, "moved_big": 0, "filled_blank": 0}
+    assert pg._moves == [("kept", "1", "5000-Black-S", 33.0, 6.22)]
+    # Higher and blank still write.
+    for rid, cur in (("2", "5.00"), ("3", "")):
+        b: dict = {}
+        np_.add_native_diffs(b, {"itemid": "x"}, {rid: cur}, rid, price=6.22,
+                             cost=None, weight=None, same=same)
+        assert "price" in b
+    # Rule off: a lower price writes as before.
+    monkeypatch.delenv("BASE_PRICE_NO_DECREASE")
+    b = {}
+    np_.add_native_diffs(b, {"itemid": "x"}, {"4": "33.00"}, "4", price=6.22,
+                         cost=None, weight=None, same=same)
+    assert "price" in b
+    pg.reset()
