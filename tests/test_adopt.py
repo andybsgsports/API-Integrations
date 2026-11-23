@@ -242,3 +242,41 @@ def test_tall_fallback_not_used_for_mixed_style():
         [_style("PC61", _sku("PC61", "Black", "Black", "L", "k1"),
                 _sku("PC61", "Black", "Black", "LT", "k2"))])
     assert [r.ns_id for r in report.rows] == ["8", None]
+
+
+# --- confirmed colour pairings (Andy, 2026-11-23) ---------------------------
+
+_PAIR_COLORS = [{"id": "723", "name": "Cardinal", "abbreviation": ""},
+                {"id": "6155", "name": "Cardinal Red", "abbreviation": ""}]
+
+
+def test_confirmed_pairing_matches_only_in_its_style(tmp_path):
+    from sanmar_netsuite.netsuite.adopt import load_confirmed_pairings
+    f = tmp_path / "p.csv"
+    f.write_text("style,netsuite_color,sanmar_color,confirmed_by,note\n"
+                 "PC450,Cardinal,Cardinal Red,Andy,x\n")
+    pairings = load_confirmed_pairings(f)
+    assert pairings == {("PC450", "cardinal red"): "Cardinal"}
+    items = {
+        "PC450": [{"id": "5430", "itemid": "PC450-Cardinal-Large",
+                   "color": "723", "size": "10"}],
+        "PC54": [{"id": "9", "itemid": "PC54-Cardinal-Large",
+                  "color": "723", "size": "10"}],
+    }
+    report = match_existing(
+        FakeClient(_PAIR_COLORS, _SIZES, items),
+        [_style("PC450", _sku("PC450", "Cardinal Red", "CardRed", "L", "k1"),
+                _sku("PC450", "Team Cardinal", "TmCard", "L", "k2")),
+         _style("PC54", _sku("PC54", "Cardinal Red", "CardRed", "L", "k3"))],
+        pairings=pairings)
+    by_key = {r.unique_key: r for r in report.rows}
+    assert by_key["k1"].ns_id == "5430"
+    assert by_key["k1"].method == "option:confirmed"
+    assert by_key["k2"].ns_id is None
+    assert by_key["k3"].ns_id is None
+    assert report.color_renames == {}
+
+
+def test_shipped_pairings_file_loads():
+    from sanmar_netsuite.netsuite.adopt import load_confirmed_pairings
+    assert load_confirmed_pairings()[("PC450", "cardinal red")] == "Cardinal"
