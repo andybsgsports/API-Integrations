@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-11-24.3',
+        VERSION: '2026-11-24.4',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -117,6 +117,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // week, the items already posted have no open line any more and must
         // not be taken for "never counted" and reset to 0.
         FULL_COUNT_RECENT_DAYS: 7,
+        // Open orders: sales-order lines read before filtering down to what is
+        // countable. This was a fixed 5,000; BSG had 5,139 open lines in
+        // November 2026, so the newest orders were being cut off the tab and
+        // their staged units could not be ticked.
+        ORDERS_MAX_ROWS: 20000,
         // Lines a device may push in one sync request.
         SYNC_MAX_LINES: 50,
         MEMO_PREFIX: 'Physical count',
@@ -692,17 +697,14 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     function openOrders(itemId, locId) {
         if (!multiLocation()) { locId = null; }
         var out = [];
-        var MAX = 5000;
+        var MAX = CONFIG.ORDERS_MAX_ROWS || 20000;
         var truncated = false;
         function fetchAll(srch) {
-            var rs = srch.run(), rows = [], start = 0, page = 1000;
-            while (start < MAX) {
-                var chunk = rs.getRange({ start: start, end: Math.min(start + page, MAX) });
-                rows = rows.concat(chunk);
-                if (chunk.length < page) { break; }
-                start += page;
+            var paged = srch.runPaged({ pageSize: 1000 }), rows = [];
+            for (var i = 0; i < paged.pageRanges.length; i++) {
+                if (rows.length >= MAX) { truncated = true; break; }
+                rows = rows.concat(paged.fetch({ index: i }).data);
             }
-            if (rows.length >= MAX) { truncated = true; }
             return rows;
         }
 
@@ -1564,7 +1566,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         naturalItemOrder(all).forEach(function (it) {
             if (!it.onhand || open[it.id]) { return; }
             if (recent.items[it.id]) { kept++; return; }
-            var row = { id: it.id, name: it.name, display: it.display || it.desc || '', onhand: it.onhand, cost: it.cost || 0 };
+            var row = { id: it.id, name: it.name, display: it.display || it.desc || '', vendor: it.vendor || '', onhand: it.onhand, committed: it.committed || 0, cost: it.cost || 0 };
             if (it.blocked) { row.blocked = it.blocked; blocked.push(row); } else { items.push(row); }
         });
         return { ok: true, items: items, blocked: blocked, kept: kept, keptDays: CONFIG.FULL_COUNT_RECENT_DAYS, inStock: all.length,
@@ -2482,14 +2484,22 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
         }).join('&');
         return fetch(API + '&action=' + action + (qs ? '&' + qs : '') + '&_ts=' + (++reqSeq), { credentials: 'same-origin', cache: 'no-store' })
-            .then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); });
+            .then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); }).catch(unreachable);
+    }
+    // fetch() rejects when the request never got an answer: wifi dropped, the
+    // tablet slept, the server hung up. Every caller here handles "not ok"
+    // and none handles a rejection -- left alone, a single lost request
+    // froze that caller for good: a device's saves sat on "Saving..." until
+    // someone reloaded the page, with nothing reaching NetSuite meanwhile.
+    function unreachable() {
+        return { ok: false, offline: true, error: 'Could not reach NetSuite. Check the connection on this device.' };
     }
     function apiPost(action, body) {
         return fetch(API + '&action=' + action + '&_ts=' + (++reqSeq), {
             method: 'POST', credentials: 'same-origin', cache: 'no-store',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body || {})
-        }).then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); });
+        }).then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); }).catch(unreachable);
     }
 
     // ---------------------------------------------------------------- dom --
@@ -3429,6 +3439,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var carried = prev.loc === state.loc ? prev : loadSessionPrefs(state.loc);
         state.session = { loc: state.loc, loading: true, error: '', lines: [], items: [], byItem: {}, fresh: {}, freshDone: false, loadedAt: 0, truncated: false,
             excluded: carried.excluded || {}, overrides: carried.overrides || {}, overrideSig: carried.overrideSig || {}, droppedOverrides: prev.loc === state.loc ? (prev.droppedOverrides || []) : [],
+            remaining: prev.loc === state.loc ? prev.remaining : undefined,
             filter: prev.filter || 'all', precheck: null };
         var s = state.session;
         apiGet('session', { loc: state.loc || '' }).then(function (res) {
@@ -3830,7 +3841,17 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 ])
             ]));
         } else {
+            var left = remainingPanel(s);
+            if (left) { form.appendChild(left); }
             form.appendChild(el('div', { class: 'ic-actions' }, [
+                el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Not counted yet…', onclick: function () {
+                    s.remaining = null; render();
+                    apiPost('uncounted', { loc: state.loc || '' }).then(function (r) {
+                        if (state.session !== s) { return; }
+                        s.remaining = (r && r.ok) ? r : { error: (r && r.error) || 'Could not reach NetSuite.' };
+                        if (state.view === 'sheet' && !state.confirm) { render(); }
+                    });
+                } }),
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Refresh on-hand', onclick: function () { s.fresh = {}; s.freshDone = false; s.freshLoading = false; render(); } }),
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Discard all counts…', onclick: discardAll }),
                 el('button', { class: 'ic-btn', type: 'button', text: full ? 'Submit full year-end count…' : 'Submit count…', onclick: function () {
@@ -3871,16 +3892,41 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var u = s.uncounted;
         return !!(u && u.ok && !u.truncated && s.reviewed);
     }
-    function uncountedCsv(u) {
+    function uncountedCsv(u, note, filename) {
         function q(v) { var t = String(v == null ? '' : v); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; }
-        var rows = [['Item', 'Description', 'On hand', 'Avg cost', 'Value', 'Note'].join(',')];
-        u.items.forEach(function (it) { rows.push([q(it.name), q(it.display), it.onhand, it.cost || '', it.cost ? Math.round(it.onhand * it.cost * 100) / 100 : '', 'Reset to 0'].join(',')); });
-        u.blocked.forEach(function (it) { rows.push([q(it.name), q(it.display), it.onhand, it.cost || '', '', q('NOT reset: needs inventory detail (' + it.blocked + ')')].join(',')); });
+        var rows = [['Item', 'Description', 'Pref. vendor', 'On hand', 'Committed to open orders', 'Avg cost', 'Value', 'Note'].join(',')];
+        u.items.forEach(function (it) { rows.push([q(it.name), q(it.display), q(it.vendor), it.onhand, it.committed || '', it.cost || '', it.cost ? Math.round(it.onhand * it.cost * 100) / 100 : '', note || 'Reset to 0'].join(',')); });
+        u.blocked.forEach(function (it) { rows.push([q(it.name), q(it.display), q(it.vendor), it.onhand, it.committed || '', it.cost || '', '', q('Needs inventory detail (' + it.blocked + '): adjust in NetSuite')].join(',')); });
         var a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([rows.join('\r\n')], { type: 'text/csv' }));
-        a.download = 'not-counted-reset-to-0.csv';
+        a.download = filename || 'not-counted-reset-to-0.csv';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+    // Progress, for the administrator, at any point in the count: which
+    // items with stock on the books nobody has counted yet, and whose they
+    // are. It is the same list a full count resets, asked for early enough
+    // to send someone to the shelf instead.
+    function remainingPanel(s) {
+        var u = s.remaining;
+        if (u === undefined) { return null; }
+        var close = el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Close', onclick: function () { delete s.remaining; render(); } });
+        if (u === null) { return el('div', { class: 'ic-commit-warn' }, [el('p', { class: 'ic-meta', text: 'Listing the items nobody has counted yet…' })]); }
+        if (u.error || u.truncated) { return el('div', { class: 'ic-commit-warn' }, [el('p', { text: 'Could not list what is left: ' + (u.error || 'too many items to list whole.') }), close]); }
+        var n = u.items.length + u.blocked.length, byVendor = {}, names = [];
+        u.items.concat(u.blocked).forEach(function (it) { var v = it.vendor || 'No preferred vendor'; if (!byVendor[v]) { byVendor[v] = 0; names.push(v); } byVendor[v]++; });
+        names.sort(function (a, b) { return byVendor[b] - byVendor[a]; });
+        return el('div', { class: 'ic-commit-warn' }, [
+            el('p', {}, [
+                el('b', { text: n ? n + ' of ' + u.inStock + ' items with stock on the books have not been counted yet. ' : 'Every item with stock on the books has been counted. ' }),
+                n ? 'Most are from: ' + names.slice(0, 8).map(function (v) { return v + ' (' + byVendor[v] + ')'; }).join(', ') + (names.length > 8 ? ', …' : '') + '.' : ''
+            ]),
+            u.kept ? el('p', { class: 'ic-meta', text: u.kept + ' more were counted and posted in the last ' + u.keptDays + ' days and are not listed.' }) : null,
+            el('div', { class: 'ic-actions' }, [
+                n ? el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Export the list (CSV)', onclick: function () { uncountedCsv(u, 'Not counted yet', 'not-counted-yet.csv'); } }) : null,
+                close
+            ])
+        ]);
     }
     // The part of the confirm that only a full count has: what will be reset.
     function uncountedPanel(s) {
@@ -3888,15 +3934,15 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (!u) { return el('p', { class: 'ic-meta', text: 'Listing the items nobody counted…' }); }
         if (u.error) { return el('div', { class: 'ic-error', text: 'The full count cannot post: ' + u.error }); }
         if (u.truncated) { return el('div', { class: 'ic-error', text: 'The full count cannot post: there are too many items or count lines here to list every uncounted item, and a partial reset would be worse than none.' }); }
-        var n = u.items.length, units = 0, value = 0, costed = false;
-        u.items.forEach(function (it) { units += Math.abs(it.onhand); if (it.cost) { costed = true; value += it.onhand * it.cost; } });
+        var n = u.items.length, units = 0, value = 0, costed = false, onOrders = 0;
+        u.items.forEach(function (it) { units += Math.abs(it.onhand); if (it.cost) { costed = true; value += it.onhand * it.cost; } if (it.committed > 0) { onOrders++; } });
         var cb = el('input', { type: 'checkbox', id: 'icReviewed' });
         cb.checked = !!s.reviewed;
         cb.addEventListener('change', function () { s.reviewed = cb.checked; render(); });
         var list = null;
         if (s.showUncounted) {
             list = el('div', { class: 'ic-uncounted' }, u.items.slice(0, 500).map(function (it) {
-                return el('div', { class: 'ic-meta', text: it.name + (it.display ? ' — ' + it.display : '') + ' · on hand ' + fmt(it.onhand) + ' → 0' });
+                return el('div', { class: 'ic-meta', text: it.name + (it.display ? ' — ' + it.display : '') + ' · on hand ' + fmt(it.onhand) + ' → 0' + (it.committed > 0 ? ' · ' + fmt(it.committed) + ' COMMITTED TO OPEN ORDERS' : '') });
             }).concat(n > 500 ? [el('div', { class: 'ic-meta', text: '… and ' + (n - 500) + ' more. Export has every one.' })] : []));
             list.style.maxHeight = '280px'; list.style.overflow = 'auto'; list.style.margin = '6px 0';
         }
@@ -3910,6 +3956,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Export (CSV)', onclick: function () { uncountedCsv(u); } })
             ]) : null,
             list,
+            onOrders ? el('p', {}, [el('b', { text: onOrders + ' of these ' + (onOrders === 1 ? 'has' : 'have') + ' units committed to open sales orders that nobody ticked. ' }),
+                'Those units are usually staged, at the decorator or waiting for pickup. Check the Open orders tab before writing them off; the export marks which items.']) : null,
             u.blocked.length ? el('p', { text: u.blocked.length + ' uncounted item' + (u.blocked.length === 1 ? ' needs' : 's need') + ' inventory detail (serial, lot or bin) and cannot be reset here -- adjust ' + (u.blocked.length === 1 ? 'it' : 'them') + ' the normal way: ' + u.blocked.slice(0, 6).map(function (it) { return it.name; }).join(', ') + (u.blocked.length > 6 ? ', …' : '') + '.' }) : null,
             u.kept ? el('p', { text: u.kept + ' item' + (u.kept === 1 ? ' has' : 's have') + ' no open count but ' + (u.kept === 1 ? 'was' : 'were') + ' counted and posted in the last ' + u.keptDays + ' days, so ' + (u.kept === 1 ? 'it is' : 'they are') + ' left as posted.' }) : null,
             el('p', { class: 'ic-meta', text: 'Inactive items are not listed and are never touched.' }),
@@ -3931,6 +3979,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (full) { s.uncounted.items.forEach(function (it) { if (!s.byItem[it.id]) { lines.push({ item: it.id, count: 0, reset: true }); } }); }
         var size = BOOT.sharedBatch || 100, batches = [];
         for (var i = 0; i < lines.length; i += size) { batches.push(lines.slice(i, i + size)); }
+        var total = lines.length, sent = 0, into = '';
+        var nameOf = {};
+        s.items.forEach(function (m) { nameOf[m.id] = m.name; });
+        if (full) { s.uncounted.items.forEach(function (it) { if (!nameOf[it.id]) { nameOf[it.id] = it.name; } }); }
         var done = { adjustments: [], applied: 0, skipped: 0, blocked: [], unmarked: [], location: state.loc ? locName(state.loc) : '', shared: true, full: full, reset: 0 };
         state.confirm = false; state.submitting = true; state.submitError = '';
         var n = 0;
@@ -3952,37 +4004,80 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             render();
             reconcile();             // this device's own posted lines leave its local sheet
         }
-        function next() {
-            if (n >= batches.length) { finish(); return; }
-            var batch = batches[n++];
-            state.progress = batches.length > 1 ? 'Submitting batch ' + n + ' of ' + batches.length + '…' : 'Creating the Inventory Adjustment…';
-            render();
-            // Every batch after the first adds its lines to the adjustment the
-            // first one made: a count is one count, however many requests it
-            // takes to send it.
-            var into = done.adjustments.length ? done.adjustments[0].id : '';
-            apiPost('submit', { loc: state.loc || '', account: state.account || '', memo: state.memo || '', lines: batch, adjustment: into }).then(function (res) {
-                if (!res || !res.ok) {
-                    state.submitting = false; state.progress = '';
-                    state.submitError = ((res && res.error) || 'Submit failed.') + (n > 1 && !(res && res.stale) ? ' (Earlier batches posted; what is left is still on the shared sheet.)' : '');
-                    if (done.adjustments.length) { state.done = done; }
-                    // A stale item was decided on old numbers: forget that decision, keep the others.
-                    (res && res.stale || []).forEach(function (st) {
-                        delete s.overrides[st.item]; delete s.overrideSig[st.item];
-                        var m = s.byItem[st.item];
-                        if (m) { m.subs.forEach(function (l) { delete s.excluded[l.id]; }); }
-                    });
-                    loadSession();
-                    render();
-                    return;
-                }
-                if (res.adjustment && !done.adjustments.some(function (a) { return a.id === res.adjustment.id; })) { done.adjustments.push(res.adjustment); }
-                done.applied += (res.applied || []).length;
-                done.reset += (res.applied || []).filter(function (l) { return l.reset; }).length;
-                done.skipped += (res.skipped || []).length;
-                (res.blocked || []).forEach(function (b) { done.blocked.push({ name: b.name || ('item ' + b.item), reason: b.reason || '' }); });
-                retryMark(res.unmarked, res.adjustment, next);
+        // Stop: nothing more is sent. What posted stays posted; the rest is
+        // still open on the shared sheet.
+        function fail(res) {
+            state.submitting = false; state.progress = '';
+            state.submitError = ((res && res.error) || 'Submit failed.') + (sent > 0 && !(res && res.stale) ? ' (' + sent + ' of ' + total + ' items were already sent and posted; what is left is still on the shared sheet. Submitting again is safe.)' : '');
+            if (done.adjustments.length) { state.done = done; }
+            // A stale item was decided on old numbers: forget that decision, keep the others.
+            (res && res.stale || []).forEach(function (st) {
+                delete s.overrides[st.item]; delete s.overrideSig[st.item];
+                var m = s.byItem[st.item];
+                if (m) { m.subs.forEach(function (l) { delete s.excluded[l.id]; }); }
             });
+            loadSession();
+            render();
+        }
+        function ok(res, batch) {
+            sent += batch.length;
+            if (res.adjustment) {
+                into = res.adjustment.id;
+                if (!done.adjustments.some(function (a) { return a.id === res.adjustment.id; })) { done.adjustments.push(res.adjustment); }
+            }
+            done.applied += (res.applied || []).length;
+            done.reset += (res.applied || []).filter(function (l) { return l.reset; }).length;
+            done.skipped += (res.skipped || []).length;
+            (res.blocked || []).forEach(function (b) { done.blocked.push({ name: b.name || nameOf[b.item] || ('item ' + b.item), reason: b.reason || '' }); });
+            retryMark(res.unmarked, res.adjustment, next);
+        }
+        // A batch NetSuite would not take. Three things it can be, cheapest
+        // first. (1) Something no retry fixes -- stale counts, the session,
+        // the role: stop. (2) The adjustment has grown too slow to open and
+        // save again (it is loaded whole for every batch added to it): send
+        // the same batch once more as a NEW adjustment and carry on into
+        // that one. (3) One line NetSuite refuses, which fails all hundred
+        // with it and would otherwise fail them on every retry: halve the
+        // batch until the line stands alone, set it aside with NetSuite's
+        // reason, and post the rest. Retrying is safe at every step because
+        // a line is a count, not a change -- an item that did post is found
+        // already matching and left off.
+        function refused(res, batch, target, retried) {
+            var err = String((res && res.error) || '');
+            var noAnswer = !res || res.offline || /non-json response/i.test(err);
+            var hard = (res && res.stale) || /no signed-in user|your role cannot|pick a location|pick an adjustment account|shared count is|too many recently posted/i.test(err);
+            if (hard) { fail(res); return; }
+            // retried holds the adjustment the first try was going into.
+            if (target && !retried && !batch.halved) { into = ''; attempt(batch, '', target); return; }
+            if (noAnswer) { fail(res); return; }
+            // A new adjustment was refused too, so size was not the trouble:
+            // go back to the one the count was going into.
+            if (retried) { into = retried; }
+            if (batch.length > 1) {
+                var half = Math.ceil(batch.length / 2), a = batch.slice(0, half), b = batch.slice(half);
+                a.halved = true; b.halved = true;
+                batches.unshift(b); batches.unshift(a);
+                next();
+                return;
+            }
+            sent += 1;
+            done.blocked.push({ name: nameOf[batch[0].item] || ('item ' + batch[0].item), reason: (batch[0].reset ? 'Not reset: ' : '') + (err || 'NetSuite refused this line.') });
+            next();
+        }
+        function attempt(batch, target, retried) {
+            apiPost('submit', { loc: state.loc || '', account: state.account || '', memo: state.memo || '', lines: batch, adjustment: target }).then(function (res) {
+                if (res && res.ok) { ok(res, batch); } else { refused(res, batch, target, retried); }
+            });
+        }
+        function next() {
+            if (!batches.length) { finish(); return; }
+            var batch = batches.shift();
+            state.progress = total > size ? 'Submitting… ' + sent + ' of ' + total + ' items sent. Keep this tab open.' : 'Creating the Inventory Adjustment…';
+            render();
+            // Every batch adds its lines to the adjustment the count is
+            // already going into: a count is one count, however many
+            // requests it takes to send it.
+            attempt(batch, into, false);
         }
         next();
     }
@@ -4366,7 +4461,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var lineCount = 0, ticked = 0;
             order.forEach(function (ref) { groups[ref].lines.forEach(function (o) { lineCount++; if (tickedBy(o.item, orderKey(o))) { ticked++; } }); });
             if (cnt) {
-                cnt.textContent = repNames.length + ' sales rep' + (repNames.length === 1 ? '' : 's') + ' · ' + order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · list capped' : '');
+                cnt.textContent = repNames.length + ' sales rep' + (repNames.length === 1 ? '' : 's') + ' · ' + order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · LIST CUT SHORT: the newest orders are missing, tell the administrator' : '');
             }
             if (!order.length) {
                 box.appendChild(el('div', { class: 'ic-empty', text: q ? 'Nothing matches "' + state.ordersFilter.trim() + '".' : 'No received-but-unshipped sales order lines at this location.' }));
