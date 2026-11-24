@@ -283,6 +283,7 @@ rest of the sheet still posts. Adjust those the normal way.
 | `SHARED_COUNTED_AT` | `custrecord_bcl_counted_at` | Optional field on the shared record that holds when each line was last *counted* (see *Keep the latest*). The page works without it; `null` never looks for it. |
 | `SHARED_BATCH` | `100` | Items sent per request when posting the shared count. Every batch is added to the **same** Inventory Adjustment, and each line is marked posted in the same request. |
 | `FULL_COUNT_RECENT_DAYS` | `7` | Full year-end count: an item with no open count line still counts as counted if one of its lines was posted within this many days, so a second submit never resets what the first one posted. |
+| `ORDERS_MAX_ROWS` | `20000` | Open orders: sales-order lines read before narrowing to what is countable. |
 | `SYNC_MAX_LINES` | `50` | Lines a device sends per save; a burst is sent in several saves. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 | `SUBMIT_ROLE_IDS` | `[3]` | Internal ids of the roles allowed to post the adjustment. `3` is NetSuite's Administrator. Every other role counts, ticks open orders and exports, but sees no **Refresh on-hand** / **Clear sheet** / **Submit count** buttons, and the submit endpoint refuses them — a hidden button is not a permission. Find a role's id in the `id=` of its URL under Setup > Users/Roles > Manage Roles. `null` lets any role in the deployment's audience submit. |
@@ -517,6 +518,72 @@ What a full count does and does not do:
 - The adjustment is dated the day it is submitted. For it to land in the
   closing year, submit on or before the last day of that year, with
   shipping and receiving held from the count until the submit.
+
+## Keeping a count moving (v2026-11-24.4)
+
+Four things that could quietly stall or shorten a count, found on a second
+review with the September test run in mind:
+
+- **A dropped connection no longer freezes a device.** A request that never
+  got an answer (wifi dropped, tablet slept) used to leave that device on
+  *Saving to NetSuite…* until someone reloaded the page, with nothing
+  reaching NetSuite in the meantime. It now reads *Not saved — retrying:
+  Could not reach NetSuite* and goes up by itself when the connection
+  returns.
+- **Open orders are not cut off at 5,000 lines.** The tab read at most 5,000
+  sales-order lines, oldest first, before narrowing them to what is
+  countable. BSG had 5,139 in November 2026, so the newest orders were
+  missing and their staged units could not be ticked. The limit is now
+  `ORDERS_MAX_ROWS` (20,000), and if it is ever reached the tab says so in
+  words.
+- **One line NetSuite refuses no longer strands the count.** A refused line
+  failed its whole batch of 100, on every retry. The page now halves a
+  refused batch until the line stands alone, sets it aside on the result
+  page with NetSuite's own reason, and posts everything else. If the
+  adjustment itself has grown too slow to add to, the same batch is sent
+  once more as a new adjustment and the count carries on into that one, so a
+  very large count may finish as two or three adjustments rather than fail.
+  Stale counts, a lost session and a lost connection still stop at once.
+- **Not counted yet…** (administrator, Sheet tab) lists, at any point in the
+  count, the items with stock on the books that nobody has counted, with a
+  count per preferred vendor and a CSV. It is the same list a full count
+  resets, asked for early enough to send someone to the shelf. The full
+  count's review also flags uncounted items that have units **committed to
+  open orders nobody ticked** — usually staged or at the decorator.
+
+## Who is counting, and who is finished (v2026-11-24.6)
+
+Built for the problem the September test run showed most clearly: people
+counting in different rooms, nobody telling the administrator where they
+were, and one device that looked fine and had saved nothing.
+
+- **Device board** (administrator, Sheet tab). Every device that has the
+  page open reports in about once a minute: whose it is, how many lines it
+  holds, **how many have not saved** and why, and whether its counter has
+  finished. The board lists them all — including a device that has never
+  managed to save a line, which the per-counter chips cannot show. A device
+  not heard from for three minutes says so (screen off, tab closed, no
+  signal), and one still running an older copy of the page is told to
+  reload. The board is a status display kept for a day, not a record.
+- **I'm finished counting** (every counter, Sheet tab). Pressed when a
+  counter has done everything they were given. It is refused while any of
+  their lines is still unsaved. Counting or ticking anything afterwards
+  takes the mark off again, and it clears by itself once the count is
+  posted. It is per location.
+- **The confirm names who it is waiting on.** Before a submit, any device
+  that has not marked itself finished, or still has unsaved lines, is listed
+  — and for a full year-end count the notice says those unsaved items would
+  be reset to 0. It is a warning, not a lock: a tablet that was simply left
+  open does not hold the count hostage.
+- **Whole-location Select all is the administrator's.** The header **Select
+  all** on Open orders marks every committed unit on every open order as
+  found, in one click. Counters no longer have it; they keep **Select all**
+  inside each order and **Clear my ticks**.
+- **Open orders reads only the open orders' fulfillments** (v2026-11-24.5).
+  The pulled / layaway search used to ask for every fulfillment ever made,
+  oldest first, so its 5,000-row limit was spent on years-old shipments
+  before reaching today's orders. Units that have really shipped are now
+  netted out of *pulled*.
 
 ## Count-day rules (what moves inventory)
 

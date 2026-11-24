@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-11-24.3',
+        VERSION: '2026-11-24.6',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -117,6 +117,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // week, the items already posted have no open line any more and must
         // not be taken for "never counted" and reset to 0.
         FULL_COUNT_RECENT_DAYS: 7,
+        // Open orders: sales-order lines read before filtering down to what is
+        // countable. This was a fixed 5,000; BSG had 5,139 open lines in
+        // November 2026, so the newest orders were being cut off the tab and
+        // their staged units could not be ticked.
+        ORDERS_MAX_ROWS: 20000,
         // Lines a device may push in one sync request.
         SYNC_MAX_LINES: 50,
         MEMO_PREFIX: 'Physical count',
@@ -225,6 +230,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 out = isPost ? markPosted(body) : { ok: false, error: 'POST required.' };
             } else if (action === 'discard') {
                 out = isPost ? discardShared(body) : { ok: false, error: 'POST required.' };
+            } else if (action === 'presence') {
+                out = isPost ? recordPresence(body) : { ok: false, error: 'POST required.' };
             } else if (action === 'uncounted') {
                 out = isPost ? uncountedItems(body) : { ok: false, error: 'POST required.' };
             } else if (action === 'precheck') {
@@ -692,17 +699,14 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     function openOrders(itemId, locId) {
         if (!multiLocation()) { locId = null; }
         var out = [];
-        var MAX = 5000;
+        var MAX = CONFIG.ORDERS_MAX_ROWS || 20000;
         var truncated = false;
         function fetchAll(srch) {
-            var rs = srch.run(), rows = [], start = 0, page = 1000;
-            while (start < MAX) {
-                var chunk = rs.getRange({ start: start, end: Math.min(start + page, MAX) });
-                rows = rows.concat(chunk);
-                if (chunk.length < page) { break; }
-                start += page;
+            var paged = srch.runPaged({ pageSize: 1000 }), rows = [];
+            for (var i = 0; i < paged.pageRanges.length; i++) {
+                if (rows.length >= MAX) { truncated = true; break; }
+                rows = rows.concat(paged.fetch({ index: i }).data);
             }
-            if (rows.length >= MAX) { truncated = true; }
             return rows;
         }
 
@@ -778,12 +782,22 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // (out may hold Do Not Commit lines with committed 0 at this point --
         // the fulfillment search below is what says whether they are countable)
         try {
+            // Only the fulfillments of the open orders found above. Without
+            // this the search is every fulfillment BSG has ever made (the
+            // third stage, Shipped, never leaves that status), oldest first:
+            // under the old 5,000-row cap it returned years-old shipments
+            // and never reached the ones on today's orders, and uncapped it
+            // took half a minute.
+            var soIds = [], soSeen = {};
+            out.forEach(function (o) { if (!soSeen[o.id]) { soSeen[o.id] = true; soIds.push(o.id); } });
+            var fromChunk = null;
             function ifSpec() {
                 var filters = [
                     ['type', 'anyof', ['ItemShip']], 'and',
                     ['mainline', 'is', 'F'], 'and',
                     ['status', 'anyof', UNSHIPPED_IF_STATUSES]
                 ];
+                if (fromChunk && !isDead('transaction', 'filter', 'createdfrom')) { filters.push('and'); filters.push(['createdfrom', 'anyof', fromChunk]); }
                 if (!isDead('transaction', 'filter', 'cogs')) { filters.push('and'); filters.push(['cogs', 'is', 'F']); }
                 itemTypeFilter(filters);
                 if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
@@ -794,8 +808,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 });
                 return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
             }
-            withSearch('transaction', ifSpec, function (srch) {
-                var seen = {};
+            var seen = {};
+            for (var c = 0; c < soIds.length; c += 900) {
+              fromChunk = soIds.slice(c, c + 900);
+              withSearch('transaction', ifSpec, function (srch) {
                 fetchAll(srch).forEach(function (r) {
                     var qty = Math.abs(parseFloat(tval(r, 'quantity')) || 0);
                     if (qty <= 0) { return; }
@@ -807,7 +823,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     var ref = m ? orderRef(m[1], '') : ('IF ' + String(tval(r, 'tranid') || r.id));
                     pulled.push({ ref: ref, item: String(tval(r, 'item')), qty: qty, pulledStatus: pulledWord(ttxt(r, 'statusref')) });
                 });
-            });
+              });
+              if (isDead('transaction', 'filter', 'createdfrom')) { break; }   // unfiltered: one pass already read everything
+            }
         } catch (e) {
             log.audit({ title: 'invcount: picked/packed fulfillment search skipped', details: userErr(e) });
         }
@@ -842,7 +860,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             if (!target) {
                 for (var j = 0; j < out.length; j++) { if (out[j].ref === f.ref && out[j].item === f.item) { target = out[j]; break; } }
             }
-            if (target) { target.pulled = round4((target.pulled || 0) + f.qty); target.pulledStatus = f.pulledStatus; }
+            if (target) { target.pulled = round4((target.pulled || 0) + f.qty); if (!target.pulledStatus || !/not yet shipped/.test(f.pulledStatus)) { target.pulledStatus = f.pulledStatus; } }
+        });
+        // Now that every fulfillment of the order is read, the ones that have
+        // really shipped are in here too -- and they are already in the
+        // order line's own shipped quantity. What is still standing in the
+        // building is the difference.
+        out.forEach(function (o) {
+            if (o.pulled == null) { return; }
+            o.pulled = round4(Math.max(0, o.pulled - (o.shipped || 0)));
+            if (!(o.pulled > 0)) { delete o.pulled; delete o.pulledStatus; }
         });
         // Do Not Commit: NetSuite commits nothing to the line, so the pulled
         // quantity is the only signal that those units are in the building.
@@ -1449,6 +1476,71 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         return { ok: true, ticks: out, lines: lines };
     }
 
+    // ---------------------------------------------------------------- presence --
+    // Who is counting right now, as each device reports it about once a
+    // minute: how many lines it holds, how many of those have NOT reached
+    // NetSuite, why not, and whether its counter has said they are finished.
+    // The count lines themselves cannot answer any of that -- a device whose
+    // saves are failing has, by definition, saved nothing to look at. That
+    // was the September test run: a counter's screen said "retrying", the
+    // administrator's sheet showed nothing wrong, and nobody knew to ask.
+    // Kept in N/cache, one entry per device plus a list of devices per
+    // location: it is a status board, not a record, and is allowed to be
+    // forgotten after a day.
+    var PRESENCE_TTL = 86400;
+    function presenceKey(locId, device) { return 'presence_v1:' + (locId || 'all') + ':' + device; }
+    function presenceIndexKey(locId) { return 'presence_idx_v1:' + (locId || 'all'); }
+    function recordPresence(body) {
+        if (!sharedOn()) { return { ok: true, stored: false }; }
+        var g = deviceGuard(body);
+        if (g.error) { return { ok: false, error: g.error }; }
+        var c = deadCache();
+        if (!c) { return { ok: true, stored: false }; }
+        var name = '';
+        try { name = runtime.getCurrentUser().name || ''; } catch (e) { name = ''; }
+        var done = body.done === true;
+        var rec = {
+            device: g.device, uid: String(g.uid), name: cleanName(name, 60), label: cleanName(body.label, 40),
+            lines: Math.max(0, parseInt(body.lines, 10) || 0), pending: Math.max(0, parseInt(body.pending, 10) || 0),
+            note: cleanName(body.note, 160), done: done, doneAt: done ? (parseInt(body.doneAt, 10) || Date.now()) : 0,
+            version: cleanName(body.version, 20), seen: Date.now()
+        };
+        try {
+            c.put({ key: presenceKey(g.locId, g.device), value: JSON.stringify(rec), ttl: PRESENCE_TTL });
+            var idx = [];
+            try { idx = JSON.parse(c.get({ key: presenceIndexKey(g.locId) }) || '[]'); } catch (e2) { idx = []; }
+            if (!Array.isArray(idx)) { idx = []; }
+            if (idx.indexOf(g.device) === -1) {
+                idx.push(g.device);
+                c.put({ key: presenceIndexKey(g.locId), value: JSON.stringify(idx.slice(-200)), ttl: PRESENCE_TTL });
+            }
+        } catch (e3) {
+            return { ok: true, stored: false };
+        }
+        return { ok: true, stored: true };
+    }
+    // Every device heard from in the last day at the location. 'age' is
+    // worked out here, on the server's clock, so a tablet with the wrong
+    // time does not look asleep (or awake) when it is not.
+    function presenceList(locId) {
+        var c = deadCache(), out = [];
+        if (!c) { return out; }
+        var idx = [];
+        try { idx = JSON.parse(c.get({ key: presenceIndexKey(locId) }) || '[]'); } catch (e) { idx = []; }
+        if (!Array.isArray(idx)) { return out; }
+        var now = Date.now();
+        idx.forEach(function (device) {
+            var rec = null;
+            try { rec = JSON.parse(c.get({ key: presenceKey(locId, device) }) || 'null'); } catch (e2) { rec = null; }
+            if (!rec || !rec.seen) { return; }
+            rec.age = Math.max(0, now - rec.seen);
+            delete rec.uid;
+            out.push(rec);
+        });
+        out.sort(function (a, b) { return (a.name + a.label) < (b.name + b.label) ? -1 : 1; });
+        return out;
+    }
+
     // Every open line at the location, for the administrator's merged sheet.
     function sessionLines(params) {
         requireShared();
@@ -1457,7 +1549,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         if (multiLocation() && !locId) { return { ok: false, error: 'Pick a location first.' }; }
         var F = CONFIG.SHARED_FIELDS;
         var rows = sharedRows(sharedLocFilter([[F.posted, 'is', 'F']], locId));
-        return { ok: true, lines: rows, truncated: rows.length >= 5000 };
+        var devices = [];
+        try { devices = presenceList(locId); } catch (e) { devices = []; }
+        return { ok: true, lines: rows, truncated: rows.length >= 5000, devices: devices };
     }
 
     // Marks lines posted, with the adjustment that took them. Stops short of the
@@ -1564,7 +1658,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         naturalItemOrder(all).forEach(function (it) {
             if (!it.onhand || open[it.id]) { return; }
             if (recent.items[it.id]) { kept++; return; }
-            var row = { id: it.id, name: it.name, display: it.display || it.desc || '', onhand: it.onhand, cost: it.cost || 0 };
+            var row = { id: it.id, name: it.name, display: it.display || it.desc || '', vendor: it.vendor || '', onhand: it.onhand, committed: it.committed || 0, cost: it.cost || 0 };
             if (it.blocked) { row.blocked = it.blocked; blocked.push(row); } else { items.push(row); }
         });
         return { ok: true, items: items, blocked: blocked, kept: kept, keptDays: CONFIG.FULL_COUNT_RECENT_DAYS, inStock: all.length,
@@ -2482,14 +2576,22 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
         }).join('&');
         return fetch(API + '&action=' + action + (qs ? '&' + qs : '') + '&_ts=' + (++reqSeq), { credentials: 'same-origin', cache: 'no-store' })
-            .then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); });
+            .then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); }).catch(unreachable);
+    }
+    // fetch() rejects when the request never got an answer: wifi dropped, the
+    // tablet slept, the server hung up. Every caller here handles "not ok"
+    // and none handles a rejection -- left alone, a single lost request
+    // froze that caller for good: a device's saves sat on "Saving..." until
+    // someone reloaded the page, with nothing reaching NetSuite meanwhile.
+    function unreachable() {
+        return { ok: false, offline: true, error: 'Could not reach NetSuite. Check the connection on this device.' };
     }
     function apiPost(action, body) {
         return fetch(API + '&action=' + action + '&_ts=' + (++reqSeq), {
             method: 'POST', credentials: 'same-origin', cache: 'no-store',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body || {})
-        }).then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); });
+        }).then(function (r) { return r.text(); }).then(function (t) { return parseJson(t, action); }).catch(unreachable);
     }
 
     // ---------------------------------------------------------------- dom --
@@ -2544,7 +2646,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // Who keyed this line, and when: the NetSuite user signed in on this device.
     // It rides on the sheet, the exports and the adjustment line memo, so a
     // doubtful count can be traced back to the person who took it.
-    function stamp(line) { line.by = BOOT.user || ''; line.at = Date.now(); markDirty(line.id); return line; }
+    function stamp(line) {
+        line.by = BOOT.user || ''; line.at = Date.now(); markDirty(line.id);
+        // Counting again is not being finished.
+        if (finished().done) { setFinished(false); }
+        return line;
+    }
     function fmtWhen(ms) {
         if (!ms) { return ''; }
         try { return new Date(ms).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
@@ -2678,9 +2785,51 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // Lines never saved are pushed; lines saved before and now gone from the
     // server were posted or discarded, so they leave here too; lines on both
     // sides are pushed only when they differ (the browser is the working copy).
+    // "I'm finished": said by the counter, per location, kept in this
+    // browser, and reported to the administrator with every heartbeat.
+    function finishedKey() { return 'bsg_invcount_done_v1:' + (state.loc || 'all'); }
+    function finished() {
+        try { var f = JSON.parse(lsGet(finishedKey()) || 'null'); return (f && f.done) ? f : { done: false, at: 0 }; }
+        catch (e) { return { done: false, at: 0 }; }
+    }
+    function setFinished(on) {
+        if (on) { lsSet(finishedKey(), JSON.stringify({ done: true, at: Date.now() })); } else { lsDel(finishedKey()); }
+        beat();
+    }
+    // Tells the administrator's sheet this device is here, what it holds,
+    // and what has not saved. Sent with every reconcile (about once a
+    // minute while the tab is showing) and whenever "finished" changes.
+    // Nothing waits on the answer: it is a status report.
+    function beat() {
+        if (!SHARED || (BOOT.multiLoc && !state.loc)) { return; }
+        var f = finished();
+        var stuck = sync.status === 'offline' || sync.status === 'error';
+        apiPost('presence', { loc: state.loc || '', device: state.device, label: state.deviceLabel || '', lines: state.order.length,
+            pending: pendingCount(), note: stuck ? String(sync.error || '').slice(0, 160) : '', done: !!f.done, doneAt: f.at || 0, version: BOOT.version || '' });
+    }
+    function finishedControl() {
+        if (!SHARED) { return null; }
+        var f = finished(), n = pendingCount();
+        if (f.done) {
+            return el('div', { class: 'ic-devlabel' }, [
+                el('b', { text: 'Marked finished · ' + fmtWhen(f.at) }),
+                el('span', { class: 'ic-meta', text: 'The administrator can see you are done. Counting anything else takes the mark off again.' }),
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Not finished after all', onclick: function () { setFinished(false); render(); } })
+            ]);
+        }
+        return el('div', { class: 'ic-devlabel' }, [
+            el('button', { class: 'ic-btn is-sm', type: 'button', text: 'I\'m finished counting', onclick: function () {
+                if (pendingCount()) { state.finishMsg = pendingCount() + ' of your lines have not saved to NetSuite yet. Wait until the top of the page says Saved, then press this again.'; render(); return; }
+                state.finishMsg = ''; setFinished(true); render();
+            } }),
+            el('span', { class: 'ic-meta', text: state.finishMsg || (n ? n + ' line' + (n === 1 ? '' : 's') + ' still saving…' : 'Press when you have counted everything you were given, so the administrator knows not to wait for you.') })
+        ]);
+    }
+
     function reconcile() {
         if (!SHARED || sync.pulling) { return; }
         if (BOOT.multiLoc && !state.loc) { return; }
+        beat();
         sync.pulling = true;
         // The answer is a snapshot taken some time after this moment. A save or
         // a delete that came back from NetSuite since then may not be in it, so
@@ -2693,14 +2842,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         apiGet('mine', { loc: state.loc || '', device: state.device }).then(function (res) {
             sync.pulling = false;
             if (!res || !res.ok) { sync.status = 'offline'; sync.error = (res && res.error) || 'Could not reach NetSuite.'; paintSync(); scheduleSync(15000); return; }
-            var server = {}, changed = false;
+            var server = {}, changed = false, cleared = false;
             (res.lines || []).forEach(function (s) { server[s.item] = s; });
             state.order.slice().forEach(function (id) {
                 var l = state.sheet[id], s = server[id];
                 if (!l) { return; }
                 if (!s) {
                     if (since(sync.savedAt, id)) { return; }           // saved after the snapshot: it is there now
-                    if (l.synced && !sync.dirty[id]) { removeLocal(id); changed = true; }
+                    if (l.synced && !sync.dirty[id]) { removeLocal(id); changed = true; cleared = true; }
                     else { sync.dirty[id] = sync.dirty[id] || Date.now(); }
                     return;
                 }
@@ -2717,6 +2866,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 changed = true;
             });
             saveSheet(); updateBadge();
+            // The count this device finished has been posted (or discarded):
+            // the next one starts unfinished.
+            if (cleared && !state.order.length && finished().done) { setFinished(false); }
             if (pendingCount()) { scheduleSync(100); } else { sync.status = sync.lastOk ? 'saved' : 'idle'; if (!sync.lastOk) { sync.lastOk = Date.now(); } paintSync(); }
             if (changed && state.view !== 'done') { render(); }
         });
@@ -3429,6 +3581,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var carried = prev.loc === state.loc ? prev : loadSessionPrefs(state.loc);
         state.session = { loc: state.loc, loading: true, error: '', lines: [], items: [], byItem: {}, fresh: {}, freshDone: false, loadedAt: 0, truncated: false,
             excluded: carried.excluded || {}, overrides: carried.overrides || {}, overrideSig: carried.overrideSig || {}, droppedOverrides: prev.loc === state.loc ? (prev.droppedOverrides || []) : [],
+            remaining: prev.loc === state.loc ? prev.remaining : undefined,
             filter: prev.filter || 'all', precheck: null };
         var s = state.session;
         apiGet('session', { loc: state.loc || '' }).then(function (res) {
@@ -3436,6 +3589,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             s.loading = false;
             if (!res || !res.ok) { s.error = (res && res.error) || 'Could not load the shared count.'; render(); return; }
             s.lines = res.lines || []; s.truncated = !!res.truncated; s.loadedAt = Date.now();
+            s.devices = res.devices || [];
             mergeSession(s);
             pruneDecisions(s);
             updateBadge();
@@ -3686,6 +3840,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var s = state.session;
         if (!s || s.loc !== state.loc || (s.stale && !s.loading && !state.submitting)) { loadSession(); s = state.session; }
         main.appendChild(deviceLabelField());
+        main.appendChild(finishedControl());
         if (s.loading) { main.appendChild(el('div', { class: 'ic-progress', text: 'Loading everyone\'s counts…' })); return; }
         if (s.error) {
             main.appendChild(el('div', { class: 'ic-error', text: s.error }));
@@ -3708,6 +3863,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 return el('span', { class: 'ic-chip' }, [el('b', { text: c.name }), c.label ? el('span', { text: c.label }) : null, el('span', { class: 'ic-meta', text: c.lines + ' line' + (c.lines === 1 ? '' : 's') + (c.at ? ' · ' + fmtAt(c.at) : '') })]);
             })));
         }
+        var board = devicesPanel(s);
+        if (board) { main.appendChild(board); }
         var full = state.countMode === 'full';
         var where = state.loc ? ' at ' + locName(state.loc) : '';
         main.appendChild(el('div', { class: 'ic-dupes', id: 'icCountMode' }, [
@@ -3817,6 +3974,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     : 'Those ' + t.changed + ' item' + (t.changed === 1 ? '' : 's') + ' move to the merged count (+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). The other ' + (live - t.changed) + ' already match and are left off. Every counter\'s lines are then cleared from their sheets.' }),
                 t.review ? el('p', { text: t.review + ' item' + (t.review === 1 ? ' is' : 's are') + ' flagged for review (two counters, or on hand changed). Where two people counted one item, the counts are ' + (dupeMode() === 'latest' ? 'resolved by keeping the latest' : 'added together') + ' unless one is unticked or a total set by hand.' }) : null,
                 t.blocked ? el('p', { text: t.blocked + ' item' + (t.blocked === 1 ? ' is' : 's are') + ' skipped and stay on the sheet.' }) : null,
+                notFinishedNote(s),
                 full ? uncountedPanel(s) : null,
                 pre === null ? el('p', { class: 'ic-meta', text: 'Checking today\'s adjustments…' }) : (pre && pre.length ? el('div', { class: 'ic-commit-warn' }, [
                     el('b', { text: pre.length + ' item' + (pre.length === 1 ? ' was' : 's were') + ' already adjusted by a count today: ' }),
@@ -3830,7 +3988,17 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 ])
             ]));
         } else {
+            var left = remainingPanel(s);
+            if (left) { form.appendChild(left); }
             form.appendChild(el('div', { class: 'ic-actions' }, [
+                el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Not counted yet…', onclick: function () {
+                    s.remaining = null; render();
+                    apiPost('uncounted', { loc: state.loc || '' }).then(function (r) {
+                        if (state.session !== s) { return; }
+                        s.remaining = (r && r.ok) ? r : { error: (r && r.error) || 'Could not reach NetSuite.' };
+                        if (state.view === 'sheet' && !state.confirm) { render(); }
+                    });
+                } }),
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Refresh on-hand', onclick: function () { s.fresh = {}; s.freshDone = false; s.freshLoading = false; render(); } }),
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Discard all counts…', onclick: discardAll }),
                 el('button', { class: 'ic-btn', type: 'button', text: full ? 'Submit full year-end count…' : 'Submit count…', onclick: function () {
@@ -3871,16 +4039,82 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var u = s.uncounted;
         return !!(u && u.ok && !u.truncated && s.reviewed);
     }
-    function uncountedCsv(u) {
+    function uncountedCsv(u, note, filename) {
         function q(v) { var t = String(v == null ? '' : v); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; }
-        var rows = [['Item', 'Description', 'On hand', 'Avg cost', 'Value', 'Note'].join(',')];
-        u.items.forEach(function (it) { rows.push([q(it.name), q(it.display), it.onhand, it.cost || '', it.cost ? Math.round(it.onhand * it.cost * 100) / 100 : '', 'Reset to 0'].join(',')); });
-        u.blocked.forEach(function (it) { rows.push([q(it.name), q(it.display), it.onhand, it.cost || '', '', q('NOT reset: needs inventory detail (' + it.blocked + ')')].join(',')); });
+        var rows = [['Item', 'Description', 'Pref. vendor', 'On hand', 'Committed to open orders', 'Avg cost', 'Value', 'Note'].join(',')];
+        u.items.forEach(function (it) { rows.push([q(it.name), q(it.display), q(it.vendor), it.onhand, it.committed || '', it.cost || '', it.cost ? Math.round(it.onhand * it.cost * 100) / 100 : '', note || 'Reset to 0'].join(',')); });
+        u.blocked.forEach(function (it) { rows.push([q(it.name), q(it.display), q(it.vendor), it.onhand, it.committed || '', it.cost || '', '', q('Needs inventory detail (' + it.blocked + '): adjust in NetSuite')].join(',')); });
         var a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([rows.join('\r\n')], { type: 'text/csv' }));
-        a.download = 'not-counted-reset-to-0.csv';
+        a.download = filename || 'not-counted-reset-to-0.csv';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+    // What a device last said about itself, and whether that is a problem.
+    function deviceState(d) {
+        var quiet = (Number(d.age) || 0) > 180000;      // three missed heartbeats
+        var mins = Math.round((Number(d.age) || 0) / 60000);
+        var bits = [];
+        bits.push(d.done ? 'Finished ' + fmtWhen(d.doneAt) : 'Counting');
+        bits.push((d.lines || 0) + ' line' + (d.lines === 1 ? '' : 's'));
+        if (d.pending) { bits.push(d.pending + ' NOT SAVED'); }
+        if (quiet) { bits.push('not heard from for ' + (mins >= 120 ? Math.round(mins / 60) + ' hours' : mins + ' min')); }
+        return { text: bits.join(' · '), bad: !!d.pending || !!d.note, quiet: quiet, why: d.note || '' };
+    }
+    function who(d) { return (d.name || 'Someone') + (d.label ? ' · ' + d.label : ''); }
+    // The status board: every device heard from today, not only the ones
+    // that managed to save something.
+    function devicesPanel(s) {
+        var list = s.devices || [];
+        if (!list.length) { return null; }
+        var done = list.filter(function (d) { return d.done; }).length;
+        var trouble = list.filter(function (d) { return deviceState(d).bad; }).length;
+        return el('div', { class: 'ic-dupes', id: 'icDevices' }, [
+            el('div', { class: 'ic-dupes-text' }, [
+                el('b', { text: done + ' of ' + list.length + ' device' + (list.length === 1 ? '' : 's') + ' finished' + (trouble ? ' · ' + trouble + ' with counts that have not saved' : '') + '. ' }),
+                el('div', {}, list.map(function (d) {
+                    var st = deviceState(d);
+                    return el('div', { class: st.bad ? 'ic-flag' : 'ic-meta', title: st.why }, [
+                        el('b', { text: who(d) + ': ' }), st.text + (st.why ? ' — ' + st.why : '') + (d.version && BOOT.version && d.version !== BOOT.version ? ' · old page (v' + d.version + '), ask them to reload' : '')
+                    ]);
+                }))
+            ])
+        ]);
+    }
+    // Said in the confirm: who the count may still be waiting on.
+    function notFinishedNote(s) {
+        var waiting = (s.devices || []).filter(function (d) { return d.device !== state.device && (!d.done || d.pending); });
+        if (!waiting.length) { return null; }
+        return el('div', { class: 'ic-commit-warn' }, [
+            el('b', { text: waiting.length + ' device' + (waiting.length === 1 ? ' has' : 's have') + ' not finished: ' }),
+            waiting.slice(0, 8).map(function (d) { return who(d) + ' (' + (d.pending ? d.pending + ' not saved' : 'not marked finished') + ')'; }).join('; ') + (waiting.length > 8 ? '; …' : '') + '. ',
+            'Counts that have not saved are not on this sheet' + (state.countMode === 'full' ? ', and in a full count their items would be reset to 0.' : '.')
+        ]);
+    }
+    // Progress, for the administrator, at any point in the count: which
+    // items with stock on the books nobody has counted yet, and whose they
+    // are. It is the same list a full count resets, asked for early enough
+    // to send someone to the shelf instead.
+    function remainingPanel(s) {
+        var u = s.remaining;
+        if (u === undefined) { return null; }
+        var close = el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Close', onclick: function () { delete s.remaining; render(); } });
+        if (u === null) { return el('div', { class: 'ic-commit-warn' }, [el('p', { class: 'ic-meta', text: 'Listing the items nobody has counted yet…' })]); }
+        if (u.error || u.truncated) { return el('div', { class: 'ic-commit-warn' }, [el('p', { text: 'Could not list what is left: ' + (u.error || 'too many items to list whole.') }), close]); }
+        var n = u.items.length + u.blocked.length, byVendor = {}, names = [];
+        u.items.concat(u.blocked).forEach(function (it) { var v = it.vendor || 'No preferred vendor'; if (!byVendor[v]) { byVendor[v] = 0; names.push(v); } byVendor[v]++; });
+        names.sort(function (a, b) { return byVendor[b] - byVendor[a]; });
+        return el('div', { class: 'ic-commit-warn' }, [
+            el('p', {}, [
+                el('b', { text: n ? n + ' of ' + u.inStock + ' items with stock on the books have not been counted yet. ' : 'Every item with stock on the books has been counted. ' }),
+                n ? 'Most are from: ' + names.slice(0, 8).map(function (v) { return v + ' (' + byVendor[v] + ')'; }).join(', ') + (names.length > 8 ? ', …' : '') + '.' : ''
+            ]),
+            u.kept ? el('p', { class: 'ic-meta', text: u.kept + ' more were counted and posted in the last ' + u.keptDays + ' days and are not listed.' }) : null,
+            el('div', { class: 'ic-actions' }, [
+                n ? el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Export the list (CSV)', onclick: function () { uncountedCsv(u, 'Not counted yet', 'not-counted-yet.csv'); } }) : null,
+                close
+            ])
+        ]);
     }
     // The part of the confirm that only a full count has: what will be reset.
     function uncountedPanel(s) {
@@ -3888,15 +4122,15 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (!u) { return el('p', { class: 'ic-meta', text: 'Listing the items nobody counted…' }); }
         if (u.error) { return el('div', { class: 'ic-error', text: 'The full count cannot post: ' + u.error }); }
         if (u.truncated) { return el('div', { class: 'ic-error', text: 'The full count cannot post: there are too many items or count lines here to list every uncounted item, and a partial reset would be worse than none.' }); }
-        var n = u.items.length, units = 0, value = 0, costed = false;
-        u.items.forEach(function (it) { units += Math.abs(it.onhand); if (it.cost) { costed = true; value += it.onhand * it.cost; } });
+        var n = u.items.length, units = 0, value = 0, costed = false, onOrders = 0;
+        u.items.forEach(function (it) { units += Math.abs(it.onhand); if (it.cost) { costed = true; value += it.onhand * it.cost; } if (it.committed > 0) { onOrders++; } });
         var cb = el('input', { type: 'checkbox', id: 'icReviewed' });
         cb.checked = !!s.reviewed;
         cb.addEventListener('change', function () { s.reviewed = cb.checked; render(); });
         var list = null;
         if (s.showUncounted) {
             list = el('div', { class: 'ic-uncounted' }, u.items.slice(0, 500).map(function (it) {
-                return el('div', { class: 'ic-meta', text: it.name + (it.display ? ' — ' + it.display : '') + ' · on hand ' + fmt(it.onhand) + ' → 0' });
+                return el('div', { class: 'ic-meta', text: it.name + (it.display ? ' — ' + it.display : '') + ' · on hand ' + fmt(it.onhand) + ' → 0' + (it.committed > 0 ? ' · ' + fmt(it.committed) + ' COMMITTED TO OPEN ORDERS' : '') });
             }).concat(n > 500 ? [el('div', { class: 'ic-meta', text: '… and ' + (n - 500) + ' more. Export has every one.' })] : []));
             list.style.maxHeight = '280px'; list.style.overflow = 'auto'; list.style.margin = '6px 0';
         }
@@ -3910,6 +4144,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Export (CSV)', onclick: function () { uncountedCsv(u); } })
             ]) : null,
             list,
+            onOrders ? el('p', {}, [el('b', { text: onOrders + ' of these ' + (onOrders === 1 ? 'has' : 'have') + ' units committed to open sales orders that nobody ticked. ' }),
+                'Those units are usually staged, at the decorator or waiting for pickup. Check the Open orders tab before writing them off; the export marks which items.']) : null,
             u.blocked.length ? el('p', { text: u.blocked.length + ' uncounted item' + (u.blocked.length === 1 ? ' needs' : 's need') + ' inventory detail (serial, lot or bin) and cannot be reset here -- adjust ' + (u.blocked.length === 1 ? 'it' : 'them') + ' the normal way: ' + u.blocked.slice(0, 6).map(function (it) { return it.name; }).join(', ') + (u.blocked.length > 6 ? ', …' : '') + '.' }) : null,
             u.kept ? el('p', { text: u.kept + ' item' + (u.kept === 1 ? ' has' : 's have') + ' no open count but ' + (u.kept === 1 ? 'was' : 'were') + ' counted and posted in the last ' + u.keptDays + ' days, so ' + (u.kept === 1 ? 'it is' : 'they are') + ' left as posted.' }) : null,
             el('p', { class: 'ic-meta', text: 'Inactive items are not listed and are never touched.' }),
@@ -3931,6 +4167,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (full) { s.uncounted.items.forEach(function (it) { if (!s.byItem[it.id]) { lines.push({ item: it.id, count: 0, reset: true }); } }); }
         var size = BOOT.sharedBatch || 100, batches = [];
         for (var i = 0; i < lines.length; i += size) { batches.push(lines.slice(i, i + size)); }
+        var total = lines.length, sent = 0, into = '';
+        var nameOf = {};
+        s.items.forEach(function (m) { nameOf[m.id] = m.name; });
+        if (full) { s.uncounted.items.forEach(function (it) { if (!nameOf[it.id]) { nameOf[it.id] = it.name; } }); }
         var done = { adjustments: [], applied: 0, skipped: 0, blocked: [], unmarked: [], location: state.loc ? locName(state.loc) : '', shared: true, full: full, reset: 0 };
         state.confirm = false; state.submitting = true; state.submitError = '';
         var n = 0;
@@ -3952,37 +4192,80 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             render();
             reconcile();             // this device's own posted lines leave its local sheet
         }
-        function next() {
-            if (n >= batches.length) { finish(); return; }
-            var batch = batches[n++];
-            state.progress = batches.length > 1 ? 'Submitting batch ' + n + ' of ' + batches.length + '…' : 'Creating the Inventory Adjustment…';
-            render();
-            // Every batch after the first adds its lines to the adjustment the
-            // first one made: a count is one count, however many requests it
-            // takes to send it.
-            var into = done.adjustments.length ? done.adjustments[0].id : '';
-            apiPost('submit', { loc: state.loc || '', account: state.account || '', memo: state.memo || '', lines: batch, adjustment: into }).then(function (res) {
-                if (!res || !res.ok) {
-                    state.submitting = false; state.progress = '';
-                    state.submitError = ((res && res.error) || 'Submit failed.') + (n > 1 && !(res && res.stale) ? ' (Earlier batches posted; what is left is still on the shared sheet.)' : '');
-                    if (done.adjustments.length) { state.done = done; }
-                    // A stale item was decided on old numbers: forget that decision, keep the others.
-                    (res && res.stale || []).forEach(function (st) {
-                        delete s.overrides[st.item]; delete s.overrideSig[st.item];
-                        var m = s.byItem[st.item];
-                        if (m) { m.subs.forEach(function (l) { delete s.excluded[l.id]; }); }
-                    });
-                    loadSession();
-                    render();
-                    return;
-                }
-                if (res.adjustment && !done.adjustments.some(function (a) { return a.id === res.adjustment.id; })) { done.adjustments.push(res.adjustment); }
-                done.applied += (res.applied || []).length;
-                done.reset += (res.applied || []).filter(function (l) { return l.reset; }).length;
-                done.skipped += (res.skipped || []).length;
-                (res.blocked || []).forEach(function (b) { done.blocked.push({ name: b.name || ('item ' + b.item), reason: b.reason || '' }); });
-                retryMark(res.unmarked, res.adjustment, next);
+        // Stop: nothing more is sent. What posted stays posted; the rest is
+        // still open on the shared sheet.
+        function fail(res) {
+            state.submitting = false; state.progress = '';
+            state.submitError = ((res && res.error) || 'Submit failed.') + (sent > 0 && !(res && res.stale) ? ' (' + sent + ' of ' + total + ' items were already sent and posted; what is left is still on the shared sheet. Submitting again is safe.)' : '');
+            if (done.adjustments.length) { state.done = done; }
+            // A stale item was decided on old numbers: forget that decision, keep the others.
+            (res && res.stale || []).forEach(function (st) {
+                delete s.overrides[st.item]; delete s.overrideSig[st.item];
+                var m = s.byItem[st.item];
+                if (m) { m.subs.forEach(function (l) { delete s.excluded[l.id]; }); }
             });
+            loadSession();
+            render();
+        }
+        function ok(res, batch) {
+            sent += batch.length;
+            if (res.adjustment) {
+                into = res.adjustment.id;
+                if (!done.adjustments.some(function (a) { return a.id === res.adjustment.id; })) { done.adjustments.push(res.adjustment); }
+            }
+            done.applied += (res.applied || []).length;
+            done.reset += (res.applied || []).filter(function (l) { return l.reset; }).length;
+            done.skipped += (res.skipped || []).length;
+            (res.blocked || []).forEach(function (b) { done.blocked.push({ name: b.name || nameOf[b.item] || ('item ' + b.item), reason: b.reason || '' }); });
+            retryMark(res.unmarked, res.adjustment, next);
+        }
+        // A batch NetSuite would not take. Three things it can be, cheapest
+        // first. (1) Something no retry fixes -- stale counts, the session,
+        // the role: stop. (2) The adjustment has grown too slow to open and
+        // save again (it is loaded whole for every batch added to it): send
+        // the same batch once more as a NEW adjustment and carry on into
+        // that one. (3) One line NetSuite refuses, which fails all hundred
+        // with it and would otherwise fail them on every retry: halve the
+        // batch until the line stands alone, set it aside with NetSuite's
+        // reason, and post the rest. Retrying is safe at every step because
+        // a line is a count, not a change -- an item that did post is found
+        // already matching and left off.
+        function refused(res, batch, target, retried) {
+            var err = String((res && res.error) || '');
+            var noAnswer = !res || res.offline || /non-json response/i.test(err);
+            var hard = (res && res.stale) || /no signed-in user|your role cannot|pick a location|pick an adjustment account|shared count is|too many recently posted/i.test(err);
+            if (hard) { fail(res); return; }
+            // retried holds the adjustment the first try was going into.
+            if (target && !retried && !batch.halved) { into = ''; attempt(batch, '', target); return; }
+            if (noAnswer) { fail(res); return; }
+            // A new adjustment was refused too, so size was not the trouble:
+            // go back to the one the count was going into.
+            if (retried) { into = retried; }
+            if (batch.length > 1) {
+                var half = Math.ceil(batch.length / 2), a = batch.slice(0, half), b = batch.slice(half);
+                a.halved = true; b.halved = true;
+                batches.unshift(b); batches.unshift(a);
+                next();
+                return;
+            }
+            sent += 1;
+            done.blocked.push({ name: nameOf[batch[0].item] || ('item ' + batch[0].item), reason: (batch[0].reset ? 'Not reset: ' : '') + (err || 'NetSuite refused this line.') });
+            next();
+        }
+        function attempt(batch, target, retried) {
+            apiPost('submit', { loc: state.loc || '', account: state.account || '', memo: state.memo || '', lines: batch, adjustment: target }).then(function (res) {
+                if (res && res.ok) { ok(res, batch); } else { refused(res, batch, target, retried); }
+            });
+        }
+        function next() {
+            if (!batches.length) { finish(); return; }
+            var batch = batches.shift();
+            state.progress = total > size ? 'Submitting… ' + sent + ' of ' + total + ' items sent. Keep this tab open.' : 'Creating the Inventory Adjustment…';
+            render();
+            // Every batch adds its lines to the adjustment the count is
+            // already going into: a count is one count, however many
+            // requests it takes to send it.
+            attempt(batch, into, false);
         }
         next();
     }
@@ -4021,7 +4304,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function renderSheetView(main) {
         var t = totals();
         if (!SHARED && BOOT.canSubmit && BOOT.shared && !BOOT.shared.off) { main.appendChild(setupNotice()); }
-        if (SHARED) { main.appendChild(deviceLabelField()); }
+        if (SHARED) { main.appendChild(deviceLabelField()); main.appendChild(finishedControl()); }
         main.appendChild(el('div', { class: 'ic-sum' }, [
             el('div', {}, [el('b', { id: 'icTotLines', text: String(t.lines) }), 'lines']),
             el('div', {}, [el('b', { id: 'icTotPos', text: '+' + fmt(t.pos) }), 'units up', costNote(t.costed, t.posCost, 'icTotPosCost')]),
@@ -4275,7 +4558,10 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         var head = el('div', { class: 'ic-listhead' }, [
             el('div', { class: 'ic-count', id: 'icOrdCount' }),
             el('div', { class: 'ic-actions' }, [
-                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Select all', onclick: function () { selectAllVisible(true); } }),
+                // One click here says every unit committed to every open order
+                // was found. That is the administrator's call to make; counters
+                // tick what they have seen, an order at a time.
+                BOOT.canSubmit ? el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Select all', onclick: function () { selectAllVisible(true); } }) : null,
                 el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Clear my ticks', onclick: function () { selectAllVisible(false); } }),
                 el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Expand all', onclick: function () { setAllOpen(true); } }),
                 el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Collapse all', onclick: function () { setAllOpen(false); } }),
@@ -4366,7 +4652,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             var lineCount = 0, ticked = 0;
             order.forEach(function (ref) { groups[ref].lines.forEach(function (o) { lineCount++; if (tickedBy(o.item, orderKey(o))) { ticked++; } }); });
             if (cnt) {
-                cnt.textContent = repNames.length + ' sales rep' + (repNames.length === 1 ? '' : 's') + ' · ' + order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · list capped' : '');
+                cnt.textContent = repNames.length + ' sales rep' + (repNames.length === 1 ? '' : 's') + ' · ' + order.length + ' open order' + (order.length === 1 ? '' : 's') + ' · ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + ' to count · ' + ticked + ' ticked' + (a.truncated ? ' · LIST CUT SHORT: the newest orders are missing, tell the administrator' : '');
             }
             if (!order.length) {
                 box.appendChild(el('div', { class: 'ic-empty', text: q ? 'Nothing matches "' + state.ordersFilter.trim() + '".' : 'No received-but-unshipped sales order lines at this location.' }));
