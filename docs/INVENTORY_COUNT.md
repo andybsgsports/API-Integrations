@@ -223,8 +223,9 @@ minus the paper. Source: `suitescript/bsg_inventory_count_sl.js`.
    lines bring on-hand to the counted quantity (`Adjust Qty. By = counted −
    on hand`). Items whose count already matches are left off; if nothing
    differs, no adjustment is created at all. The result page links straight to
-   the transaction. Sheets over 200 lines post as several adjustments, one after
-   another.
+   the transaction. Without the shared count, a device's own sheet of more than
+   200 lines posts as several adjustments, one after another; the shared count
+   always posts one (see *Shared count*).
 
 The adjustment is created **as the logged-in user** — that is the audit trail
 you want on a count — and the transaction memo records who counted and when
@@ -276,10 +277,10 @@ rest of the sheet still posts. Adjust those the normal way.
 | `ITEM_TYPES` | `['InvtPart', 'Assembly']` | Item types that can be counted. |
 | `SEARCH_PAGE_SIZE` | `100` | Rows per page of the list (a **Load more** button pages on). |
 | `IN_STOCK_DEFAULT` | `false` | `false` opens on every item, zeros included (like the *Custom Current Inventory Snapshot 2* report with Show Zeros on); `true` opens on items with quantity on hand (on-order-only items are not in stock). The toggle on the page overrides it and is remembered per browser. |
-| `MAX_LINES_PER_ADJUSTMENT` | `200` | Bigger sheets post as several adjustments. |
+| `MAX_LINES_PER_ADJUSTMENT` | `200` | Without the shared count, a device's sheet bigger than this posts as several adjustments. |
 | `SHARED_RECORD` | `customrecord_bsg_count_line` | The custom record that holds every device's count lines (see *Shared count*). `null` switches the shared count off: one sheet per device, submitted from that device. |
 | `SHARED_FIELDS` | `custrecord_bcl_*` | The record's field IDs, if you named them differently. |
-| `SHARED_BATCH` | `100` | Items per Inventory Adjustment when posting the shared count (each line is also marked posted in the same request). |
+| `SHARED_BATCH` | `100` | Items sent per request when posting the shared count. Every batch is added to the **same** Inventory Adjustment, and each line is marked posted in the same request. |
 | `SYNC_MAX_LINES` | `50` | Lines a device sends per save; a burst is sent in several saves. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 | `SUBMIT_ROLE_IDS` | `[3]` | Internal ids of the roles allowed to post the adjustment. `3` is NetSuite's Administrator. Every other role counts, ticks open orders and exports, but sees no **Refresh on-hand** / **Clear sheet** / **Submit count** buttons, and the submit endpoint refuses them — a hidden button is not a permission. Find a role's id in the `id=` of its URL under Setup > Users/Roles > Manage Roles. `null` lets any role in the deployment's audience submit. |
@@ -306,7 +307,7 @@ disappears and account-wide on-hand is used.
    box to jump to a customer, order number or item.
 4. If a count spans hours, **Refresh on-hand** on the sheet re-reads the current
    quantities so the deltas stay honest (submit re-reads them again anyway).
-6. **Submit count…** → confirm → the adjustment link appears. Any lines the
+5. **Submit count…** → confirm → the adjustment link appears. Any lines the
    server refused stay on the sheet with the reason. The adjustment posts to
    5005 INVENTORY ADJUSTMENT; there is nothing to pick.
 
