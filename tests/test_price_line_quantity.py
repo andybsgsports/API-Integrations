@@ -52,3 +52,27 @@ def test_no_retry_without_a_price_line_or_for_other_errors():
     assert cw._price_line_at_quantity_one({"weight": 1}, RuntimeError(ERR)) is None
     assert cw._price_line_at_quantity_one(_body(), RuntimeError("429")) is None
     assert cw._price_line_at_quantity_one(_body(1), RuntimeError(ERR)) is None
+
+
+def test_fires_on_a_real_netsuite_error_whose_code_is_in_the_payload():
+    from sanmar_netsuite.netsuite.client import NetSuiteError
+
+    payload = {"o:errorDetails": [{
+        "detail": "Unable to find the specified sublist line.",
+        "o:errorCode": "NONEXISTENT_SUBLIST_KEY"}]}
+    exc = NetSuiteError(404, "Not Found", payload)
+    assert "NONEXISTENT_SUBLIST_KEY" not in str(exc)   # the trap
+    alt = cw._price_line_at_quantity_one(_body(), exc)
+    assert alt["price"]["items"][0]["quantity"] == {"value": 1}
+
+    class RealClient:
+        calls = 0
+
+        def update_record(self, record_type, rid, body):
+            RealClient.calls += 1
+            if body["price"]["items"][0]["quantity"]["value"] == 0:
+                raise NetSuiteError(404, "Not Found", payload)
+
+    assert cw.write_records(RealClient(), "inventoryItem", [("1", _body())],
+                            workers=1) == (1, 0)
+    assert RealClient.calls == 2
