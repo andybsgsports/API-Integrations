@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-09-15.7',
+        VERSION: '2026-11-24.1',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -1204,9 +1204,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         var s = String(v == null ? '' : v).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
         return s.length >= 8 ? s : '';
     }
+    // Ticked order lines one count line may carry. A popular blank can sit on
+    // far more than a few dozen open orders, and "Select all" ticks every one
+    // of them: the old cap of 30 kept the first 30 and dropped the rest
+    // without a word, so the saved line came up short by those units while
+    // the counter's own screen still showed them. Anything over this is
+    // refused out loud (see syncLines), never trimmed.
+    var ORDERS_MAX = 500;
     function cleanOrders(raw) {
         var out = [];
-        (Array.isArray(raw) ? raw : []).slice(0, 30).forEach(function (o) {
+        (Array.isArray(raw) ? raw : []).slice(0, ORDERS_MAX).forEach(function (o) {
             var ref = cleanRef(o && o.ref), qty = parseFloat(o && o.qty);
             // key tells apart two lines of one item on one order (two
             // decoration jobs on the same blank, say); older saved data and
@@ -1298,6 +1305,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             if (!id) { return; }
             var shelf = parseFloat(u.shelf);
             if (!isFinite(shelf) || shelf < 0) { errors.push({ item: String(id), error: 'Bad count.' }); return; }
+            if (Array.isArray(u.orders) && u.orders.length > ORDERS_MAX) {
+                errors.push({ item: String(id), error: 'More than ' + ORDERS_MAX + ' open orders are ticked into this one item; untick some and count them on a second device.' });
+                return;
+            }
             var vals = {};
             vals[F.shelf] = round4(shelf);
             vals[F.orders] = JSON.stringify(cleanOrders(u.orders));
@@ -2415,7 +2426,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     // NetSuite owns it -- if it is gone from the server (posted, or discarded
     // by the administrator) it leaves this sheet too.
     var SHARED = !!(BOOT.shared && BOOT.shared.ready);
-    var sync = { dirty: {}, removed: {}, timer: null, inflight: false, status: SHARED ? 'idle' : 'off', error: '', backoff: 0, lastOk: 0, pulling: false };
+    // savedAt / goneAt: when a save or a delete of an item last came back from
+    // NetSuite. reconcile() reads a snapshot that may be older than either.
+    var sync = { dirty: {}, removed: {}, timer: null, inflight: false, status: SHARED ? 'idle' : 'off', error: '', backoff: 0, lastOk: 0, pulling: false, savedAt: {}, goneAt: {} };
     function markDirty(id) { if (!SHARED) { return; } sync.dirty[id] = Date.now(); delete sync.removed[id]; scheduleSync(); }
     function markRemoved(id) { if (!SHARED) { return; } sync.removed[id] = true; delete sync.dirty[id]; scheduleSync(); }
     function pendingCount() { return Object.keys(sync.dirty).length + Object.keys(sync.removed).length; }
@@ -2453,9 +2466,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 if (sync.dirty[id] !== sentAt[id]) { return; }      // changed again while in flight: goes next time
                 delete sync.dirty[id];
                 var l = state.sheet[id];
-                if (l) { if (failed[id]) { l.error = 'Not saved to NetSuite: ' + failed[id]; } else { l.synced = true; l.error = ''; } }
+                if (l) { if (failed[id]) { l.error = 'Not saved to NetSuite: ' + failed[id]; } else { l.synced = true; l.error = ''; sync.savedAt[id] = Date.now(); } }
             });
-            dels.forEach(function (id) { delete sync.removed[id]; });
+            dels.forEach(function (id) { delete sync.removed[id]; sync.goneAt[id] = Date.now(); });
             saveSheet();
             // The administrator's merged sheet now lags this device's own lines.
             if (BOOT.canSubmit && state.session && (upserts.length || dels.length)) { state.session.stale = true; }
@@ -2523,6 +2536,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         if (!SHARED || sync.pulling) { return; }
         if (BOOT.multiLoc && !state.loc) { return; }
         sync.pulling = true;
+        // The answer is a snapshot taken some time after this moment. A save or
+        // a delete that came back from NetSuite since then may not be in it, so
+        // its absence (or presence) there proves nothing: without this check a
+        // line saved while the request was out was dropped from the sheet as
+        // "posted or discarded", and a line just removed was put back, each
+        // until the next reconcile a minute later.
+        var askedAt = Date.now();
+        function since(map, id) { return (map[id] || 0) >= askedAt; }
         apiGet('mine', { loc: state.loc || '', device: state.device }).then(function (res) {
             sync.pulling = false;
             if (!res || !res.ok) { sync.status = 'offline'; sync.error = (res && res.error) || 'Could not reach NetSuite.'; paintSync(); scheduleSync(15000); return; }
@@ -2532,6 +2553,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 var l = state.sheet[id], s = server[id];
                 if (!l) { return; }
                 if (!s) {
+                    if (since(sync.savedAt, id)) { return; }           // saved after the snapshot: it is there now
                     if (l.synced && !sync.dirty[id]) { removeLocal(id); changed = true; }
                     else { sync.dirty[id] = sync.dirty[id] || Date.now(); }
                     return;
@@ -2541,7 +2563,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 else { l.synced = true; }
             });
             (res.lines || []).forEach(function (s) {
-                if (state.sheet[s.item] || sync.removed[s.item]) { return; }
+                if (state.sheet[s.item] || sync.removed[s.item] || since(sync.goneAt, s.item)) { return; }
                 var line = ensureLine({ id: s.item, name: s.name || ('item ' + s.item), onhand: s.onhand });
                 line.orders = (s.orders || []).slice();
                 line.count = round4((Number(s.shelf) || 0) + ordersTotal(line));
@@ -3250,7 +3272,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
     function saveSessionPrefs() {
         var s = state.session;
         if (!s) { return; }
-        lsSet(sessionPrefsKey(s.loc), JSON.stringify({ excluded: s.excluded, overrides: s.overrides }));
+        lsSet(sessionPrefsKey(s.loc), JSON.stringify({ excluded: s.excluded, overrides: s.overrides, overrideSig: s.overrideSig }));
     }
     function loadSession(after) {
         var prev = state.session || {};
@@ -3259,7 +3281,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         // has no live session to carry, so it picks up what was saved.
         var carried = prev.loc === state.loc ? prev : loadSessionPrefs(state.loc);
         state.session = { loc: state.loc, loading: true, error: '', lines: [], items: [], byItem: {}, fresh: {}, freshDone: false, loadedAt: 0, truncated: false,
-            excluded: carried.excluded || {}, overrides: carried.overrides || {}, filter: prev.filter || 'all', precheck: null };
+            excluded: carried.excluded || {}, overrides: carried.overrides || {}, overrideSig: carried.overrideSig || {}, droppedOverrides: prev.loc === state.loc ? (prev.droppedOverrides || []) : [],
+            filter: prev.filter || 'all', precheck: null };
         var s = state.session;
         apiGet('session', { loc: state.loc || '' }).then(function (res) {
             if (state.session !== s) { return; }   // superseded (location change, discard)
@@ -3267,6 +3290,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (!res || !res.ok) { s.error = (res && res.error) || 'Could not load the shared count.'; render(); return; }
             s.lines = res.lines || []; s.truncated = !!res.truncated; s.loadedAt = Date.now();
             mergeSession(s);
+            pruneDecisions(s);
             updateBadge();
             if (state.view === 'sheet') { render(); loadFresh(s, after); }
             else if (after) { after(); }
@@ -3284,6 +3308,36 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         items.forEach(function (m) { m.subs.sort(function (a, b) { return (Number(b.seq) || 0) - (Number(a.seq) || 0); }); });
         items.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
         s.items = naturalItemOrder(items); s.byItem = byItem;
+    }
+    // The counts behind an item, as one string: which lines, and what each
+    // holds. A hand-set total is a decision about exactly these.
+    function subsSig(m) {
+        return m.subs.map(function (l) { return [String(l.id), round4(Number(l.shelf) || 0), JSON.stringify((l.orders || []).map(function (o) { return [o.ref, o.key || o.ref, o.qty]; }))].join(':'); }).sort().join('|');
+    }
+    // A hand-set total is kept in this browser by item, so it outlives the
+    // counts it was typed over: a counter re-keys the item, a second person
+    // counts it, or the lines are cleared and the item is counted afresh next
+    // month -- and the old number would quietly decide what posts. So a total
+    // is dropped as soon as the lines under it are not the ones it was set
+    // over, and the sheet says which items that happened to. Leave-outs name
+    // a line, not an item, and simply go when their line does. (A total saved
+    // before this check existed has nothing to compare; it adopts the lines
+    // it finds.) A truncated load cannot tell "gone" from "not shown", so it
+    // prunes nothing.
+    function pruneDecisions(s) {
+        if (s.truncated) { return; }
+        var changed = false, lineIds = {};
+        s.lines.forEach(function (l) { lineIds[l.id] = true; });
+        Object.keys(s.excluded).forEach(function (id) { if (!lineIds[id]) { delete s.excluded[id]; changed = true; } });
+        Object.keys(s.overrides).forEach(function (item) {
+            var m = s.byItem[item], sig = m ? subsSig(m) : '';
+            if (m && s.overrideSig[item] == null) { s.overrideSig[item] = sig; changed = true; return; }
+            if (m && s.overrideSig[item] === sig) { return; }
+            if (m) { s.droppedOverrides.push(m.name); }
+            delete s.overrides[item]; delete s.overrideSig[item]; changed = true;
+        });
+        Object.keys(s.overrideSig).forEach(function (item) { if (s.overrides[item] == null) { delete s.overrideSig[item]; changed = true; } });
+        if (changed) { saveSessionPrefs(); }
     }
     // Fresh on-hand for every merged item, 200 at a time; the deltas the
     // administrator sees are against NetSuite right now, not the counters' screens.
@@ -3345,7 +3399,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         return out;
     }
     function mergedFor(m) {
-        var s = state.session, shelf = 0, rawOrders = [], names = [], ids = [], live = 0, latest = '', liveSubs = [];
+        var s = state.session, shelf = 0, rawOrders = [], names = [], ids = [], live = 0, latest = '', latestSeq = Infinity, liveSubs = [];
         m.subs.forEach(function (l) {
             ids.push(l.id);
             if (s.excluded[l.id]) { return; }
@@ -3353,7 +3407,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             liveSubs.push(l);
             (l.orders || []).forEach(function (o) { rawOrders.push(o); });
             if (l.counterName && names.indexOf(l.counterName) === -1) { names.push(l.counterName); }
-            if (String(l.at || '') > latest) { latest = String(l.at); }
+            // 'at' is display text ("9/14/2026 9:05 am") and does not sort;
+            // seq does (0 = saved most recently).
+            if ((Number(l.seq) || 0) < latestSeq) { latestSeq = Number(l.seq) || 0; latest = String(l.at || ''); }
         });
         var orders = collapseOrderEntries(rawOrders);
         var mode = 'one', keptBy = '';
@@ -3400,9 +3456,9 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         });
         s.lines.forEach(function (l) {
             var k = (l.counterName || 'Unknown') + '|' + (l.label || '');
-            var c = t.counters[k] || (t.counters[k] = { name: l.counterName || 'Unknown', label: l.label || '', lines: 0, at: '' });
+            var c = t.counters[k] || (t.counters[k] = { name: l.counterName || 'Unknown', label: l.label || '', lines: 0, at: '', seq: Infinity });
             c.lines++;
-            if (l.at > c.at) { c.at = l.at; }
+            if ((Number(l.seq) || 0) < c.seq) { c.seq = Number(l.seq) || 0; c.at = l.at || ''; }
         });
         return t;
     }
@@ -3431,11 +3487,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         input.addEventListener('change', function () {
             var c = parseCount(input.value);
             if (c === null) { input.value = fmt(g.total); return; }
-            if (c === g.computed) { delete s.overrides[m.id]; } else { s.overrides[m.id] = c; }
+            if (c === g.computed) { delete s.overrides[m.id]; delete s.overrideSig[m.id]; } else { s.overrides[m.id] = c; s.overrideSig[m.id] = subsSig(m); }
             saveSessionPrefs();
             render();
         });
-        var reset = el('button', { class: 'ic-x', type: 'button', text: '↺', title: 'Back to the counted total (' + fmt(g.computed) + ')', 'aria-label': 'Use the counted total', onclick: function () { delete s.overrides[m.id]; saveSessionPrefs(); render(); } });
+        var reset = el('button', { class: 'ic-x', type: 'button', text: '↺', title: 'Back to the counted total (' + fmt(g.computed) + ')', 'aria-label': 'Use the counted total', onclick: function () { delete s.overrides[m.id]; delete s.overrideSig[m.id]; saveSessionPrefs(); render(); } });
         if (!g.overridden) { reset.style.visibility = 'hidden'; }
         var delta = el('div', { class: 'ic-delta ' + (g.delta == null ? 'is-zero' : g.delta > 0 ? 'is-pos' : g.delta < 0 ? 'is-neg' : 'is-zero'), text: g.delta == null ? (f.missing || f.blocked ? 'n/a' : '…') : signed(g.delta) });
         row.appendChild(el('div', { class: 'ic-info' }, [
@@ -3515,6 +3571,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     el('button', { class: 'ic-segbtn' + (dupeMode() === 'add' ? ' is-on' : ''), type: 'button', text: 'Add them up', onclick: function () { setDupeMode('add'); } }),
                     el('button', { class: 'ic-segbtn' + (dupeMode() === 'latest' ? ' is-on' : ''), type: 'button', text: 'Keep the latest', onclick: function () { setDupeMode('latest'); } })
                 ])
+            ]));
+        }
+        if (s.droppedOverrides.length) {
+            var dn = s.droppedOverrides.length;
+            main.appendChild(el('div', { class: 'ic-warn' }, [
+                'The counts changed under ' + dn + ' item' + (dn === 1 ? '' : 's') + ' whose total you had set by hand, so ' + (dn === 1 ? 'that total was' : 'those totals were') + ' dropped and the counted total is back: '
+                    + s.droppedOverrides.slice(0, 5).join(', ') + (dn > 5 ? ', …' : '') + '. Check ' + (dn === 1 ? 'it' : 'them') + ' and set the total again if it still applies. ',
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'OK', onclick: function () { s.droppedOverrides = []; render(); } })
             ]));
         }
         if (s.truncated) { main.appendChild(el('div', { class: 'ic-warn', text: 'The shared count has more than 5,000 lines; only the first 5,000 are shown. Post these, then reload for the rest.' })); }
@@ -3663,7 +3727,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     if (done.adjustments.length) { state.done = done; }
                     // A stale item was decided on old numbers: forget that decision, keep the others.
                     (res && res.stale || []).forEach(function (st) {
-                        delete s.overrides[st.item];
+                        delete s.overrides[st.item]; delete s.overrideSig[st.item];
                         var m = s.byItem[st.item];
                         if (m) { m.subs.forEach(function (l) { delete s.excluded[l.id]; }); }
                     });

@@ -384,6 +384,23 @@ way — one sheet per device.
   moved or not — plus anything that cannot post normally (missing or
   blocked); an item whose total lands exactly on its on-hand needs nobody's
   time and stays under **All**.
+- A **hand-set total belongs to the counts it was typed over.** If a counter
+  re-keys that item, a second person counts it, or its lines are cleared and
+  it is counted afresh later, the hand-set total is dropped, the counted
+  total comes back, and a notice on the sheet names the items so the
+  administrator can set it again if it still applies. (Until v2026-11-24.1
+  the old number stayed in the browser by item and went on deciding what
+  posted.)
+- One item can carry up to 500 ticked order lines. (Until v2026-11-24.1 the
+  server kept the first 30 and silently dropped the rest, so a popular blank
+  on more than 30 open orders — easy to reach with **Select all** — saved
+  short by those units while the counter's own screen still showed them.)
+- A count never flickers off a counter's sheet. The once-a-minute check
+  against NetSuite used to compare the sheet with an answer that could be a
+  second or two older than the last save, so a line saved in that gap was
+  taken for "posted or discarded" and vanished until the next check, and a
+  line just removed came back the same way. Since v2026-11-24.1 a save or a
+  delete newer than the answer wins.
 - Every device sees everyone's open-order ticks. A line someone else ticked
   shows checked and locked with *ticked by Jeff Howard · Warehouse tablet 1*,
   the order and rep headers count it, and **Select all** skips it; the view
