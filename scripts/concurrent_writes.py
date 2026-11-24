@@ -64,7 +64,11 @@ def _price_line_at_quantity_one(body: dict, exc: Exception) -> dict | None:
     J317 and L317, 2026-11-23) key it at quantity 1, and NetSuite answers the
     quantity-0 body with NONEXISTENT_SUBLIST_KEY, failing the whole record.
     """
-    if "NONEXISTENT_SUBLIST_KEY" not in str(exc):
+    # NetSuiteError keeps the error code in ``payload``; str(exc) is only
+    # "NetSuite 404: Not Found". Reading str() alone meant this never fired on
+    # the first production run with the fix (2026-11-24).
+    text = f"{exc} {getattr(exc, 'payload', '')!r}"
+    if "NONEXISTENT_SUBLIST_KEY" not in text:
         return None
     lines = (body.get("price") or {}).get("items") if isinstance(
         body.get("price"), dict) else None
