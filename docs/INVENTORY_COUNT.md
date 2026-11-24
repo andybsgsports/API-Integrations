@@ -551,6 +551,40 @@ review with the September test run in mind:
   count's review also flags uncounted items that have units **committed to
   open orders nobody ticked** — usually staged or at the decorator.
 
+## Who is counting, and who is finished (v2026-11-24.6)
+
+Built for the problem the September test run showed most clearly: people
+counting in different rooms, nobody telling the administrator where they
+were, and one device that looked fine and had saved nothing.
+
+- **Device board** (administrator, Sheet tab). Every device that has the
+  page open reports in about once a minute: whose it is, how many lines it
+  holds, **how many have not saved** and why, and whether its counter has
+  finished. The board lists them all — including a device that has never
+  managed to save a line, which the per-counter chips cannot show. A device
+  not heard from for three minutes says so (screen off, tab closed, no
+  signal), and one still running an older copy of the page is told to
+  reload. The board is a status display kept for a day, not a record.
+- **I'm finished counting** (every counter, Sheet tab). Pressed when a
+  counter has done everything they were given. It is refused while any of
+  their lines is still unsaved. Counting or ticking anything afterwards
+  takes the mark off again, and it clears by itself once the count is
+  posted. It is per location.
+- **The confirm names who it is waiting on.** Before a submit, any device
+  that has not marked itself finished, or still has unsaved lines, is listed
+  — and for a full year-end count the notice says those unsaved items would
+  be reset to 0. It is a warning, not a lock: a tablet that was simply left
+  open does not hold the count hostage.
+- **Whole-location Select all is the administrator's.** The header **Select
+  all** on Open orders marks every committed unit on every open order as
+  found, in one click. Counters no longer have it; they keep **Select all**
+  inside each order and **Clear my ticks**.
+- **Open orders reads only the open orders' fulfillments** (v2026-11-24.5).
+  The pulled / layaway search used to ask for every fulfillment ever made,
+  oldest first, so its 5,000-row limit was spent on years-old shipments
+  before reaching today's orders. Units that have really shipped are now
+  netted out of *pulled*.
+
 ## Count-day rules (what moves inventory)
 
 - A sales order commits stock but does not move it: On hand stays, Available
