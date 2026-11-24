@@ -14,10 +14,12 @@ from __future__ import annotations
 import html
 import os
 import re
+import time
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
+import field_policy
 from concurrent_writes import write_records
 from native_pricing import (
     add_native_diffs,
@@ -26,7 +28,7 @@ from native_pricing import (
     weight_display,
 )
 from pricing_ownership import VENDOR_SANMAR, owns_pricing, read_preferred
-from run_status import exit_code
+from run_status import exit_code, print_field_counts, rotated
 from warehouse_fields import SANMAR_QTY_FIELDS, SANMAR_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config
@@ -543,15 +545,16 @@ def main() -> int:
     client = NetSuiteClient(cfg.netsuite)
     # Use the On Sale / Closeout checkboxes only once they exist in NetSuite
     # (self-enabling).
-    on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
-    closeout_field = CLOSEOUT_FIELD if _field_exists(client, CLOSEOUT_FIELD) else ""
-    shop_image_field = (
-        SHOP_IMAGE_FIELD if _field_exists(client, SHOP_IMAGE_FIELD) else ""
-    )
+    def _active(field: str) -> str:
+        return field if field_policy.keep(field) and _field_exists(client, field) else ""
+
+    on_sale_field = _active(ON_SALE_FIELD)
+    closeout_field = _active(CLOSEOUT_FIELD)
+    shop_image_field = _active(SHOP_IMAGE_FIELD)
     if shop_image_field:
         print(f"shop image field active: {shop_image_field}")
     view_image_fields = {
-        f: attr for f, attr in VIEW_IMAGE_FIELDS.items() if _field_exists(client, f)
+        f: attr for f, attr in VIEW_IMAGE_FIELDS.items() if _active(f)
     }
     if view_image_fields:
         print(f"view image fields active: {sorted(view_image_fields)}")
@@ -571,12 +574,16 @@ def main() -> int:
     ]
     if store_cols:
         print(f"store fields active: {store_cols}")
-    cols = ", ".join(
-        FIELD_ORDER + SEEN_FIELDS + store_cols
+    requested = (
+        ["custitem_ss_brand"] + FIELD_ORDER + SEEN_FIELDS
+        + ([on_sale_field] if on_sale_field else [])
         + ([closeout_field] if closeout_field else [])
         + ([shop_image_field] if shop_image_field else [])
         + sorted(view_image_fields)
     )
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report("sanmar field update", requested, custom_cols)
+    cols = field_policy.select(custom_cols + store_cols)
     gtins = sorted(payloads)
     considered = written = unchanged = priced = failures = deferred = 0
     _fail_shown = [0]
@@ -596,13 +603,25 @@ def main() -> int:
     # costs that field rather than the whole record. Reported below -- a
     # silently dropped field is exactly what hid for days.
     dropped: dict[str, int] = {}
-    for i in range(0, len(gtins), 250):
+    # Stop cleanly before the runner's job limit instead of being cut off
+    # mid-write with no totals, and start from a different place each day so a
+    # short night does not skip the same items every time.
+    budget_min = float(os.environ.get("UPDATE_TIME_BUDGET_MIN", "0") or "0")
+    deadline = time.monotonic() + budget_min * 60 if budget_min else None
+    starts = list(range(0, len(gtins), 250))
+    order = [starts[k] for k in rotated(len(starts), date.today().toordinal())]
+    chunks_not_reached = 0
+    field_counts: dict[str, int] = {}
+    for n_done, i in enumerate(order):
+        if deadline is not None and time.monotonic() > deadline:
+            chunks_not_reached = len(order) - n_done
+            break
         chunk = gtins[i : i + 250]
         in_list = ", ".join(f"'{_sql_escape(g)}'" for g in chunk)
         try:
             rows = client.suiteql(
-                f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
-                f"custitem_ss_brand, {cols} FROM item WHERE upccode IN ({in_list})"
+                f"SELECT id, itemid, upccode, cost, weight, weightunit, manufacturer"
+                f"{cols} FROM item WHERE upccode IN ({in_list})"
             )
         except Exception as exc:  # noqa: BLE001 - sustained throttling shouldn't crash
             # the whole run and discard every chunk already written; skip this
@@ -657,6 +676,7 @@ def main() -> int:
                 if cur_co != want_co:
                     body[closeout_field] = want_co
             stamp(body, row, "sanmar", claim_source=owner)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue
@@ -665,6 +685,8 @@ def main() -> int:
             considered += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
+            for f in body:
+                field_counts[f] = field_counts.get(f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -687,6 +709,15 @@ def main() -> int:
             f"Uncapped depth is only available via SanMar's Web Service / "
             f"PromoStandards inventory API."
         )
+    if chunks_not_reached:
+        print(
+            f"NOTE: sanmar field update stopped at its {budget_min:.0f}-minute "
+            f"time budget with {chunks_not_reached:,} of {len(order):,} "
+            f"chunk(s) not reached (about {chunks_not_reached * 250:,} SKUs). "
+            f"Tomorrow's run starts from a different place, so they are "
+            f"reached within a few days."
+        )
+    print_field_counts("sanmar field update", field_counts)
     if chunks_skipped:
         print(
             f"NOTE: {chunks_skipped} chunk(s) skipped after their SuiteQL read "

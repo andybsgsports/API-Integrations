@@ -63,7 +63,7 @@ def test_ramp_cap_defaults_to_a_bounded_number():
 
 def test_run_vendor_runs_phases_in_order(monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(vp, "_run", lambda script, env: calls.append(script) or 0)
+    monkeypatch.setattr(vp, "_run", lambda script, env, **kw: calls.append(script) or 0)
     vp.run_vendor("sanmar")
     assert calls == [
         "scripts/sanmar_create_preview.py",
@@ -72,24 +72,27 @@ def test_run_vendor_runs_phases_in_order(monkeypatch):
         "scripts/sanmar_parent_create.py",
         "scripts/sanmar_child_finalize.py",
         "scripts/sanmar_field_update.py",
+        "scripts/vendor_line_price_sync.py",
         "scripts/atlas_image_backfill.py",
     ]
 
 
 def test_run_vendor_honours_a_phase_subset(monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(vp, "_run", lambda script, env: calls.append(script) or 0)
+    monkeypatch.setattr(vp, "_run", lambda script, env, **kw: calls.append(script) or 0)
     vp.run_vendor("sanmar", phases=("update",))
-    assert calls == ["scripts/sanmar_field_update.py"]
+    assert calls == ["scripts/sanmar_field_update.py",
+                     "scripts/vendor_line_price_sync.py"]
     calls.clear()
     vp.run_vendor("sanmar", phases=("update", "images"))
     assert calls == ["scripts/sanmar_field_update.py",
+                     "scripts/vendor_line_price_sync.py",
                      "scripts/atlas_image_backfill.py"]
 
 
 def test_run_vendor_sets_the_ramp_cap(monkeypatch):
     seen: list[dict] = []
-    monkeypatch.setattr(vp, "_run", lambda script, env: seen.append(env) or 0)
+    monkeypatch.setattr(vp, "_run", lambda script, env, **kw: seen.append(env) or 0)
     monkeypatch.delenv("CREATE_MAX_STYLES", raising=False)
     vp.run_vendor("sanmar", phases=("create",))
     assert seen and seen[0]["CREATE_MAX_STYLES"] == vp.DEFAULT_CREATE_MAX_STYLES
@@ -99,7 +102,7 @@ def test_a_failing_phase_does_not_abort_the_vendor(monkeypatch):
     # Diff-aware phases: finishing the rest still moves the catalogue forward.
     calls: list[str] = []
 
-    def fake(script, env):
+    def fake(script, env, **kw):
         calls.append(script)
         return 1 if "ensure_matrix_values" in script else 0
 
@@ -170,7 +173,7 @@ def test_dcos_runs_every_supplier(monkeypatch):
     # saw 100% stale and only the circuit breaker kept their items alive.
     runs: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        vp, "_run", lambda script, env: runs.append((script, env["DCOS_SUPPLIER"])) or 0)
+        vp, "_run", lambda script, env, **kw: runs.append((script, env["DCOS_SUPPLIER"])) or 0)
     vp.run_vendor("dcos", phases=("update",))
     assert [s for _, s in runs] == list(vp.DCOS_SUPPLIERS)
     assert set(s for _, s in runs) >= {"champro", "tck", "capamerica", "mizuno"}

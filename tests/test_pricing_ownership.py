@@ -24,7 +24,10 @@ from pricing_ownership import (  # noqa: E402
     read_preferred,
 )
 
-from sanmar_netsuite.netsuite.feed_seen import stamp  # noqa: E402
+from sanmar_netsuite.netsuite.feed_seen import (
+    STALE_AFTER_DAYS,
+    stamp,  # noqa: E402
+)
 
 # --- owns_pricing: Preferred Vendor set -> ownership follows it exactly
 
@@ -128,7 +131,7 @@ def test_stamp_owner_claims_source():
 def test_stamp_non_owner_leaves_live_source_alone():
     # The nightly ping-pong: S&S must stop re-stamping 'ss' over the owner's
     # 'sanmar' -- but still refresh a stale heartbeat.
-    stale = (date.today() - timedelta(days=4)).strftime("%m/%d/%Y")
+    stale = (date.today() - timedelta(days=STALE_AFTER_DAYS + 1)).strftime("%m/%d/%Y")
     want: dict = {}
     stamp(want, {"custitem_feed_source": "sanmar",
                  "custitem_feed_last_seen": stale}, "ss", claim_source=False)

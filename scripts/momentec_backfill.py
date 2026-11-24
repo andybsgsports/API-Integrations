@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+import field_policy
 from native_pricing import (
     WEIGHT_UNIT_LB,
     WEIGHT_UNIT_OZ,
@@ -25,6 +26,7 @@ from native_pricing import (
     read_base_prices,
 )
 from pricing_ownership import VENDOR_MOMENTEC, owns_pricing, read_preferred
+from run_status import print_field_counts
 
 from momentec_netsuite.adopt import match_momentec
 from momentec_netsuite.config import get_config
@@ -51,6 +53,9 @@ FIELDS = [
 
 # ASG "Ribbon" values that mean the item is a closeout.
 CLOSEOUT_FIELD = "custitem_mtec_is_closeout"
+
+#: field name -> how many items had it changed this run (for the summary).
+FIELD_COUNTS: dict[str, int] = {}
 
 
 def is_closeout(ribbon: str) -> bool:
@@ -269,7 +274,10 @@ def main() -> int:
     if missing:
         print(f"WARNING: custom field(s) not present in account -- skipping "
               f"read+write for these (create them, then re-run): {missing}")
-    cols = ", ".join(present + SEEN_FIELDS)
+    requested = ["custitem_ss_brand", "custitem_sanmar_style"] + present + SEEN_FIELDS
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report("momentec backfill", requested, custom_cols)
+    cols = field_policy.select(custom_cols)
     considered = written = unchanged = upc_filled = priced = failures = 0
     deferred = 0
     for i in range(0, len(ids), 250):
@@ -278,8 +286,7 @@ def main() -> int:
         rows = client.suiteql(
             # custitem_sanmar_style feeds the pricing-ownership ranking
             # fallback (SanMar outranks Momentec).
-            f"SELECT id, upccode, cost, weight, weightunit, manufacturer, "
-            f"custitem_ss_brand, custitem_sanmar_style, {cols} "
+            f"SELECT id, upccode, cost, weight, weightunit, manufacturer{cols} "
             f"FROM item WHERE id IN ({in_list})"
         )
         base_by_rid = read_base_prices(client, in_list)
@@ -348,6 +355,7 @@ def main() -> int:
                 if cur_co != closeout:
                     body[CLOSEOUT_FIELD] = closeout
             stamp(body, row, "momentec", claim_source=owner)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue
@@ -358,6 +366,8 @@ def main() -> int:
                 upc_filled += 1
             if any(k in body for k in ("price", "cost", "weight", "weightUnit")):
                 priced += 1
+            for _f in body:
+                FIELD_COUNTS[_f] = FIELD_COUNTS.get(_f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -378,6 +388,7 @@ def main() -> int:
               f"weightUnit left unchanged for these (add them to WEIGHT_UNITS): "
               f"{sorted(UNKNOWN_WEIGHT_UNITS)}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
+    print_field_counts("momentec backfill", FIELD_COUNTS)
     print(f"\nmomentec backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
           f"price/cost/weight updated: {priced}; "

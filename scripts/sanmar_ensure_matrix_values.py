@@ -33,6 +33,7 @@ from sanmar_netsuite.config import get_config
 from sanmar_netsuite.netsuite.adopt import COLOR_LIST, SIZE_LIST, heuristic_abbrev
 from sanmar_netsuite.netsuite.client import NetSuiteClient
 from sanmar_netsuite.netsuite.matrix_options import normalize_option_name as _norm
+from sanmar_netsuite.netsuite.matrix_options import tidy_color_name
 from sanmar_netsuite.transform.sizes import normalize_size
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -145,8 +146,13 @@ def main() -> int:
         for c, canon in list(sorted(color_variants.items()))[:12]:
             print(f"  {c!r} -> {canon!r}")
 
+    # New colours are created in BSG style (Andy, 2026-11-20): Title Case,
+    # no stray spaces. Two feed spellings of one colour make one value.
+    tidy_by_norm: dict[str, str] = {}
+    for raw in sorted(new_colors):
+        tidy_by_norm.setdefault(_norm(raw), tidy_color_name(raw))
     created = failures = 0
-    for name in sorted(new_colors):
+    for name in sorted(tidy_by_norm.values()):
         if create_max and created >= create_max:
             break
         if not allow_write:

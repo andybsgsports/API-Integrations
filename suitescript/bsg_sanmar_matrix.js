@@ -18,16 +18,23 @@
  *       "department": "Apparel", "class": "Tops : Tees",
  *       "location": "Badger Sporting Goods",
  *       "preferredLocation": "Badger Sporting Goods", "costingMethod": "AVG",
- *       "cost": 3.49, "basePrice": 6.00, "currency": "US Dollar"
+ *       "cost": 3.49, "basePrice": 6.00,
+ *       "manufacturer": "Port & Co", "parentId": "50286", "currency": "US Dollar"
  *   }, ... ] }
  *
  * Response: { "results": [ { "externalId", "status": created|updated|error,
  *                            "id", "message" } ] }
  *
+ * Second action, vendor line purchase prices (added 2026-11-20):
+ *   { "action": "vendorPrices",
+ *     "vendorPrices": [ { "id": 94809, "vendor": 576, "price": 44 }, ... ] }
+ * Response: { "action": "vendorPrices", "results": [ { "id",
+ *             "status": updated|unchanged|error, "old", "price", "message" } ] }
+ *
  * @NApiVersion 2.1
  * @NScriptType Restlet
  */
-define(["N/record", "N/search"], (record, search) => {
+define(["N/record", "N/search", "N/query"], (record, search, query) => {
   const COLOR_LIST = "customlist_bsg_matrix_color";
   const SIZE_LIST = "customlist_bsg_matrix_size";
 
@@ -96,6 +103,8 @@ define(["N/record", "N/search"], (record, search) => {
     setIf(rec, "purchasedescription", it.description);
     setIf(rec, "vendorname", it.vendorName);
     setIf(rec, "upccode", it.upc);
+    // Native Manufacturer = the brand (Andy: never the distributor).
+    setIf(rec, "manufacturer", it.manufacturer);
     setIf(rec, "incomeaccount", it.incomeAccount && resolveAccount(it.incomeAccount));
     setIf(rec, "cogsaccount", it.cogsAccount && resolveAccount(it.cogsAccount));
     setIf(rec, "assetaccount", it.assetAccount && resolveAccount(it.assetAccount));
@@ -168,6 +177,15 @@ define(["N/record", "N/search"], (record, search) => {
           if (it.vendorName) {
             rec.setSublistValue({ sublistId: "itemvendor", fieldId: "vendorcode", line: 0, value: it.vendorName });
           }
+          // The vendor line's own Purchase Price. The item-level cost was
+          // filled but this was left blank on 126,781 of 167,761 vendor
+          // lines (sandbox, 2026-11-11). Guarded on its own: a refused price
+          // must not undo the vendor + preferred flag set just above.
+          if (it.cost !== undefined && it.cost !== null && it.cost !== "") {
+            try {
+              rec.setSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: 0, value: it.cost });
+            } catch (e) { /* item_format_fix.py --steps vendorprice backfills */ }
+          }
         }
       } catch (e) {
         /* vendors sublist shape varies by config; vendor_sublist.py backfills */
@@ -180,10 +198,16 @@ define(["N/record", "N/search"], (record, search) => {
         /* price sublist varies by config; reconcile sets it as a fallback */
       }
     }
+    // Only Base Price is ever written. The other price levels (10% Off, Team,
+    // Team Contracts) are calculated by NetSuite from Base; Andy, 2026-11-11:
+    // "only change/add base price....not price levels".
   }
 
   function createChild(it) {
-    const parentId = resolveParent(it.style);
+    // Prefer the id the caller already resolved: a bare-name search can land
+    // on an EMPTY duplicate parent that differs only by letter case (St650 vs
+    // ST650), which strands the child away from its siblings.
+    const parentId = it.parentId || resolveParent(it.style);
     if (!parentId) throw new Error("parent matrix item not found for style '" + it.style + "'");
     const colorId = resolveOption(COLOR_LIST, it.color);
     const sizeId = resolveOption(SIZE_LIST, it.size);
@@ -205,7 +229,74 @@ define(["N/record", "N/search"], (record, search) => {
     return externalId ? firstId("item", [["externalid", "is", externalId]]) : null;
   }
 
+  // Set the purchase price on ONE existing vendor line of an item. The REST
+  // record API cannot do this once the line has a price: the price lives in a
+  // nested per-currency price line and a PATCH of purchasePrice is accepted
+  // and ignored (sandbox runs 44668710929 and 44669765243, 2026-11-20).
+  // Changes nothing else, never adds or removes a vendor line.
+  function setVendorPrice(it) {
+    const id = parseInt(it.id, 10);
+    const vendor = parseInt(it.vendor, 10);
+    const price = Number(it.price);
+    if (!id || !vendor || !isFinite(price) || price <= 0) {
+      return { id: it.id, status: "error", message: "needs id, vendor and a price above 0" };
+    }
+    const rec = record.load({ type: record.Type.INVENTORY_ITEM, id: id });
+    const hits = [];
+    const n = rec.getLineCount({ sublistId: "itemvendor" });
+    for (let i = 0; i < n; i++) {
+      const v = parseInt(rec.getSublistValue({ sublistId: "itemvendor", fieldId: "vendor", line: i }), 10);
+      if (v === vendor) hits.push(i);
+    }
+    if (hits.length !== 1) {
+      return { id: id, status: "error", message: "expected one line for vendor " + vendor + ", found " + hits.length };
+    }
+    const old = parseFloat(rec.getSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: hits[0] }));
+    if (isFinite(old) && Math.abs(old - price) < 0.005) {
+      return { id: id, status: "unchanged", old: old };
+    }
+    // With Multiple Currencies on, a priced line keeps its price in the
+    // line's Vendor Prices subrecord, one row per currency. Setting
+    // purchaseprice on the line itself saves without error and changes
+    // nothing (sandbox run 44670777975), so the row is what gets written.
+    const sub = rec.getSublistSubrecord({ sublistId: "itemvendor", fieldId: "itemvendorprice", line: hits[0] });
+    const rows = sub.getLineCount({ sublistId: "itemvendorpricelines" });
+    if (rows > 1) {
+      return { id: id, status: "error", message: "vendor line has " + rows + " currency rows; not changed" };
+    }
+    if (rows === 1) {
+      sub.setSublistValue({ sublistId: "itemvendorpricelines", fieldId: "vendorprice", line: 0, value: price });
+    } else {
+      rec.setSublistValue({ sublistId: "itemvendor", fieldId: "purchaseprice", line: hits[0], value: price });
+    }
+    rec.save({ enableSourcing: false, ignoreMandatoryFields: true });
+    // Never report "updated" unless the database really shows the new price.
+    const after = query.runSuiteQL({
+      query: "SELECT purchaseprice FROM itemvendor WHERE item = ? AND vendor = ?",
+      params: [id, vendor],
+    }).asMappedResults();
+    const now = after.length === 1 ? Number(after[0].purchaseprice) : NaN;
+    if (!isFinite(now) || Math.abs(now - price) >= 0.005) {
+      return { id: id, status: "error", message: "saved, but the line reads " + now + ", not " + price };
+    }
+    return { id: id, status: "updated", old: isFinite(old) ? old : null, price: now };
+  }
+
   function post(body) {
+    if (body && body.action === "vendorPrices") {
+      // A separate key from "items" on purpose: an older copy of this script
+      // then sees no items and does nothing, instead of trying to create them.
+      return {
+        action: "vendorPrices",
+        results: (body.vendorPrices || []).map((it) => {
+          try {
+            return setVendorPrice(it);
+          } catch (e) {
+            return { id: it.id, status: "error", message: e.message || String(e) };
+          }
+        }),
+      };
+    }
     const items = (body && body.items) || [];
     const results = items.map((it) => {
       try {

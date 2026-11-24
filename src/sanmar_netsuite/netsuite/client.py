@@ -68,6 +68,10 @@ class _RetryableHTTP(RuntimeError):
     """Internal marker for 429/5xx responses worth retrying."""
 
 
+class NetSuiteReadOnlyError(RuntimeError):
+    """A write was attempted while ``NETSUITE_READ_ONLY`` is set."""
+
+
 class NetSuiteClient:
     RECORD_PATH = "/services/rest/record/v1"
     QUERY_PATH = "/services/rest/query/v1"
@@ -121,6 +125,12 @@ class NetSuiteClient:
         json_body: Any = None,
         headers: dict[str, str] | None = None,
     ) -> requests.Response:
+        if self._config.read_only and not self._is_read(method, url):
+            # Raised before anything is sent. Not retried (not a retryable type).
+            raise NetSuiteReadOnlyError(
+                f"NETSUITE_READ_ONLY is set: refused {method} "
+                f"{url.split('?')[0]} -- nothing was sent to NetSuite."
+            )
         merged_headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if headers:
             merged_headers.update(headers)
@@ -136,6 +146,17 @@ class NetSuiteClient:
             log.warning("Retryable NetSuite response %s for %s %s", resp.status_code, method, url)
             raise _RetryableHTTP(f"{resp.status_code} {resp.reason}")
         return resp
+
+    def _is_read(self, method: str, url: str) -> bool:
+        """A request that cannot change NetSuite: a GET to the record/query
+        API, or a SuiteQL query (a POST, but read-only by definition). A
+        RESTlet call is never counted as a read, whatever its method -- a
+        RESTlet can do anything."""
+        if self.RESTLET_PATH in url:
+            return False
+        if method.upper() == "GET":
+            return True
+        return method.upper() == "POST" and f"{self.QUERY_PATH}/suiteql" in url
 
     def _url(self, path: str) -> str:
         return f"{self._config.rest_base}{path}"

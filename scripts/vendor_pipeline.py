@@ -44,11 +44,16 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
+
+import price_guard
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,6 +66,11 @@ VENDOR_ORDER = ["sanmar", "momentec", "ua", "ss", "dcos", "champro-csv"]
 #: stamps; it is a separate phase so it can be its own chain step with its own
 #: job budget (see the SanMar note in PIPELINES).
 PHASES = ("discover", "options", "create", "update", "images")
+
+#: Phases that run only when asked for by name -- never part of the default
+#: run or the nightly chain. ``link`` is the read-only report that matches
+#: existing items to feed SKUs before anything is linked (Andy, 2026-11-20).
+ON_REQUEST_PHASES = ("link", "link-apply")
 
 #: Per-vendor phase -> script(s). A phase absent from a vendor's map has no
 #: implementation for that vendor yet; the pipeline says so out loud and moves
@@ -86,7 +96,8 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
             "scripts/sanmar_parent_create.py",
             "scripts/sanmar_child_finalize.py",
         ],
-        "update": ["scripts/sanmar_field_update.py"],
+        "update": ["scripts/sanmar_field_update.py",
+                   "scripts/vendor_line_price_sync.py"],
         # atlas_image_backfill runs AFTER the field update because it joins
         # items by custitem_sanmar_unique_key, which the field update stamps
         # (matched by UPC) -- a child created minutes earlier has no key yet.
@@ -100,13 +111,26 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         # and a leg killed by the cap never reaches the dispatch step -- so
         # every vendor after SanMar would silently lose the night.
         "images": ["scripts/atlas_image_backfill.py"],
+        # Read-only: which existing items match a feed size and colour, and
+        # why the rest do not. On request only (ON_REQUEST_PHASES).
+        "link": ["scripts/sanmar_link_report.py"],
+        # Stamps the UPC and Sanmar unique key on clean matches only, capped
+        # by MAX_ITEMS. On request only; writes only in live mode.
+        "link-apply": ["scripts/sanmar_link_apply.py"],
     },
     "momentec": {
-        # No creation path built yet -- see PIPELINE_GAPS below.
-        "update": ["scripts/momentec_backfill.py"],
+        # Parents then children for styles NetSuite does not have, plus
+        # missing colours/sizes under existing parents; resolves its own
+        # option values. NOT in the nightly chain's momentec step yet (the
+        # chain runs "update" only): it wants a dry run and a small pilot
+        # Andy reviews first, the way SanMar's creation rolled out.
+        "create": ["scripts/momentec_create.py"],
+        "update": ["scripts/momentec_backfill.py",
+                   "scripts/vendor_line_price_sync.py"],
     },
     "ua": {
-        "update": ["scripts/ua_backfill.py"],
+        "update": ["scripts/ua_backfill.py",
+                   "scripts/vendor_line_price_sync.py"],
     },
     "ss": {
         # Read-only diff of the 195k-SKU catalog: buckets missing SKUs into
@@ -119,7 +143,8 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
         # into the nightly chain's ss leg yet: it wants a dry run and a small
         # pilot Andy reviews first, the way SanMar's creation rolled out.
         "create": ["scripts/ss_create.py"],
-        "update": ["scripts/ss_backfill.py"],
+        "update": ["scripts/ss_backfill.py",
+                   "scripts/vendor_line_price_sync.py"],
     },
     "dcos": {
         # dcos_item_create resolves/creates its own option values inline, so
@@ -135,8 +160,9 @@ PIPELINES: dict[str, dict[str, list[str]]] = {
 #: Vendors whose CREATE path doesn't exist yet, and why it isn't a one-liner.
 #: Printed by --list so the gap is visible instead of implied by an empty map.
 PIPELINE_GAPS = {
-    "momentec": "matches on matrix options only (no barcode), so creation needs "
-                "a style->parent mapping built first",
+    "momentec": "create is built (momentec_create.py) but deliberately NOT "
+                "in the chain's momentec step: it wants a dry run and a small "
+                "pilot Andy reviews first.",
     "ua": "DC OneSource parts carry no style grid; parent structure per style "
           "needs deciding before children can be created",
     "ss": "create is built (ss_create.py) but deliberately NOT in the "
@@ -164,26 +190,209 @@ DCOS_SUPPLIERS = tuple(
 
 #: Vendor -> env the phase scripts expect (supplier selector, mostly).
 VENDOR_ENV: dict[str, dict[str, str]] = {
+    # VENDOR_LINE_SOURCE tells vendor_line_price_sync.py whose Preferred
+    # Vendor lines this leg keeps equal to cost.
+    "sanmar": {"VENDOR_LINE_SOURCE": "sanmar"},
+    "momentec": {"VENDOR_LINE_SOURCE": "momentec"},
+    "ua": {"VENDOR_LINE_SOURCE": "ua"},
     "ss": {"SS_CREATE_BRANDS": os.environ.get("SS_CREATE_BRANDS")
-           or SS_DEFAULT_BRANDS},
+           or SS_DEFAULT_BRANDS,
+           "VENDOR_LINE_SOURCE": "ss"},
 }
 
 #: Default per-vendor-per-night cap on NET-NEW styles created (0 = no cap).
 DEFAULT_CREATE_MAX_STYLES = "300"
 
 
-def _run(script: str, env: dict[str, str]) -> int:
-    """Run one phase script, streaming its output. Returns its exit code."""
+#: Output lines worth repeating in the run summary: each script's totals line,
+#: everything skipped or failed by name, and warnings / notes / price holds.
+_SUMMARY_LINE = re.compile(
+    r"failures: \d|SKIPPED|FAILED item|^WARNING|^NOTE|PRICE HOLD|PRICE GUARD"
+    r"|WOULD |dropped on |^LINK REPORT|^LINK APPLY"
+)
+#: Cap on named skip / failure lines kept per script so one bad night cannot
+#: produce a summary nobody can read. The totals line always carries the count.
+SUMMARY_MAX_DETAIL = 200
+
+#: Collected for the run summary: (heading, [lines]).
+_SUMMARY: list[tuple[str, list[str]]] = []
+
+
+def _run(script: str, env: dict[str, str], *, label: str = "",
+         summarize: bool = True) -> int:
+    """Run one phase script, streaming its output. Returns its exit code.
+
+    The child runs unbuffered so a job killed by the runner's time limit still
+    shows how far it got (a buffered child lost its whole report when the
+    SanMar update leg hit the 350-minute cap on 2026-11-17 and 2026-11-18).
+    """
     path = ROOT / script
     if not path.exists():
         print(f"  !! {script} not found -- skipping", flush=True)
         return 0
     t0 = time.monotonic()
-    print(f"\n--- {script}", flush=True)
-    proc = subprocess.run([sys.executable, str(path)], env=env, cwd=ROOT, check=False)
-    print(f"--- {script} finished rc={proc.returncode} "
+    print(f"\n--- {script}{label}", flush=True)
+    child_env = {**env, "PYTHONUNBUFFERED": "1"}
+    kept: list[str] = []
+    detail = 0
+    proc = subprocess.Popen(
+        [sys.executable, str(path)], env=child_env, cwd=ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", bufsize=1,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        text = line.rstrip()
+        if "Retryable NetSuite response" in text or not _SUMMARY_LINE.search(text):
+            continue
+        if "failures: " in text or text.startswith(("WARNING", "NOTE")):
+            kept.append(text.strip())
+        elif detail < SUMMARY_MAX_DETAIL:
+            detail += 1
+            kept.append(text.strip())
+    rc = proc.wait()
+    print(f"--- {script} finished rc={rc} "
           f"in {time.monotonic() - t0:,.1f}s", flush=True)
-    return proc.returncode
+    if summarize:
+        if rc:
+            kept.append(f"exit code {rc}")
+        _SUMMARY.append((f"{script}{label}", kept))
+    return rc
+
+
+#: Update-phase scripts that set no Base Price or cost of their own, so they
+#: need no price guard check pass. vendor_line_price_sync copies the cost the
+#: guarded script just wrote (or left alone).
+NO_PRICE_GUARD = {"scripts/vendor_line_price_sync.py"}
+
+
+def _guard_enabled(env: dict[str, str]) -> bool:
+    return env.get("PRICE_GUARD", "").strip().lower() in ("on", "true", "1")
+
+
+def _is_dry(env: dict[str, str]) -> bool:
+    return env.get("SYNC_DRY_RUN", "true").strip().lower() in ("true", "1", "yes")
+
+
+#: Settings the scripts read from ``.env`` that this runner must see too.
+_RUN_MODE_KEYS = ("SYNC_DRY_RUN", "NETSUITE_READ_ONLY")
+
+
+def load_run_mode(env: dict[str, str], dotenv_path: str | None = None) -> None:
+    """Copy the run mode from ``.env`` into ``env`` where the process has none.
+
+    The workflows write SYNC_DRY_RUN to ``.env``, which the scripts load but
+    this runner did not. On the first live production update (2026-11-21) the
+    runner therefore took a live run for a dry run, ran one pass, and the
+    price hold was never applied: prices were written on 25 items.
+    """
+    try:
+        from dotenv import dotenv_values
+    except ImportError:  # pragma: no cover - dotenv is a hard dependency
+        return
+    values = dotenv_values(dotenv_path) if dotenv_path else dotenv_values()
+    for key in _RUN_MODE_KEYS:
+        if key not in env and values.get(key) is not None:
+            env[key] = str(values[key])
+
+
+def _run_update(script: str, env: dict[str, str], *, label: str = "") -> int:
+    """Run an update script behind the price guard (see price_guard.py).
+
+    Guard off: one plain run. Guard on: a read-only dry pass collects how far
+    Base Price and Purchase Price would move; if too many move too far the
+    real pass runs with price and cost writes held. A run that is itself a dry
+    run needs only the one pass -- it reports the verdict and writes nothing.
+    """
+    if not _guard_enabled(env):
+        return _run(script, env, label=label)
+
+    fd, report_path = tempfile.mkstemp(prefix="price_guard_", suffix=".json")
+    os.close(fd)
+    os.unlink(report_path)
+    probe_env = {**env, "PRICE_GUARD_REPORT": report_path}
+    probe_env.pop("PRICE_GUARD_HOLD", None)
+    # Only a run that is known to be dry takes the single pass. With the mode
+    # unknown, do the check pass and the real pass: if the run turns out to be
+    # dry the second pass writes nothing, and if it is live the hold applies.
+    dry = "SYNC_DRY_RUN" in env and _is_dry(env)
+    if dry:
+        rc = _run(script, probe_env, label=label)
+    else:
+        probe_env.update({"SYNC_DRY_RUN": "true", "NETSUITE_READ_ONLY": "true"})
+        rc = _run(script, probe_env, label=f"{label} (price guard check, no writes)",
+                  summarize=False)
+    try:
+        report = json.loads(Path(report_path).read_text())
+    except (OSError, ValueError):
+        report = None
+    finally:
+        Path(report_path).unlink(missing_ok=True)
+
+    lines: list[str] = []
+    hold = False
+    if report is None:
+        # No verdict is not a pass. Hold prices rather than write them blind.
+        hold = True
+        lines.append("PRICE HOLD: the price guard check produced no report "
+                     f"(exit code {rc}); Base Price and Purchase Price are "
+                     "held for this vendor.")
+    else:
+        lines += [f"PRICE GUARD {x}" for x in price_guard.describe(report)]
+        over = price_guard.tripped(report)
+        released = env.get("PRICE_GUARD_OVERRIDE", "").strip() == "RELEASE"
+        if over and released:
+            lines.append("PRICE GUARD over the limit for "
+                         f"{', '.join(over)}, RELEASED by override: prices "
+                         "are written.")
+        elif over:
+            hold = True
+            lines.append(
+                f"PRICE HOLD: more than {price_guard.MAX_SHARE:.0%} of "
+                f"{' and '.join(over)} values move more than "
+                f"{price_guard.MOVE_PCT:.0%}. Base Price and Purchase Price "
+                "are held for this vendor; every other field is still "
+                "written. Review, then run again with the override to release.")
+    for line in lines:
+        print(line, flush=True)
+    _SUMMARY.append((f"{script}{label} price guard", lines))
+    if dry:
+        return rc
+    if hold:
+        # Set on the vendor's own env, not a copy, so the scripts that follow
+        # in this phase (vendor_line_price_sync) see the hold too.
+        env["PRICE_GUARD_HOLD"] = "1"
+    return _run(script, env, label=label)
+
+
+def write_summary(vendor: str, phases: tuple[str, ...], worst: int) -> None:
+    """Write what this run added, changed, skipped and held.
+
+    Goes to the GitHub run summary page and, when RUN_SUMMARY_FILE is set, to
+    that file so the workflow can post it to the day's summary issue.
+    """
+    seen = dict(os.environ)
+    load_run_mode(seen)
+    mode = "dry run (nothing written)" if _is_dry(seen) else "live"
+    out = [f"### {vendor}: {', '.join(phases)} ({mode})", ""]
+    for heading, lines in _SUMMARY:
+        out.append(f"**{heading}**")
+        out += [f"- {x}" for x in lines] or ["- no totals line was printed"]
+        out.append("")
+    if worst:
+        out.append(f"Worst exit code: {worst}")
+    text = "\n".join(out) + "\n"
+    for target in (os.environ.get("GITHUB_STEP_SUMMARY"),
+                   os.environ.get("RUN_SUMMARY_FILE")):
+        if not target:
+            continue
+        try:
+            with open(target, "a", encoding="utf-8") as fh:
+                fh.write(text)
+        except OSError as exc:
+            print(f"could not write summary to {target}: {exc}", flush=True)
 
 
 def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
@@ -200,7 +409,12 @@ def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
         return 1
 
     env = dict(os.environ)
+    load_run_mode(env)
     env.setdefault("CREATE_MAX_STYLES", DEFAULT_CREATE_MAX_STYLES)
+    budget = float(env.get("LEG_TIME_BUDGET_MIN", "0") or "0")
+    if budget and not env.get("LEG_DEADLINE_EPOCH"):
+        # One deadline for every script in this leg (run_status.leg_deadline).
+        env["LEG_DEADLINE_EPOCH"] = f"{time.time() + budget * 60:.0f}"
     env.update(VENDOR_ENV.get(vendor, {}))
 
     print(f"\n{'=' * 62}\n=== VENDOR: {vendor}  "
@@ -225,10 +439,16 @@ def run_vendor(vendor: str, phases: tuple[str, ...] = PHASES) -> int:
                 # (dry run 31367785465, live run 31457843380).
                 for supplier in DCOS_SUPPLIERS:
                     print(f"  -- supplier: {supplier}", flush=True)
-                    worst = max(worst, _run(script, {**env, "DCOS_SUPPLIER": supplier}))
+                    worst = max(worst, _run(
+                        script, {**env, "DCOS_SUPPLIER": supplier},
+                        label=f" [{supplier}]"))
+            elif phase == "update" and script not in NO_PRICE_GUARD:
+                worst = max(worst, _run_update(script, env))
             else:
                 worst = max(worst, _run(script, env))
     print(f"\n=== VENDOR {vendor} complete (worst rc={worst})", flush=True)
+    write_summary(vendor, phases, worst)
+    _SUMMARY.clear()
     return worst
 
 
@@ -253,9 +473,10 @@ def main() -> int:
         return 0
 
     phases = tuple(p.strip() for p in args.phases.split(",") if p.strip())
-    bad = [p for p in phases if p not in PHASES]
+    valid = PHASES + ON_REQUEST_PHASES
+    bad = [p for p in phases if p not in valid]
     if bad:
-        print(f"unknown phase(s): {bad}; valid: {', '.join(PHASES)}")
+        print(f"unknown phase(s): {bad}; valid: {', '.join(valid)}")
         return 1
 
     vendors = VENDOR_ORDER if args.vendor == "all" else [args.vendor]

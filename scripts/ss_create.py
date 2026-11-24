@@ -36,6 +36,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+import field_policy
 from native_pricing import base_price, weight_display
 from pricing_ownership import VENDOR_SS
 from run_status import exit_code
@@ -118,13 +119,15 @@ def clean_html(text: str | None) -> str:
 
 
 def display_name(style_name: str, title: str) -> str:
-    """Name fields keep the style code; description fields drop it.
+    """Display Name = the clean title, the same text as the descriptions.
 
-    A style with no title in the feed gets the bare code -- never the code
-    twice, which is what naive concatenation produces.
+    Andy, 2026-11-11: "Display name should not have the style number at the
+    end. match description." (replaces the 2026-08-05 keep-the-code spec). A
+    style with no title in the feed still gets the bare code -- a name field
+    is never left empty.
     """
     base = (title or "").strip()
-    return f"{base} {style_name}".strip() if base else style_name
+    return base or style_name
 
 
 def child_fields(p: dict) -> dict[str, object]:
@@ -151,7 +154,10 @@ def child_fields(p: dict) -> dict[str, object]:
                        ("weight", "custitem_ss_weight")):
         if p.get(key) not in (None, ""):
             out[field] = p[key]
-    return {k: v for k, v in out.items() if v not in (None, "")}
+    # Only the fields the pipeline still keeps (field_policy): the S&S SKU and
+    # brand by default, not the reference data.
+    return {k: v for k, v in out.items()
+            if v not in (None, "") and field_policy.keep(k)}
 
 
 def _num(p: dict, key: str) -> float | None:

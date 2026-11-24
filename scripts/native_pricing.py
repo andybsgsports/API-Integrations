@@ -10,6 +10,8 @@ is idempotent anyway).
 
 from __future__ import annotations
 
+import price_guard
+
 BASE_PRICE_LEVEL = "1"
 
 # weightUnit is a REFERENCE field, not a string. A REST GET returns
@@ -125,10 +127,25 @@ def add_native_diffs(
     weight_unit is NetSuite's reference shape ``{"id": ...}``; a bare string is
     accepted and treated as the id, since SuiteQL reports the current value as
     that id and the diff has to compare like with like."""
-    if price is not None and not same(base_by_rid.get(rid), price):
-        body["price"] = base_price_body(price)
-    if cost is not None and not same(row.get("cost"), cost):
-        body["cost"] = cost
+    # Every price and cost is counted for the price guard; while the guard is
+    # holding this vendor (see price_guard.py) neither is written.
+    hold = price_guard.holding()
+    if price is not None and price_guard.keeps_higher(base_by_rid.get(rid), price):
+        # The feed's price is lower than the Base Price already on the item.
+        # A price set above MSRP may be deliberate, so it is listed for review
+        # and left alone (Andy, 2026-11-23).
+        price_guard.record_kept(base_by_rid.get(rid), price,
+                                ref=rid, name=row.get("itemid"))
+    elif price is not None:
+        price_guard.record("price", base_by_rid.get(rid), price,
+                           ref=rid, name=row.get("itemid"))
+        if not hold and not same(base_by_rid.get(rid), price):
+            body["price"] = base_price_body(price)
+    if cost is not None:
+        price_guard.record("cost", row.get("cost"), cost,
+                           ref=rid, name=row.get("itemid"))
+        if not hold and not same(row.get("cost"), cost):
+            body["cost"] = cost
     if weight is not None and not same(row.get("weight"), weight):
         body["weight"] = weight
     if weight_unit:

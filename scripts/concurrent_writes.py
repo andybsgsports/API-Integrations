@@ -11,6 +11,7 @@ shared mutable state.
 
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import threading
@@ -51,6 +52,44 @@ def _offending_fields(exc: Exception) -> set[str]:
     return found
 
 
+#: Items whose Base Price line is keyed at quantity 1 instead of 0, written on
+#: the second try. Reported at exit so the count is visible in the run log.
+PRICE_LINE_RETRIES: dict[str, int] = {"count": 0}
+
+
+def _price_line_at_quantity_one(body: dict, exc: Exception) -> dict | None:
+    """The same body with its price line keyed at quantity 1, or None.
+
+    Most items key the Base Price line at quantity 0. Some (production styles
+    J317 and L317, 2026-11-23) key it at quantity 1, and NetSuite answers the
+    quantity-0 body with NONEXISTENT_SUBLIST_KEY, failing the whole record.
+    """
+    # NetSuiteError keeps the error code in ``payload``; str(exc) is only
+    # "NetSuite 404: Not Found". Reading str() alone meant this never fired on
+    # the first production run with the fix (2026-11-24).
+    text = f"{exc} {getattr(exc, 'payload', '')!r}"
+    if "NONEXISTENT_SUBLIST_KEY" not in text:
+        return None
+    lines = (body.get("price") or {}).get("items") if isinstance(
+        body.get("price"), dict) else None
+    if not lines:
+        return None
+    if not all((ln.get("quantity") or {}).get("value") == 0 for ln in lines):
+        return None
+    alt = dict(body)
+    alt["price"] = {"items": [{**ln, "quantity": {"value": 1}} for ln in lines]}
+    return alt
+
+
+def _report_price_line_retries() -> None:
+    if PRICE_LINE_RETRIES["count"]:
+        print(f"NOTE: {PRICE_LINE_RETRIES['count']:,} item(s) had their Base "
+              "Price line at quantity 1; written on the second try")
+
+
+atexit.register(_report_price_line_retries)
+
+
 def write_records(
     client,
     record_type: str,
@@ -88,6 +127,12 @@ def write_records(
             client.update_record(record_type, rid, body)
             return rid
         except Exception as exc:  # noqa: BLE001 - salvage the rest of the record
+            alt = _price_line_at_quantity_one(body, exc)
+            if alt is not None:
+                client.update_record(record_type, rid, alt)
+                with drop_lock:
+                    PRICE_LINE_RETRIES["count"] += 1
+                return rid
             blamed = _offending_fields(exc)
             if not blamed:
                 raise

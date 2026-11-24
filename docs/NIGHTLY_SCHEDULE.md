@@ -41,7 +41,7 @@ writer above must have stamped first. Every heartbeat source
 (sanmar/ss/momentec/ua/champro/tck/capamerica/mizuno) is covered by the six
 vendor slots — dcos-backfill carries the last three.
 
-Full passes only recur every ~3 days (the heartbeat refresh in
+Full passes only recur every ~14 days (the heartbeat refresh in
 `feed_seen.STALE_AFTER_DAYS`); other nights are diff-only and small since the
 checkbox-compare fix (PR #80) and the Preferred-Vendor pricing ownership rule
 (`scripts/pricing_ownership.py`, 2026-07-31) — before that rule, SanMar and

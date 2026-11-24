@@ -1,0 +1,7 @@
+# SanMar SFTP server PUBLIC host key, base64, one line.
+# From the "SanMar SFTP Host Key Probe" workflow. With no key line below, the
+# client connects without checking the server key and says so.
+# ftp.sanmar.com:2200, ssh-rsa, SHA256:5n3MbQ0zsoXr1mMpdzKWx7lSFkdHfuZC9FXYUV6ba5E
+# Read by probe run 44383744929 on 2026-11-18. If SanMar changes its server key
+# the nightly will refuse to connect: run the probe again and update this line.
+AAAAB3NzaC1yc2EAAAADAQABAAABAQCju+iwnPc19J3BmciSFih+d9VqZ1XOnC6DkvQmOg5fY1saS0jnI3fUuPZx0VSR/ulmckZBrGgPwNWXXlgvL+fbFpJkwQdXY5gvZI8XmyXigP0AQ6ZMtL+yOeodZLwc0ZXq7HB0O6hG3fql3v6zqx4SUzqjq+lrICVPTHSFScwg4RymKKSOaKCARE/91UaDKzvBXEmqwsSvkxwA0ZCsHQtO+WB19guGCGCQZqsxit4SBAECfu+fwq6SHtkQe+gesC0YkL6uN0UTN2+pZ35Xpb9wu37kS6XsC8ZFZKEe2VuAngdeNy+qJD5tcH3DW8B/0EPs9ar+8gi+nVf9NuhKzayZ

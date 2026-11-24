@@ -10,13 +10,17 @@ on:
         description: "Comma list of item names to dump"
         required: false
         default: ""
+      script:
+        description: "Probe script to run (item_field_probe.py or vendor_line_probe.py)"
+        required: false
+        default: "item_field_probe.py"
   push:
     branches: ["claude/festive-carson-oj4y8n"]
     paths: [".item-field-probe-trigger"]
 
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,4 +51,10 @@ jobs:
           NETSUITE_ALLOW_PRODUCTION_WRITES=false
           EOF2
       - name: Run item field probe (read-only)
-        run: python scripts/item_field_probe.py
+        env:
+          PROBE_SCRIPT: ${{ github.event.inputs.script || 'item_field_probe.py' }}
+        run: |
+          case "$PROBE_SCRIPT" in
+            item_field_probe.py|vendor_line_probe.py) python "scripts/$PROBE_SCRIPT" ;;
+            *) echo "unknown probe script"; exit 1 ;;
+          esac

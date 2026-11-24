@@ -17,6 +17,9 @@ than another's:
 
 from __future__ import annotations
 
+import os
+import time
+
 #: Absolute floor for "small" -- below this, a 429 set is noise at any volume.
 MIN_TOLERATED = 50
 #: ...and above the floor, it must also be under this share of the attempts.
@@ -54,3 +57,52 @@ def exit_code(
         )
         return 0
     return 1
+
+
+def print_field_counts(label: str, counts: dict[str, int], top: int = 12) -> None:
+    """One line naming which fields a writer changed, most-changed first.
+
+    A writer that reports "wrote 583 item(s)" every night says nothing about
+    WHAT it keeps writing; this line does (inventory quantities are expected
+    nightly, a price or a name rewritten every night is a bug).
+    """
+    if not counts:
+        return
+    ordered = sorted(counts.items(), key=lambda kv: -kv[1])
+    shown = ", ".join(f"{k} {n:,}" for k, n in ordered[:top])
+    more = f", and {len(ordered) - top} more field(s)" if len(ordered) > top else ""
+    print(f"NOTE: {label} fields changed: {shown}{more}")
+
+
+def rotated(n: int, day_ordinal: int, step: int = 7) -> list[int]:
+    """Indexes 0..n-1 starting from a point that moves every day.
+
+    A pass that is cut off by a time limit always loses its tail. Starting
+    from a different place each day means the part that is lost changes, so
+    every item is reached within a few days instead of the same items never
+    being reached at all.
+    """
+    if n <= 0:
+        return []
+    start = (day_ordinal * max(1, n // step)) % n
+    return list(range(start, n)) + list(range(0, start))
+
+
+def leg_deadline() -> float | None:
+    """Wall-clock time (epoch seconds) this workflow leg must stop writing by.
+
+    ``vendor_pipeline.py`` sets ``LEG_DEADLINE_EPOCH`` once, from
+    ``LEG_TIME_BUDGET_MIN``, when the leg starts, so every script in the leg
+    measures against the same clock. A step that is still writing when the
+    job limit arrives is cancelled with nothing reported; one that stops at
+    the deadline says what it did not reach and the next run carries on.
+    """
+    raw = os.environ.get("LEG_DEADLINE_EPOCH", "").strip()
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def past_deadline(deadline: float | None) -> bool:
+    return deadline is not None and time.time() >= deadline

@@ -28,6 +28,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import field_policy
 from concurrent_writes import write_records
 from native_pricing import (
     add_native_diffs,
@@ -36,7 +37,7 @@ from native_pricing import (
     weight_display,
 )
 from pricing_ownership import VENDOR_SS, owns_pricing, read_preferred
-from run_status import exit_code
+from run_status import exit_code, print_field_counts
 from warehouse_fields import SS_QTY_FIELDS, SS_WHSE_FIELDS
 
 from sanmar_netsuite.config import get_config as ns_config
@@ -60,6 +61,9 @@ READ_WORKERS = int(os.environ.get("SS_READ_CONCURRENCY", "6") or "6")
 # Styles per batched vendorname lookup (pass 2). NetSuite tolerates large IN
 # lists; 250 matches the chunk size the other writers use.
 STYLE_CHUNK = 250
+
+#: field name -> how many items had it changed this run (for the summary).
+FIELD_COUNTS: dict[str, int] = {}
 
 
 class _Phase:
@@ -463,11 +467,15 @@ def main() -> int:
     ids = sorted(matched)
     # custitem_sanmar_style / custitem_mtec_item_sku are read for the
     # pricing-ownership ranking fallback (higher-ranked feeds than S&S).
-    cols = ", ".join(
-        FIELDS + SEEN_FIELDS + ["custitem_sanmar_style", "custitem_mtec_item_sku"]
-    )
     # Tick the On Sale checkbox only once the field exists in NetSuite.
     on_sale_field = ON_SALE_FIELD if _field_exists(client, ON_SALE_FIELD) else ""
+    requested = (
+        FIELDS + SEEN_FIELDS + ["custitem_sanmar_style", "custitem_mtec_item_sku"]
+        + ([on_sale_field] if on_sale_field else [])
+    )
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report("ss backfill", requested, custom_cols)
+    cols = field_policy.select(custom_cols)
     considered = written = unchanged = upc_filled = priced = failures = 0
     deferred = chunks_skipped = 0
     on_sale_count = 0
@@ -500,7 +508,7 @@ def main() -> int:
         # Skip the chunk -- diff-aware, so the next run picks it up.
         try:
             rows = client.suiteql(
-                f"SELECT id, upccode, cost, weight, weightunit, manufacturer, {cols} "
+                f"SELECT id, upccode, cost, weight, weightunit, manufacturer{cols} "
                 f"FROM item WHERE id IN ({in_list})"
             )
         except Exception as exc:  # noqa: BLE001
@@ -545,6 +553,7 @@ def main() -> int:
             else:
                 deferred += 1
             stamp(body, row, "ss", claim_source=owner)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue
@@ -575,6 +584,8 @@ def main() -> int:
                     if "weightUnit" in body:
                         print(f"    weightUnit: current={row.get('weightunit')!r} "
                               f"want={weight_unit!r}", flush=True)
+            for _f in body:
+                FIELD_COUNTS[_f] = FIELD_COUNTS.get(_f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -611,6 +622,7 @@ def main() -> int:
     if dropped:
         print(f"NOTE: field(s) dropped after NetSuite rejected them: {dropped}")
     verb = "wrote" if allow_write else "WOULD write (dry run)"
+    print_field_counts("ss backfill", FIELD_COUNTS)
     print(f"\nss backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
           f"price/cost/weight updated: {priced}; "

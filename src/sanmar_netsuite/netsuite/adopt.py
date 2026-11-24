@@ -26,8 +26,11 @@ Everything here is read-only; it produces a report + mapping the caller acts on.
 
 from __future__ import annotations
 
+import csv
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..models import StyleRecord
 from ..transform.sizes import normalize_size
@@ -89,6 +92,51 @@ def rename_is_safe(current: str, new: str, feed_colors: set[str]) -> bool:
     return True
 
 
+def color_key(name: str) -> str:
+    """Colour name reduced to what identifies it: case and spacing ignored.
+
+    SanMar writes two-part colours with a space after the slash
+    (``Black/ White``); the BSG list mostly has none (``Black/White``).
+    Production link report, 2026-11-20: every unmatched slash colour was this.
+    """
+    return re.sub(r"\s*/\s*", "/", " ".join(name.split())).casefold()
+
+
+#: Colour pairings a person has confirmed, one row per style: the NetSuite
+#: colour on the existing items and the SanMar colour they really are.
+PAIRINGS_FILE = Path(__file__).resolve().parents[3] / "data" / (
+    "sanmar_confirmed_color_pairings.csv")
+
+
+def load_confirmed_pairings(path: Path | None = None) -> dict[tuple[str, str], str]:
+    """``(style, sanmar colour key) -> NetSuite colour name`` from the file.
+
+    Only ever applied inside the named style, so a pairing for one style can
+    never change how another style matches."""
+    path = path or PAIRINGS_FILE
+    out: dict[tuple[str, str], str] = {}
+    try:
+        with path.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                style = (row.get("style") or "").strip()
+                ns = (row.get("netsuite_color") or "").strip()
+                sm = (row.get("sanmar_color") or "").strip()
+                if style and ns and sm:
+                    out[(style.upper(), color_key(sm))] = ns
+    except OSError:
+        pass
+    return out
+
+
+#: Size names the BSG list carries under more than one spelling. A feed size
+#: on the left may sit on an item under any name on the right.
+SIZE_ALIASES: dict[str, tuple[str, ...]] = {
+    "one size": ("osfa", "one size fits all", "os"),
+}
+
+_TALL = " tall"
+
+
 def heuristic_abbrev(full_color: str) -> str:
     """BSG-style abbreviation guess: first two letters of each word, joined.
 
@@ -108,6 +156,7 @@ class OptionMaps:
     def __init__(self, client) -> None:
         self.color_by_name: dict[str, list[str]] = {}
         self.color_by_abbrev: dict[str, list[str]] = {}
+        self.color_by_key: dict[str, list[str]] = {}
         self.size_by_name: dict[str, list[str]] = {}
         self.color_info: dict[str, tuple[str, str]] = {}  # id -> (name, abbrev)
         self.available = False
@@ -129,6 +178,7 @@ class OptionMaps:
             self.color_info[vid] = (raw_name, raw_abbrev)
             if raw_name:
                 self.color_by_name.setdefault(raw_name.lower(), []).append(vid)
+                self.color_by_key.setdefault(color_key(raw_name), []).append(vid)
             if raw_abbrev:
                 self.color_by_abbrev.setdefault(raw_abbrev.lower(), []).append(vid)
         for r in client.suiteql(f"SELECT id, name FROM {SIZE_LIST}"):
@@ -153,13 +203,23 @@ class OptionMaps:
         add(self.color_by_abbrev.get(mf), "option:abbrev")
         add(self.color_by_name.get(mf), "option:name")
         add(self.color_by_abbrev.get(full), "option:abbrev")
+        # Same colour, different spacing ("Black/ White" vs "Black/White").
+        add(self.color_by_key.get(color_key(full_color)), "option:name-spacing")
         heur = heuristic_abbrev(full_color)
         add(self.color_by_name.get(heur), "option:heur")
         add(self.color_by_abbrev.get(heur), "option:heur")
         return out
 
     def size_candidates(self, size_normalized: str) -> list[str]:
-        return self.size_by_name.get(size_normalized.strip().lower(), [])
+        name = size_normalized.strip().lower()
+        out = list(self.size_by_name.get(name, []))
+        for alias in SIZE_ALIASES.get(name, ()):
+            out += [v for v in self.size_by_name.get(alias, []) if v not in out]
+        return out
+
+    def is_tall(self, size_id: str) -> bool:
+        return any(size_id in ids for name, ids in self.size_by_name.items()
+                   if name.endswith(_TALL))
 
 
 @dataclass
@@ -175,6 +235,19 @@ class MatchRow:
 
 
 @dataclass
+class NsChild:
+    """One existing NetSuite child item under a style the feed carries."""
+
+    ns_id: str
+    style: str
+    itemid: str
+    color_id: str = ""
+    size_id: str = ""
+    upc: str = ""
+    inactive: bool = False
+
+
+@dataclass
 class ReconcileReport:
     rows: list[MatchRow] = field(default_factory=list)
     dup_parents: dict[str, list[str]] = field(default_factory=dict)
@@ -185,6 +258,14 @@ class ReconcileReport:
     # values matched via abbreviation/heuristic whose Name should become the
     # full color (renaming a list value cascades to every item using it).
     color_renames: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Existing NetSuite child items no feed SKU matched (the link report says
+    # why: which colour and size they carry).
+    unclaimed: list[NsChild] = field(default_factory=list)
+    # Every existing child a feed SKU did match, keyed by item id.
+    claimed_items: dict[str, NsChild] = field(default_factory=dict)
+    # Feed SKUs whose colour and size fit more than one NetSuite item:
+    # unique_key -> every candidate item id. The first one is the match.
+    ambiguous: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def matched(self) -> list[MatchRow]:
@@ -226,6 +307,13 @@ def _fetch_style_items(client, style: str) -> list[dict]:
     safe = _sql_escape(style)
     try:
         return client.suiteql(
+            f"SELECT id, itemid, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size, "
+            f"upccode, isinactive, parent FROM item WHERE vendorname = '{safe}'"
+        )
+    except Exception:  # noqa: BLE001 - extra columns unreadable -> core only
+        pass
+    try:
+        return client.suiteql(
             f"SELECT id, itemid, {COLOR_FIELD} AS color, {SIZE_FIELD} AS size "
             f"FROM item WHERE vendorname = '{safe}'"
         )
@@ -236,7 +324,8 @@ def _fetch_style_items(client, style: str) -> list[dict]:
 
 
 def match_existing(
-    client, styles: Iterable[StyleRecord], *, style_limit: int = 0
+    client, styles: Iterable[StyleRecord], *, style_limit: int = 0,
+    pairings: dict[tuple[str, str], str] | None = None,
 ) -> ReconcileReport:
     """Match every SKU to an existing NetSuite item (option ids, then names)."""
     report = ReconcileReport()
@@ -245,6 +334,7 @@ def match_existing(
         style_list = style_list[:style_limit]
 
     options = OptionMaps(client)
+    pairings = load_confirmed_pairings() if pairings is None else pairings
 
     # Every full color SanMar uses, for the rename guard: a list value whose
     # current name is one of these is a real color, not an abbreviation.
@@ -262,12 +352,24 @@ def match_existing(
         opt_index: dict[tuple[str, str], list[str]] = {}
         children: set[str] = set()
         others: list[str] = []
+        detail: dict[str, NsChild] = {}
         for r in rows:
             rid = str(r["id"])
             itemid = str(r.get("itemid", ""))
             color_id = str(r.get("color") or "")
             size_id = str(r.get("size") or "")
+            detail[rid] = NsChild(
+                ns_id=rid, style=style.style, itemid=itemid,
+                color_id=color_id, size_id=size_id,
+                upc=str(r.get("upccode") or "").strip(),
+                inactive=str(r.get("isinactive") or "").upper() in {"T", "TRUE"},
+            )
             parsed = split_color_size(itemid, style.style)
+            if itemid == style.style and not r.get("parent"):
+                # The style's own parent item. It can carry a colour and a
+                # size too, and must never be the item a feed SKU links to.
+                others.append(rid)
+                continue
             if color_id and size_id:
                 opt_index.setdefault((color_id, size_id), []).append(rid)
                 children.add(rid)
@@ -286,6 +388,12 @@ def match_existing(
             report.dup_parents[style.style] = others
         report.ns_children_total += len(children)
 
+        # Tall-only style: every feed size is a Tall, and no item in NetSuite
+        # carries a Tall size.
+        tall_style = bool(style.skus) and all(
+            normalize_size(k.size).lower().endswith(_TALL) for k in style.skus
+        ) and not any(options.is_tall(sz) for _c, sz in opt_index)
+
         claimed: set[str] = set()
         for sku in style.skus:
             size_n = normalize_size(sku.size)
@@ -300,7 +408,24 @@ def match_existing(
             # 1) option-id match (robust to naming differences)
             if options.available and opt_index:
                 size_ids = options.size_candidates(size_n)
-                for color_id, method in options.color_candidates(
+                via_tall = False
+                if tall_style and size_n.lower().endswith(_TALL):
+                    # A tall-only style whose items carry the plain size
+                    # (TST350 "Large" is SanMar's "LT"). Safe only because
+                    # nothing in the style is a regular cut.
+                    plain = size_n[: -len(_TALL)]
+                    extra = [v for v in options.size_candidates(plain)
+                             if v not in size_ids]
+                    via_tall = bool(extra)
+                    size_ids = size_ids + extra
+                confirmed_ns = pairings.get(
+                    (style.style.upper(), color_key(sku.color_name)))
+                confirmed = [
+                    (vid, "option:confirmed")
+                    for vid in options.color_by_name.get(
+                        (confirmed_ns or "").lower(), [])
+                ]
+                for color_id, method in confirmed + options.color_candidates(
                     sku.color_name, sku.mainframe_color
                 ):
                     hit = None
@@ -311,11 +436,16 @@ def match_existing(
                     if hit:
                         row.ns_id = hit[0]
                         row.method = method
+                        if via_tall and size_id in extra:
+                            row.method = "option:tall-style"
+                        if len(hit) > 1:
+                            report.ambiguous[sku.unique_key] = list(hit)
                         # Matched via abbreviation/heuristic => the list value's
                         # Name isn't the full color yet; propose the rename.
                         cur_name, _ = options.color_info.get(color_id, ("", ""))
                         if (
-                            cur_name.strip().lower()
+                            method != "option:confirmed"
+                            and cur_name.strip().lower()
                             != sku.color_name.strip().lower()
                             and rename_is_safe(
                                 cur_name, sku.color_name, feed_colors
@@ -336,11 +466,18 @@ def match_existing(
                     if ids:
                         row.ns_id = ids[0]
                         row.method = method
+                        if len(ids) > 1:
+                            report.ambiguous[sku.unique_key] = list(ids)
                         break
             if row.ns_id:
                 claimed.add(row.ns_id)
             report.rows.append(row)
 
         report.ns_children_claimed += len(claimed & children)
+        for rid in sorted(children, key=lambda x: (len(x), x)):
+            if rid in claimed:
+                report.claimed_items[rid] = detail[rid]
+            else:
+                report.unclaimed.append(detail[rid])
 
     return report

@@ -36,8 +36,24 @@ COLOR_LIST = "customlist_bsg_matrix_color"
 SIZE_LIST = "customlist_bsg_matrix_size"
 
 
+class MatrixOptionError(RuntimeError):
+    """A matrix list value could not be created.
+
+    Raised in place of the bare ``NetSuite 400: Bad Request`` the REST client
+    gives, because that message names neither the list nor the value: the
+    2026-09-22 nightly died on one unnamed size and took all 1,332 net-new
+    styles with it (run 35707265204), leaving nothing to act on. NetSuite puts
+    the real reason in ``o:errorDetails``, so it is carried through here.
+    """
+
+
 def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _mentions_abbreviation(exc: Exception) -> bool:
+    text = f"{exc} {getattr(exc, 'payload', '')}"
+    return "abbreviation" in text.lower()
 
 
 def normalize_option_name(name: str) -> str:
@@ -57,6 +73,32 @@ def normalize_option_name(name: str) -> str:
     it is the same failure mode as the Forest/Forrest mess.
     """
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+_SLASH_SPACING = re.compile(r"\s*/\s*")
+_NAME_WORD = re.compile(r"[A-Za-z][A-Za-z']*")
+
+
+def tidy_color_name(name: str) -> str:
+    """The spelling a NEW colour value is created with on the BSG list.
+
+    Andy, 2026-11-20: new colours are added "tidied to BSG style" -- spelled
+    out in Title Case, without the feed's stray spaces. SanMar writes
+    ``'Aluminum Grey/ Bright White'``; the list gets
+    ``'Aluminum Grey/Bright White'``. Extra spaces go, an ALL CAPS name
+    becomes Title Case (a token with a digit keeps its capitals), and a
+    mixed-case name keeps its own capitals.
+
+    Only spacing and case change, so ``normalize_option_name`` gives the same
+    key before and after: the feed's spelling still resolves to this value.
+    """
+    text = _SLASH_SPACING.sub("/", " ".join((name or "").split()))
+    if text and text == text.upper() and any(ch.isalpha() for ch in text):
+        text = " ".join(
+            tok if any(ch.isdigit() for ch in tok)
+            else _NAME_WORD.sub(lambda m: m.group(0).capitalize(), tok)
+            for tok in text.split(" "))
+    return text
 
 
 def collect_options(styles: Iterable[StyleRecord]) -> tuple[set[str], set[str]]:
@@ -81,6 +123,9 @@ class MatrixOptionResolver:
     allow_create: bool = True
     _cache: dict[tuple[str, str], str] = field(default_factory=dict, init=False, repr=False)
     _norm_cache: dict[str, dict[str, tuple[str, str]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _active_norms: dict[str, set[str]] = field(
         default_factory=dict, init=False, repr=False
     )
 
@@ -110,10 +155,54 @@ class MatrixOptionResolver:
             return variant, "existing"
         if not self.allow_create:
             return None, "missing"
-        new_id = self.client.create_record(list_type, {"name": name})
-        log.info("Created %s value %r -> internal id %s", list_type, name, new_id)
+        created_as = tidy_color_name(name) if list_type == COLOR_LIST else name
+        try:
+            new_id = self._create_value(list_type, created_as)
+        except Exception as exc:  # noqa: BLE001 - re-raised with the value named
+            detail = getattr(exc, "payload", "")
+            raise MatrixOptionError(
+                f"could not create {list_type} value {name!r}: {exc} "
+                f":: {str(detail)[:400]}"
+            ) from exc
+        log.info("Created %s value %r -> internal id %s", list_type, created_as, new_id)
         self._cache[key] = new_id
+        # canonical_name must answer with the LIST's spelling for the rest of
+        # this run too, or the RESTlet is sent the feed's spelling and rejects
+        # the child as "not in the list".
+        index = self._norm_cache.get(list_type)
+        if index is not None:
+            norm = normalize_option_name(created_as)
+            index.setdefault(norm, (new_id, created_as))
+            self._active_norms.setdefault(list_type, set()).add(norm)
         return new_id, "created"
+
+    def _create_value(self, list_type: str, name: str) -> str:
+        """Create a list value, supplying an Abbreviation when NetSuite asks.
+
+        A name-only create is what has always worked, so it stays the first
+        attempt. But some values come back "Please enter value(s) for:
+        Abbreviation" -- size ``0`` and colour ``Oat`` did every night from
+        2026-11-06, which kept styles MM400x / W960 / W96x from ever being
+        created. On that specific complaint, retry with the name as the
+        abbreviation, then with a shortened, uniquified one (the same fallback
+        ``color_correction_apply.create_color_value`` uses) in case the
+        abbreviation itself collides.
+        """
+        try:
+            return str(self.client.create_record(list_type, {"name": name}))
+        except Exception as exc:  # noqa: BLE001 - inspected, re-raised if unrelated
+            if not _mentions_abbreviation(exc):
+                raise
+        try:
+            return str(self.client.create_record(
+                list_type, {"name": name, "abbreviation": name}
+            ))
+        except Exception as exc:  # noqa: BLE001
+            if not _mentions_abbreviation(exc):
+                raise
+        return str(self.client.create_record(
+            list_type, {"name": name, "abbreviation": f"{name[:12]}~"}
+        ))
 
     def _find(self, list_type: str, name: str) -> str | None:
         # Retired duplicate values are marked inactive (color consolidation);
@@ -187,7 +276,24 @@ class MatrixOptionResolver:
             if active:
                 have_active.add(norm)
         self._norm_cache[list_type] = index
+        self._active_norms[list_type] = have_active
         return index
+
+    def is_retired(self, list_type: str, name: str) -> bool:
+        """Is ``name`` on the list ONLY as inactive value(s)?
+
+        Someone retired that value on purpose (usually a duplicate merged in
+        the colour cleanup). The matrix RESTlet resolves ACTIVE values only,
+        so a child that needs it is rejected with "not in
+        customlist_bsg_matrix_color" -- and it must not be reactivated or
+        re-created behind Andy's back (Andy, 2026-11-13: skip it and list it).
+        A value added during this run is not in the index and is not retired.
+        """
+        norm = normalize_option_name((name or "").strip())
+        if not norm:
+            return False
+        index = self._norm_index(list_type)
+        return norm in index and norm not in self._active_norms.get(list_type, set())
 
     # convenience wrappers for the per-SKU (REST sync) path
     def color_id(self, color_name: str) -> str | None:

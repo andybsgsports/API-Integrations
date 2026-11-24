@@ -23,7 +23,9 @@ on:
   # item-lifecycle (Andy approved the dry-run report 2026-08-10) -- it runs
   # LAST so every vendor has restamped its feed heartbeats first.
   schedule:
-    - cron: "0 4 * * *"
+    # Off the top of the hour: GitHub delays on-the-hour schedules the most
+    # (this one started about 8 hours late every day, 2026-11-14 to 11-19).
+    - cron: "17 4 * * *"
   workflow_dispatch:
     inputs:
       vendor:
@@ -54,6 +56,10 @@ on:
         description: "Re-post existing children through the RESTlet update path (payload-schema fixes)"
         required: false
         default: "false"
+      price_guard:
+        description: "Price guard (on = check first and hold prices when more than a quarter move over 25%)"
+        required: false
+        default: "off"
       ss_brands:
         description: "S&S: comma-separated brand allowlist for creation (blank = the default list; 'ALL' is not a value -- pass every brand explicitly)"
         required: false
@@ -67,7 +73,7 @@ concurrency:
 
 jobs:
   pipeline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -142,12 +148,25 @@ jobs:
       - name: Run vendor pipeline
         env:
           UPDATE_MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          # The SanMar update stops cleanly at this many minutes (job limit
+          # is 350) and reports what it did not reach; see run_status.rotated.
+          UPDATE_TIME_BUDGET_MIN: "290"
+          # Every script in the leg stops writing by this many minutes (job
+          # limit is 350) and says what it did not reach; see
+          # run_status.leg_deadline.
+          LEG_TIME_BUDGET_MIN: "335"
+          # Sandbox only: the vendor line backlog is about 159,000 lines, so
+          # allow more per night. The leg deadline above still bounds it.
+          VENDOR_LINE_MAX_ITEMS: "20000"
           CREATE_MAX_STYLES: ${{ env.CREATE_MAX_STYLES }}
           CREATE_REFRESH_STYLES: ${{ github.event.inputs.refresh_existing || 'false' }}
           # Blank = use the allowlist baked into vendor_pipeline.SS_DEFAULT_BRANDS.
           SS_CREATE_BRANDS: ${{ github.event.inputs.ss_brands || '' }}
           DCOS_KEY_ID: ${{ secrets.DCOS_KEY_ID }}
           DCOS_KEY_PASSWORD: ${{ secrets.DCOS_KEY_PASSWORD }}
+          # Off unless asked for on a manual run: the check adds a read pass,
+          # and the sandbox SanMar update already runs close to the job limit.
+          PRICE_GUARD: ${{ github.event.inputs.price_guard || 'off' }}
         run: |
           python scripts/vendor_pipeline.py \
             --vendor "$VENDOR" --phases "$PHASES"

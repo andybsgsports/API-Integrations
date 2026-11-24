@@ -21,8 +21,11 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
+import field_policy
+import price_guard
 import requests
 from pricing_ownership import VENDOR_UA, owns_pricing, read_preferred
+from run_status import print_field_counts
 
 from sanmar_netsuite.config import get_config as ns_config
 from sanmar_netsuite.netsuite.adopt import COLOR_FIELD, SIZE_FIELD, OptionMaps
@@ -42,6 +45,9 @@ FIELDS = [
     "custitem_ua_part_id", "custitem_ua_style", "custitem_ua_gtin",
     "custitem_ua_qty_available",
 ]
+
+#: field name -> how many items had it changed this run (for the summary).
+FIELD_COUNTS: dict[str, int] = {}
 
 
 def _soap(url: str, action: str, body: str) -> str:
@@ -285,10 +291,13 @@ def main() -> int:
     ids = sorted(matched)
     # The three higher-ranked feeds' key fields feed the pricing-ownership
     # ranking fallback (UA is the lowest-ranked pricing writer).
-    cols = ", ".join(
-        FIELDS + SEEN_FIELDS
+    requested = (
+        ["custitem_ss_brand"] + FIELDS + SEEN_FIELDS
         + ["custitem_sanmar_style", "custitem_mtec_item_sku", "custitem_ss_sku"]
     )
+    custom_cols = field_policy.usable(client, requested)
+    field_policy.report("ua backfill", requested, custom_cols)
+    cols = field_policy.select(custom_cols)
     considered = written = unchanged = upc_filled = priced = failures = 0
     deferred = 0
     for i in range(0, len(ids), 250):
@@ -307,7 +316,7 @@ def main() -> int:
             print(f"  (base-price read failed, writing unconditionally: {str(exc)[:80]})")
         pref_by_rid = read_preferred(client, in_list)
         for row in client.suiteql(
-            f"SELECT id, upccode, cost, manufacturer, custitem_ss_brand, {cols} "
+            f"SELECT id, upccode, cost, manufacturer{cols} "
             f"FROM item WHERE id IN ({in_list})"
         ):
             rid = str(row["id"])
@@ -328,7 +337,9 @@ def main() -> int:
             if list_price is not None and not owner:
                 deferred += 1
             elif list_price is not None:
-                if not _same(base_by_rid.get(rid), list_price):
+                hold = price_guard.holding()
+                price_guard.record("price", base_by_rid.get(rid), list_price)
+                if not hold and not _same(base_by_rid.get(rid), list_price):
                     body["price"] = {
                         "items": [
                             {
@@ -341,9 +352,11 @@ def main() -> int:
                     }
                 if cost_pct:
                     cost = round(list_price * cost_pct / 100.0, 2)
-                    if not _same(row.get("cost"), cost):
+                    price_guard.record("cost", row.get("cost"), cost)
+                    if not hold and not _same(row.get("cost"), cost):
                         body["cost"] = cost
             stamp(body, row, "ua", claim_source=owner)
+            body = field_policy.clean(body, custom_cols)
             if not body:
                 unchanged += 1
                 continue
@@ -354,6 +367,8 @@ def main() -> int:
                 upc_filled += 1
             if "price" in body or "cost" in body:
                 priced += 1
+            for _f in body:
+                FIELD_COUNTS[_f] = FIELD_COUNTS.get(_f, 0) + 1
             if not allow_write:
                 written += 1
                 continue
@@ -367,6 +382,7 @@ def main() -> int:
                     print(f"  FAILED item {rid}: {str(exc)[:100]} :: {str(detail)[:300]}")
 
     verb = "wrote" if allow_write else "WOULD write (dry run)"
+    print_field_counts("ua backfill", FIELD_COUNTS)
     print(f"\nua backfill: {verb} {written} item(s); unchanged: {unchanged}; "
           f"upcCode filled (was empty): {upc_filled}; "
           f"price/cost updated: {priced}; "
