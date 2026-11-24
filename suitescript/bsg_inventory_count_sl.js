@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-11-24.4',
+        VERSION: '2026-11-24.5',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -780,12 +780,22 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // (out may hold Do Not Commit lines with committed 0 at this point --
         // the fulfillment search below is what says whether they are countable)
         try {
+            // Only the fulfillments of the open orders found above. Without
+            // this the search is every fulfillment BSG has ever made (the
+            // third stage, Shipped, never leaves that status), oldest first:
+            // under the old 5,000-row cap it returned years-old shipments
+            // and never reached the ones on today's orders, and uncapped it
+            // took half a minute.
+            var soIds = [], soSeen = {};
+            out.forEach(function (o) { if (!soSeen[o.id]) { soSeen[o.id] = true; soIds.push(o.id); } });
+            var fromChunk = null;
             function ifSpec() {
                 var filters = [
                     ['type', 'anyof', ['ItemShip']], 'and',
                     ['mainline', 'is', 'F'], 'and',
                     ['status', 'anyof', UNSHIPPED_IF_STATUSES]
                 ];
+                if (fromChunk && !isDead('transaction', 'filter', 'createdfrom')) { filters.push('and'); filters.push(['createdfrom', 'anyof', fromChunk]); }
                 if (!isDead('transaction', 'filter', 'cogs')) { filters.push('and'); filters.push(['cogs', 'is', 'F']); }
                 itemTypeFilter(filters);
                 if (itemId) { filters.push('and'); filters.push(['item', 'anyof', [String(itemId)]]); }
@@ -796,8 +806,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 });
                 return { type: search.Type.TRANSACTION, filters: filters, columns: cols };
             }
-            withSearch('transaction', ifSpec, function (srch) {
-                var seen = {};
+            var seen = {};
+            for (var c = 0; c < soIds.length; c += 900) {
+              fromChunk = soIds.slice(c, c + 900);
+              withSearch('transaction', ifSpec, function (srch) {
                 fetchAll(srch).forEach(function (r) {
                     var qty = Math.abs(parseFloat(tval(r, 'quantity')) || 0);
                     if (qty <= 0) { return; }
@@ -809,7 +821,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     var ref = m ? orderRef(m[1], '') : ('IF ' + String(tval(r, 'tranid') || r.id));
                     pulled.push({ ref: ref, item: String(tval(r, 'item')), qty: qty, pulledStatus: pulledWord(ttxt(r, 'statusref')) });
                 });
-            });
+              });
+              if (isDead('transaction', 'filter', 'createdfrom')) { break; }   // unfiltered: one pass already read everything
+            }
         } catch (e) {
             log.audit({ title: 'invcount: picked/packed fulfillment search skipped', details: userErr(e) });
         }
@@ -844,7 +858,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             if (!target) {
                 for (var j = 0; j < out.length; j++) { if (out[j].ref === f.ref && out[j].item === f.item) { target = out[j]; break; } }
             }
-            if (target) { target.pulled = round4((target.pulled || 0) + f.qty); target.pulledStatus = f.pulledStatus; }
+            if (target) { target.pulled = round4((target.pulled || 0) + f.qty); if (!target.pulledStatus || !/not yet shipped/.test(f.pulledStatus)) { target.pulledStatus = f.pulledStatus; } }
+        });
+        // Now that every fulfillment of the order is read, the ones that have
+        // really shipped are in here too -- and they are already in the
+        // order line's own shipped quantity. What is still standing in the
+        // building is the difference.
+        out.forEach(function (o) {
+            if (o.pulled == null) { return; }
+            o.pulled = round4(Math.max(0, o.pulled - (o.shipped || 0)));
+            if (!(o.pulled > 0)) { delete o.pulled; delete o.pulledStatus; }
         });
         // Do Not Commit: NetSuite commits nothing to the line, so the pulled
         // quantity is the only signal that those units are in the building.
