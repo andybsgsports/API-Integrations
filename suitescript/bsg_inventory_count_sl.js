@@ -49,7 +49,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-11-24.1',
+        VERSION: '2026-11-24.2',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -99,9 +99,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             posted: 'custrecord_bcl_posted',        // Check Box
             adjustment: 'custrecord_bcl_adjustment' // List/Record: Transaction
         },
-        // Lines per Inventory Adjustment when posting the shared count: each line
-        // is also marked posted in the same request, so this stays well inside
-        // the request's governance.
+        // Optional field on the same record -- Free-Form Text. When the count
+        // itself last changed (the shelf number or the ticked orders), stamped
+        // by the server. Without it "Keep the latest" can only go by the
+        // record's last save, and a save is not a count: renaming a device
+        // re-saves every one of its lines. The page works without the field
+        // and says so where it matters; null never looks for it.
+        SHARED_COUNTED_AT: 'custrecord_bcl_counted_at',
+        // Items per request when posting the shared count (every batch goes
+        // into the same adjustment): each line is also marked posted in the
+        // same request, so this stays well inside the request's governance.
         SHARED_BATCH: 100,
         // Lines a device may push in one sync request.
         SYNC_MAX_LINES: 50,
@@ -1113,6 +1120,25 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             return { ready: false, missing: rf ? rf.name : '', error: userErr(e) };
         }
     }
+    // The optional counted-at field's id, or null when the record does not
+    // have it (yet). Asked of NetSuite once and remembered: an hour when it
+    // is there, five minutes when it is not, so adding the field takes
+    // effect without touching the script.
+    var countedAtMemo;
+    function countedAtField() {
+        var f = CONFIG.SHARED_COUNTED_AT;
+        if (!f || !sharedOn()) { return null; }
+        if (countedAtMemo !== undefined) { return countedAtMemo; }
+        var c = deadCache(), key = 'counted_at_v1:' + f, hit = null;
+        if (c) { try { hit = c.get({ key: key }); } catch (e) { hit = null; } }
+        if (hit === 'y' || hit === 'n') { countedAtMemo = hit === 'y' ? f : null; return countedAtMemo; }
+        var ok = true;
+        try { search.create({ type: CONFIG.SHARED_RECORD, filters: [[CONFIG.SHARED_FIELDS.posted, 'is', 'F']], columns: [f] }).run().getRange({ start: 0, end: 1 }); }
+        catch (e2) { ok = false; }
+        countedAtMemo = ok ? f : null;
+        if (c) { try { c.put({ key: key, value: ok ? 'y' : 'n', ttl: ok ? 3600 : 300 }); } catch (e3) { /* best effort */ } }
+        return countedAtMemo;
+    }
     function requireShared() {
         var st = sharedStatus();
         if (!st.ready) { throw new Error(st.off ? 'The shared count is switched off.' : 'The shared count is not set up: ' + (st.error || 'record type missing')); }
@@ -1250,6 +1276,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     function sharedRows(filters) {
         var F = CONFIG.SHARED_FIELDS;
         var cols = [F.item, F.shelf, F.orders, F.onhand, F.counter, F.device, F.label, F.posted, F.adjustment, search.createColumn({ name: 'lastmodified', sort: search.Sort.DESC })];
+        var CA = countedAtField();
+        if (CA) { cols.push(CA); }
         var rs = search.create({ type: CONFIG.SHARED_RECORD, filters: filters, columns: cols }).run();
         var rows = [], start = 0, MAX = 5000;
         function num(v) { return v === '' || v == null ? null : parseFloat(v); }
@@ -1270,13 +1298,29 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                     label: String(r.getValue(F.label) || ''),
                     posted: posted === true || posted === 'T',
                     adjustment: String(r.getValue(F.adjustment) || ''),
-                    at: String(r.getValue('lastmodified') || ''),
+                    countedAt: CA ? String(r.getValue(CA) || '') : '',
+                    at: String((CA && r.getValue(CA)) || r.getValue('lastmodified') || ''),
                     seq: rows.length     // 0 = saved most recently; 'at' is display text and does not sort
                 });
             });
             if (chunk.length < 1000) { break; }
             start += 1000;
         }
+        return rankByCount(rows);
+    }
+
+    // seq says which line is the latest: 0 first. It starts as the order the
+    // lines were last SAVED in; where lines carry a counted-at stamp it
+    // becomes the order they were last COUNTED in (an ISO time, so it sorts
+    // as text). A line with no stamp predates the field and ranks behind
+    // every stamped one, in save order among its own kind. The rows
+    // themselves stay in the order the search returned them.
+    function rankByCount(rows) {
+        if (!rows.some(function (r) { return !!r.countedAt; })) { return rows; }
+        rows.slice().sort(function (a, b) {
+            if (a.countedAt === b.countedAt) { return a.seq - b.seq; }
+            return a.countedAt > b.countedAt ? -1 : 1;
+        }).forEach(function (r, i) { r.seq = i; });
         return rows;
     }
 
@@ -1296,9 +1340,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         dels.forEach(function (d) { items[d] = true; });
         var itemIds = Object.keys(items);
         if (!itemIds.length) { return { ok: true, synced: 0, deleted: 0, errors: [] }; }
-        var existing = {};
+        var existing = {}, prior = {};
         sharedRows(sharedLocFilter([[F.counter, 'anyof', [String(g.uid)]], 'and', [F.device, 'is', g.device], 'and', [F.posted, 'is', 'F'], 'and', [F.item, 'anyof', itemIds]], g.locId))
-            .forEach(function (r) { existing[r.item] = r.id; });
+            .forEach(function (r) { existing[r.item] = r.id; prior[r.item] = r; });
+        var CA = countedAtField(), now = new Date().toISOString();
         var synced = 0, deleted = 0, errors = [];
         ups.forEach(function (u) {
             var id = posInt(u && u.item);
@@ -1313,6 +1358,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             vals[F.shelf] = round4(shelf);
             vals[F.orders] = JSON.stringify(cleanOrders(u.orders));
             vals[F.label] = label;
+            // Counted now only if the count is new or different. A re-save of
+            // the same numbers (a renamed device, on-hand filled in) leaves
+            // the stamp alone, which is the whole point of having it.
+            var was = prior[id];
+            if (CA && (!was || round4(was.shelf) !== vals[F.shelf] || JSON.stringify(was.orders) !== vals[F.orders])) { vals[CA] = now; }
             var oh = parseFloat(u.onhand);
             if (isFinite(oh)) { vals[F.onhand] = oh; }
             try {
@@ -1834,7 +1884,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // Excel needs N/compress, which not every account has; the page only
         // offers the button where it does (CSV opens in Excel regardless).
         try { require('N/compress'); boot.excel = true; } catch (e4) { boot.excel = false; }
-        boot.sharedSetup = { record: CONFIG.SHARED_RECORD, fields: CONFIG.SHARED_FIELDS };
+        boot.sharedSetup = { record: CONFIG.SHARED_RECORD, fields: CONFIG.SHARED_FIELDS, countedAt: CONFIG.SHARED_COUNTED_AT || '' };
+        boot.countedAt = false;
+        try { boot.countedAt = !!(boot.shared && boot.shared.ready && countedAtField()); } catch (e5) { boot.countedAt = false; }
         if (boot.multiLoc) {
             try { boot.locations = listLocations(); } catch (e1) { boot.warnings.push('Could not list locations: ' + userErr(e1)); }
         }
@@ -2595,6 +2647,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             if (!F[k]) { return; }
             list.appendChild(el('li', {}, [el('code', { text: F[k] }), ' — ' + spec[k] + (sh.missing && sh.missing === F[k] ? '  ← missing' : '')]));
         });
+        if (su.countedAt) { list.appendChild(el('li', {}, [el('code', { text: su.countedAt }), ' — Free-Form Text (optional: lets "Keep the latest" go by when an item was counted)'])); }
         return el('div', { class: 'ic-setup' }, [
             el('b', { text: 'Shared count is not set up yet' }),
             el('p', { text: 'Until the custom record below exists, each device keeps its own sheet and only this one can be submitted from here. Create it once (Customization › Lists, Records & Fields › Record Types › New, then its Fields subtab), then reload this page. NetSuite said: ' + (sh.error || 'record type missing') + '.' }),
@@ -3567,6 +3620,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     el('b', { text: t.multi + ' item' + (t.multi === 1 ? ' was' : 's were') + ' counted by two people. ' }),
                     (dupeMode() === 'latest' ? 'Only the latest count is kept for each -- for a shelf counted twice by mistake, even when both counters landed on the same number.' : 'The counts are added up for each -- for two areas of the building.') + ' Those items carry +' + fmt(t.multiPos) + ' / −' + fmt(t.multiNeg) + ' of the units up / down. This choice is remembered in this browser.'
                 ]),
+                (dupeMode() === 'latest' && !BOOT.countedAt && (BOOT.sharedSetup || {}).countedAt) ? el('div', { class: 'ic-dupes-text' }, [
+                    el('b', { text: 'Latest here means saved last, which is not always counted last. ' }),
+                    'Renaming a device re-saves all of its lines, so they can look newest. Check the kept counter on each item below, or add a Free-Form Text field ',
+                    el('code', { text: BOOT.sharedSetup.countedAt }),
+                    ' to the BSG Count Line record so the page can go by when each item was actually counted (lines counted before the field exists keep going by their save).'
+                ]) : null,
                 el('div', { class: 'ic-seg', role: 'group', 'aria-label': 'Two people counted the same item' }, [
                     el('button', { class: 'ic-segbtn' + (dupeMode() === 'add' ? ' is-on' : ''), type: 'button', text: 'Add them up', onclick: function () { setDupeMode('add'); } }),
                     el('button', { class: 'ic-segbtn' + (dupeMode() === 'latest' ? ' is-on' : ''), type: 'button', text: 'Keep the latest', onclick: function () { setDupeMode('latest'); } })

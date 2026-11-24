@@ -280,6 +280,7 @@ rest of the sheet still posts. Adjust those the normal way.
 | `MAX_LINES_PER_ADJUSTMENT` | `200` | Without the shared count, a device's sheet bigger than this posts as several adjustments. |
 | `SHARED_RECORD` | `customrecord_bsg_count_line` | The custom record that holds every device's count lines (see *Shared count*). `null` switches the shared count off: one sheet per device, submitted from that device. |
 | `SHARED_FIELDS` | `custrecord_bcl_*` | The record's field IDs, if you named them differently. |
+| `SHARED_COUNTED_AT` | `custrecord_bcl_counted_at` | Optional field on the shared record that holds when each line was last *counted* (see *Keep the latest*). The page works without it; `null` never looks for it. |
 | `SHARED_BATCH` | `100` | Items sent per request when posting the shared count. Every batch is added to the **same** Inventory Adjustment, and each line is marked posted in the same request. |
 | `SYNC_MAX_LINES` | `50` | Lines a device sends per save; a burst is sent in several saves. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
@@ -345,6 +346,7 @@ under Customization › Lists, Records & Fields › Record Types › **New**:
 | Field `custrecord_bcl_device_label` | Free-Form Text |
 | Field `custrecord_bcl_posted` | Check Box |
 | Field `custrecord_bcl_adjustment` | List/Record → **Transaction** |
+| Field `custrecord_bcl_counted_at` | Free-Form Text — **optional**, see *Keep the latest* below |
 
 Type the IDs exactly (NetSuite prefixes `custrecord_` for you on the field
 form — enter the part after it if the prefix is already shown). Until the
@@ -401,6 +403,19 @@ way — one sheet per device.
   taken for "posted or discarded" and vanished until the next check, and a
   line just removed came back the same way. Since v2026-11-24.1 a save or a
   delete newer than the answer wins.
+- **Keep the latest goes by when an item was counted, once the record has
+  the `custrecord_bcl_counted_at` field.** Without that field the page can
+  only go by when a line was last *saved*, and a save is not a count:
+  renaming a device re-saves every one of its lines, so an older count can
+  look newest and win. With the field (Free-Form Text, added to the BSG
+  Count Line record the same way as the others — nothing else to do, the
+  page notices it within five minutes), the server stamps a line only when
+  its shelf number or its ticked orders actually change, and the times shown
+  beside each counter are count times too. Lines counted before the field
+  existed have no stamp: they rank behind stamped ones and keep going by
+  their save among themselves. While the field is missing and Keep the
+  latest is switched on, the notice above the list says so. Add them up, the
+  default, never depended on any of this.
 - Every device sees everyone's open-order ticks. A line someone else ticked
   shows checked and locked with *ticked by Jeff Howard · Warehouse tablet 1*,
   the order and rep headers count it, and **Select all** skips it; the view
