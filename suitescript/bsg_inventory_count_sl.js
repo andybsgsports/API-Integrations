@@ -44,12 +44,12 @@
  * @NApiVersion 2.1
  * @NScriptType Suitelet
  */
-define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/render', 'N/log'], function (search, record, runtime, url, cache, file, render, log) {
+define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/render', 'N/log', 'N/format'], function (search, record, runtime, url, cache, file, render, log, format) {
 
     var CONFIG = {
         TITLE: 'BSG Inventory Count',
         // Shown in the page footer so a device running an old copy is obvious.
-        VERSION: '2026-11-24.2',
+        VERSION: '2026-11-24.3',
         // Internal id of the account the Inventory Adjustment posts against (its
         // header "Account" field). BSG posts counts to 5005 INVENTORY ADJUSTMENT
         // (Cost of Goods Sold), internal id 222 -- confirmed by Andy 2026-09-11.
@@ -110,6 +110,13 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // into the same adjustment): each line is also marked posted in the
         // same request, so this stays well inside the request's governance.
         SHARED_BATCH: 100,
+        // Full year-end count: an item counts as "counted" if it has an open
+        // count line, or one that was posted within this many days. The second
+        // half is what makes a full count safe to submit twice -- after a
+        // failed batch, or when part of the count was posted earlier in the
+        // week, the items already posted have no open line any more and must
+        // not be taken for "never counted" and reset to 0.
+        FULL_COUNT_RECENT_DAYS: 7,
         // Lines a device may push in one sync request.
         SYNC_MAX_LINES: 50,
         MEMO_PREFIX: 'Physical count',
@@ -218,6 +225,8 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 out = isPost ? markPosted(body) : { ok: false, error: 'POST required.' };
             } else if (action === 'discard') {
                 out = isPost ? discardShared(body) : { ok: false, error: 'POST required.' };
+            } else if (action === 'uncounted') {
+                out = isPost ? uncountedItems(body) : { ok: false, error: 'POST required.' };
             } else if (action === 'precheck') {
                 out = isPost ? precheckAdjusted(body) : { ok: false, error: 'POST required.' };
             } else {
@@ -905,8 +914,15 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         (Array.isArray(raw) ? raw : []).forEach(function (l) {
             if (!l) { return; }
             var id = posInt(l.item);
-            var count = parseFloat(l.count);
+            // reset: a full year-end count's "nobody counted this, so it is
+            // not here" line. It is a count of 0 with nothing behind it.
+            var reset = l.reset === true;
+            var count = reset ? 0 : parseFloat(l.count);
             if (!id || !isFinite(count) || count < 0) { return; }
+            if (reset) {
+                if (!seen[id]) { seen[id] = { item: String(id), count: 0, orders: [], by: '', ids: [], seen: [], reset: true }; out.push(seen[id]); }
+                return;      // an item that also carries a real count keeps the real count
+            }
             var orders = cleanOrders(l.orders);
             // seen: the shared count lines behind this total as the administrator
             // saw them (id, shelf, ticked orders); they are marked posted afterwards,
@@ -916,7 +932,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             }).filter(function (x) { return !!x.id; });
             var ids = seenLines.length ? seenLines.map(function (x) { return String(x.id); }) : idList(l.ids, 50);
             var line = { item: String(id), count: round4(count), orders: orders, by: cleanName(l.by, 160), ids: ids, seen: seenLines };
-            if (seen[id]) { seen[id].count = line.count; seen[id].orders = orders; seen[id].by = line.by; seen[id].ids = ids; seen[id].seen = seenLines; return; } // same item twice: last wins
+            if (seen[id]) { seen[id].count = line.count; seen[id].orders = orders; seen[id].by = line.by; seen[id].ids = ids; seen[id].seen = seenLines; seen[id].reset = false; return; } // same item twice: last wins
             seen[id] = line;
             out.push(line);
         });
@@ -924,6 +940,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
     }
 
     function lineMemo(l) {
+        if (l.reset) { return 'Not counted in full count; on hand ' + l.onhand + '; reset to 0'; }
         var memo = 'Counted ' + l.count;
         if (l.orders && l.orders.length) {
             var total = 0;
@@ -975,7 +992,11 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // holding the value the administrator saw. A line that is missing, or
         // has changed since (a counter re-keyed it), makes the total stale --
         // reload rather than post it.
-        var shared = lines.some(function (l) { return l.ids.length > 0; });
+        // A full count's reset lines ride the same check: a reset says "nobody
+        // counted this", so an open count line for that item -- keyed after
+        // the administrator reviewed the list -- makes it stale too.
+        var resets = lines.filter(function (l) { return l.reset; });
+        var shared = resets.length > 0 || lines.some(function (l) { return l.ids.length > 0; });
         if (shared) {
             requireShared();
             var carried = {};
@@ -1001,8 +1022,16 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         // Fresh on-hand, right now, server side -- the page's numbers may be hours old.
         var current = lookupOnHand(lines.map(function (l) { return l.item; }), locId);
         var candidates = [], skipped = [], blocked = [];
+        // An item whose count was posted in the last few days WAS counted,
+        // whatever the page thought when it built its reset list.
+        var justPosted = resets.length ? recentlyPosted(locId, resets.map(function (l) { return l.item; })) : { items: {} };
+        if (justPosted.truncated) { return { ok: false, error: 'Too many recently posted count lines to check the full count safely. Nothing was posted.' }; }
         lines.forEach(function (l) {
             var it = current[l.item];
+            if (l.reset && justPosted.items[l.item]) {
+                blocked.push({ item: l.item, name: it && it.name, count: 0, reset: true, reason: 'Counted and posted in the last ' + CONFIG.FULL_COUNT_RECENT_DAYS + ' days -- left as it is, not reset.' });
+                return;
+            }
             if (!it) {
                 blocked.push({ item: l.item, count: l.count, reason: 'Not found: inactive, not an inventory item, or not stocked at this location.' });
                 return;
@@ -1011,7 +1040,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
                 blocked.push({ item: l.item, name: it.name, count: l.count, reason: 'Needs inventory detail (' + it.blocked + ') -- adjust this one manually.' });
                 return;
             }
-            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand, orders: l.orders, by: l.by, ids: l.ids });
+            candidates.push({ item: l.item, name: it.name, count: l.count, onhand: it.onhand, orders: l.orders, by: l.by, ids: l.ids, reset: !!l.reset });
         });
         // Shared lines behind the counts that went through (posted or already
         // matching) are marked posted so they leave everyone's open sheet;
@@ -1076,7 +1105,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
         var id = rec.save({ enableSourcing: true, ignoreMandatoryFields: false });
         log.audit({
             title: 'invcount: adjustment ' + id + (addTo ? ' (added to)' : ' (created)'),
-            details: applied.length + ' lines, ' + skipped.length + ' unchanged, ' + blocked.length + ' blocked; location ' + (locId || 'n/a') + '; account ' + accountId
+            details: applied.length + ' lines (' + applied.filter(function (l) { return l.reset; }).length + ' reset to 0 as not counted), ' + skipped.length + ' unchanged, ' + blocked.length + ' blocked; location ' + (locId || 'n/a') + '; account ' + accountId
         });
         return finish({
             ok: true,
@@ -1476,6 +1505,70 @@ define(['N/search', 'N/record', 'N/runtime', 'N/url', 'N/cache', 'N/file', 'N/re
             try { record.delete({ type: CONFIG.SHARED_RECORD, id: r.id }); deleted++; } catch (e) { /* stays in remaining */ }
         });
         return { ok: true, deleted: deleted, remaining: Math.max(0, rows.length - deleted) };
+    }
+
+    // ------------------------------------------------------------ full count --
+    // A spot count changes only what was counted. A full year-end count also
+    // says something about everything else: an item with stock on the books
+    // that nobody counted or ticked is not in the building, and goes to 0.
+    // "Not counted" and "not there" look the same from here, so nothing is
+    // reset on the server's own say-so: this lists the items, the
+    // administrator reviews the list, and the page sends each one back as an
+    // explicit reset line that submitCount checks again.
+
+    // Items with a count line posted in the last FULL_COUNT_RECENT_DAYS days
+    // at the location (optionally only among itemIds).
+    function recentlyPosted(locId, itemIds) {
+        var F = CONFIG.SHARED_FIELDS, since = new Date();
+        since.setDate(since.getDate() - CONFIG.FULL_COUNT_RECENT_DAYS);
+        var filters = [[F.posted, 'is', 'T'], 'and', ['lastmodified', 'onorafter', format.format({ value: since, type: format.Type.DATE })]];
+        var out = { items: {}, truncated: false };
+        var ids = itemIds || [null];
+        // 'anyof' takes at most 1,000 values; a full count can reset more.
+        for (var i = 0; i < ids.length; i += 900) {
+            var f = filters.slice();
+            if (itemIds) { f.push('and'); f.push([F.item, 'anyof', itemIds.slice(i, i + 900)]); }
+            var rows = sharedRows(sharedLocFilter(f, locId));
+            if (rows.length >= 5000) { out.truncated = true; }
+            rows.forEach(function (r) { out.items[r.item] = true; });
+        }
+        return out;
+    }
+
+    function uncountedItems(body) {
+        requireShared();
+        if (!canSubmit()) { return { ok: false, error: 'Your role cannot post a full count.' }; }
+        var locId = multiLocation() ? posInt(body.loc) : null;
+        if (multiLocation() && !locId) { return { ok: false, error: 'Pick a location first.' }; }
+        var F = CONFIG.SHARED_FIELDS, open = {};
+        var openRows = sharedRows(sharedLocFilter([[F.posted, 'is', 'F']], locId));
+        openRows.forEach(function (r) { open[r.item] = true; });
+        var recent = recentlyPosted(locId, null);
+        var oh = qtyField(locId, 'onhand');
+        if (isDead('item', 'filter', oh)) { return { ok: false, error: 'This account cannot list items by quantity on hand, so a full count cannot be worked out here.' }; }
+        var all = [], capped = false;
+        withSearch('item', function () {
+            var filters = baseFilters(locId);
+            filters.push('and');
+            filters.push([[oh, 'greaterthan', '0'], 'or', [oh, 'lessthan', '0']]);
+            return itemSpec(filters, locId);
+        }, function (srch) {
+            all = []; capped = false;
+            var paged = srch.runPaged({ pageSize: 1000 });
+            for (var i = 0; i < paged.pageRanges.length; i++) {
+                if (all.length >= CONFIG.EXPORT_MAX_ROWS) { capped = true; break; }
+                paged.fetch({ index: i }).data.forEach(function (r) { all.push(rowToItem(r, locId)); });
+            }
+        });
+        var items = [], blocked = [], kept = 0;
+        naturalItemOrder(all).forEach(function (it) {
+            if (!it.onhand || open[it.id]) { return; }
+            if (recent.items[it.id]) { kept++; return; }
+            var row = { id: it.id, name: it.name, display: it.display || it.desc || '', onhand: it.onhand, cost: it.cost || 0 };
+            if (it.blocked) { row.blocked = it.blocked; blocked.push(row); } else { items.push(row); }
+        });
+        return { ok: true, items: items, blocked: blocked, kept: kept, keptDays: CONFIG.FULL_COUNT_RECENT_DAYS, inStock: all.length,
+            truncated: capped || recent.truncated || openRows.length >= 5000 };
     }
 
     // Items a count already adjusted today, so a second submit is a decision
@@ -2253,7 +2346,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         confirm: false,
         done: null,
         device: '', deviceLabel: '', // this browser's id and the name shown to the administrator
-        session: null              // administrator, shared count: everyone's open lines
+        session: null,             // administrator, shared count: everyone's open lines
+        countMode: 'spot'          // spot | full. Never remembered: a full count resets what was not counted, so it is chosen each time
     };
     var searchTimer = null, reqSeq = 0;
 
@@ -3614,6 +3708,20 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 return el('span', { class: 'ic-chip' }, [el('b', { text: c.name }), c.label ? el('span', { text: c.label }) : null, el('span', { class: 'ic-meta', text: c.lines + ' line' + (c.lines === 1 ? '' : 's') + (c.at ? ' · ' + fmtAt(c.at) : '') })]);
             })));
         }
+        var full = state.countMode === 'full';
+        var where = state.loc ? ' at ' + locName(state.loc) : '';
+        main.appendChild(el('div', { class: 'ic-dupes', id: 'icCountMode' }, [
+            el('div', { class: 'ic-dupes-text' }, [
+                el('b', { text: full ? 'Full year-end count. ' : 'Spot count. ' }),
+                full
+                    ? 'Items counted or ticked post as counted, and every other item with stock on the books' + where + ' is reset to 0 -- if nobody counted it, it is not here. You are shown that list, and must confirm it, before anything posts.'
+                    : 'Only the items counted below change. Everything else' + where + ' is left exactly as it is.'
+            ]),
+            el('div', { class: 'ic-seg', role: 'group', 'aria-label': 'What this submit covers' }, [
+                el('button', { class: 'ic-segbtn' + (!full ? ' is-on' : ''), type: 'button', text: 'Spot count', onclick: function () { setCountMode('spot'); } }),
+                el('button', { class: 'ic-segbtn' + (full ? ' is-on' : ''), type: 'button', text: 'Full year-end count', onclick: function () { setCountMode('full'); } })
+            ])
+        ]));
         if (t.multi) {
             main.appendChild(el('div', { class: 'ic-dupes', id: 'icDupes' }, [
                 el('div', { class: 'ic-dupes-text' }, [
@@ -3709,6 +3817,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                     : 'Those ' + t.changed + ' item' + (t.changed === 1 ? '' : 's') + ' move to the merged count (+' + fmt(t.pos) + ' / −' + fmt(t.neg) + ' units). The other ' + (live - t.changed) + ' already match and are left off. Every counter\'s lines are then cleared from their sheets.' }),
                 t.review ? el('p', { text: t.review + ' item' + (t.review === 1 ? ' is' : 's are') + ' flagged for review (two counters, or on hand changed). Where two people counted one item, the counts are ' + (dupeMode() === 'latest' ? 'resolved by keeping the latest' : 'added together') + ' unless one is unticked or a total set by hand.' }) : null,
                 t.blocked ? el('p', { text: t.blocked + ' item' + (t.blocked === 1 ? ' is' : 's are') + ' skipped and stay on the sheet.' }) : null,
+                full ? uncountedPanel(s) : null,
                 pre === null ? el('p', { class: 'ic-meta', text: 'Checking today\'s adjustments…' }) : (pre && pre.length ? el('div', { class: 'ic-commit-warn' }, [
                     el('b', { text: pre.length + ' item' + (pre.length === 1 ? ' was' : 's were') + ' already adjusted by a count today: ' }),
                     pre.slice(0, 8).map(function (a) { var m = s.byItem[a.item]; return (m ? m.name : 'item ' + a.item) + ' (' + signed(a.qty) + (a.tranid ? ', #' + a.tranid : '') + ')'; }).join('; ') + (pre.length > 8 ? '; …' : ''),
@@ -3716,20 +3825,32 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 ]) : null),
                 el('div', { class: 'ic-actions' }, [
                     el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Cancel', onclick: function () { state.confirm = false; render(); } }),
-                    el('button', { class: 'ic-btn is-ok', type: 'button', text: nothing ? 'Yes, record the count' : 'Yes, submit count', onclick: submitShared })
+                    el('button', { class: 'ic-btn is-ok', type: 'button', disabled: full && !fullReady(s),
+                        text: full ? 'Yes, post the full count' : (nothing ? 'Yes, record the count' : 'Yes, submit count'), onclick: submitShared })
                 ])
             ]));
         } else {
             form.appendChild(el('div', { class: 'ic-actions' }, [
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Refresh on-hand', onclick: function () { s.fresh = {}; s.freshDone = false; s.freshLoading = false; render(); } }),
                 el('button', { class: 'ic-btn is-ghost', type: 'button', text: 'Discard all counts…', onclick: discardAll }),
-                el('button', { class: 'ic-btn', type: 'button', text: 'Submit count…', onclick: function () {
+                el('button', { class: 'ic-btn', type: 'button', text: full ? 'Submit full year-end count…' : 'Submit count…', onclick: function () {
                     state.submitError = '';
                     if (BOOT.multiLoc && !state.loc) { state.submitError = 'Pick a location at the top first.'; render(); return; }
                     if (!BOOT.accountLocked && !state.account) { state.submitError = 'Pick the adjustment account first.'; render(); return; }
                     if (!s.freshDone) { state.submitError = 'Still loading on-hand — one moment.'; render(); return; }
                     if (t.items - t.blocked <= 0) { state.submitError = 'No countable items on the shared sheet.'; render(); return; }
-                    state.confirm = true; s.precheck = null; render();
+                    state.confirm = true; s.precheck = null;
+                    // Listed fresh every time the confirm opens: what was not
+                    // counted a minute ago may have been counted since.
+                    s.uncounted = null; s.reviewed = false; s.showUncounted = false;
+                    if (full) {
+                        apiPost('uncounted', { loc: state.loc || '' }).then(function (r) {
+                            if (state.session !== s) { return; }
+                            s.uncounted = (r && r.ok) ? r : { error: (r && r.error) || 'Could not list the items that were not counted.' };
+                            if (state.confirm) { render(); }
+                        });
+                    }
+                    render();
                     apiPost('precheck', { loc: state.loc || '', items: s.items.map(function (m) { return m.id; }) }).then(function (r) {
                         if (state.session !== s) { return; }
                         s.precheck = (r && r.ok && r.adjusted) || [];
@@ -3741,16 +3862,76 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         main.appendChild(form);
     }
 
+    // Spot count or full year-end count. Switching closes an open confirm:
+    // what it was about to post has just changed.
+    function setCountMode(v) { state.countMode = v === 'full' ? 'full' : 'spot'; state.confirm = false; state.submitError = ''; render(); }
+    // The full count may post only once its list has loaded whole and the
+    // administrator has said they looked at it.
+    function fullReady(s) {
+        var u = s.uncounted;
+        return !!(u && u.ok && !u.truncated && s.reviewed);
+    }
+    function uncountedCsv(u) {
+        function q(v) { var t = String(v == null ? '' : v); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; }
+        var rows = [['Item', 'Description', 'On hand', 'Avg cost', 'Value', 'Note'].join(',')];
+        u.items.forEach(function (it) { rows.push([q(it.name), q(it.display), it.onhand, it.cost || '', it.cost ? Math.round(it.onhand * it.cost * 100) / 100 : '', 'Reset to 0'].join(',')); });
+        u.blocked.forEach(function (it) { rows.push([q(it.name), q(it.display), it.onhand, it.cost || '', '', q('NOT reset: needs inventory detail (' + it.blocked + ')')].join(',')); });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([rows.join('\r\n')], { type: 'text/csv' }));
+        a.download = 'not-counted-reset-to-0.csv';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+    // The part of the confirm that only a full count has: what will be reset.
+    function uncountedPanel(s) {
+        var u = s.uncounted;
+        if (!u) { return el('p', { class: 'ic-meta', text: 'Listing the items nobody counted…' }); }
+        if (u.error) { return el('div', { class: 'ic-error', text: 'The full count cannot post: ' + u.error }); }
+        if (u.truncated) { return el('div', { class: 'ic-error', text: 'The full count cannot post: there are too many items or count lines here to list every uncounted item, and a partial reset would be worse than none.' }); }
+        var n = u.items.length, units = 0, value = 0, costed = false;
+        u.items.forEach(function (it) { units += Math.abs(it.onhand); if (it.cost) { costed = true; value += it.onhand * it.cost; } });
+        var cb = el('input', { type: 'checkbox', id: 'icReviewed' });
+        cb.checked = !!s.reviewed;
+        cb.addEventListener('change', function () { s.reviewed = cb.checked; render(); });
+        var list = null;
+        if (s.showUncounted) {
+            list = el('div', { class: 'ic-uncounted' }, u.items.slice(0, 500).map(function (it) {
+                return el('div', { class: 'ic-meta', text: it.name + (it.display ? ' — ' + it.display : '') + ' · on hand ' + fmt(it.onhand) + ' → 0' });
+            }).concat(n > 500 ? [el('div', { class: 'ic-meta', text: '… and ' + (n - 500) + ' more. Export has every one.' })] : []));
+            list.style.maxHeight = '280px'; list.style.overflow = 'auto'; list.style.margin = '6px 0';
+        }
+        return el('div', { class: 'ic-commit-warn' }, [
+            el('p', {}, [
+                el('b', { text: n ? n + ' item' + (n === 1 ? '' : 's') + ' with stock on the books ' + (n === 1 ? 'was' : 'were') + ' NOT counted and will be reset to 0: ' : 'Every item with stock on the books was counted. Nothing will be reset. ' }),
+                n ? fmt(units) + ' unit' + (units === 1 ? '' : 's') + (costed ? ', ' + money(Math.abs(value)) + ' at average cost' : '') + '. If a shelf, a back room or an outside location was skipped, its stock is in this list -- cancel and count it first.' : ''
+            ]),
+            n ? el('div', { class: 'ic-actions' }, [
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: s.showUncounted ? 'Hide the list' : 'View the ' + n, onclick: function () { s.showUncounted = !s.showUncounted; render(); } }),
+                el('button', { class: 'ic-btn is-ghost is-sm', type: 'button', text: 'Export (CSV)', onclick: function () { uncountedCsv(u); } })
+            ]) : null,
+            list,
+            u.blocked.length ? el('p', { text: u.blocked.length + ' uncounted item' + (u.blocked.length === 1 ? ' needs' : 's need') + ' inventory detail (serial, lot or bin) and cannot be reset here -- adjust ' + (u.blocked.length === 1 ? 'it' : 'them') + ' the normal way: ' + u.blocked.slice(0, 6).map(function (it) { return it.name; }).join(', ') + (u.blocked.length > 6 ? ', …' : '') + '.' }) : null,
+            u.kept ? el('p', { text: u.kept + ' item' + (u.kept === 1 ? ' has' : 's have') + ' no open count but ' + (u.kept === 1 ? 'was' : 'were') + ' counted and posted in the last ' + u.keptDays + ' days, so ' + (u.kept === 1 ? 'it is' : 'they are') + ' left as posted.' }) : null,
+            el('p', { class: 'ic-meta', text: 'Inactive items are not listed and are never touched.' }),
+            el('label', { class: 'ic-sub', for: 'icReviewed' }, [cb, el('span', {}, [el('b', { text: n ? 'I have reviewed the list: these ' + n + ' item' + (n === 1 ? ' is' : 's are') + ' not in the building.' : 'Post this as the full year-end count.' })])])
+        ]);
+    }
+
     function submitShared() {
         var s = state.session, lines = [];
+        var full = state.countMode === 'full';
+        if (full && !fullReady(s)) { return; }
         s.items.forEach(function (m) {
             var g = mergedFor(m);
             if (!g.usable) { return; }
             lines.push({ item: m.id, count: g.total, orders: g.orders, by: g.names.join(', '), ids: g.ids, seen: g.seen });
         });
+        // After the counted items, so a count that fails part-way has posted
+        // what was found before anything is written off.
+        if (full) { s.uncounted.items.forEach(function (it) { if (!s.byItem[it.id]) { lines.push({ item: it.id, count: 0, reset: true }); } }); }
         var size = BOOT.sharedBatch || 100, batches = [];
         for (var i = 0; i < lines.length; i += size) { batches.push(lines.slice(i, i + size)); }
-        var done = { adjustments: [], applied: 0, skipped: 0, blocked: [], unmarked: [], location: state.loc ? locName(state.loc) : '', shared: true };
+        var done = { adjustments: [], applied: 0, skipped: 0, blocked: [], unmarked: [], location: state.loc ? locName(state.loc) : '', shared: true, full: full, reset: 0 };
         state.confirm = false; state.submitting = true; state.submitError = '';
         var n = 0;
         function retryMark(unmarked, adj, cb) {
@@ -3766,6 +3947,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
             state.submitting = false; state.progress = '';
             lsDel(sessionPrefsKey(s.loc));
             state.session = null;    // whatever is left -- blocked, or arrived meanwhile -- reloads on the next visit
+            state.countMode = 'spot'; // the next submit is a spot count unless a full one is chosen again
             state.done = done; state.view = 'done';
             render();
             reconcile();             // this device's own posted lines leave its local sheet
@@ -3796,6 +3978,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
                 }
                 if (res.adjustment && !done.adjustments.some(function (a) { return a.id === res.adjustment.id; })) { done.adjustments.push(res.adjustment); }
                 done.applied += (res.applied || []).length;
+                done.reset += (res.applied || []).filter(function (l) { return l.reset; }).length;
                 done.skipped += (res.skipped || []).length;
                 (res.blocked || []).forEach(function (b) { done.blocked.push({ name: b.name || ('item ' + b.item), reason: b.reason || '' }); });
                 retryMark(res.unmarked, res.adjustment, next);
@@ -4312,6 +4495,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-offset:0
         }
         box.appendChild(el('ul', {}, [
             el('li', { text: d.applied + ' line' + (d.applied === 1 ? '' : 's') + ' adjusted' + (d.location ? ' at ' + d.location : '') }),
+            d.full ? el('li', { text: 'Full year-end count: ' + (d.reset || 0) + ' of those lines ' + ((d.reset || 0) === 1 ? 'is an item' : 'are items') + ' nobody counted, reset to 0' }) : null,
             el('li', { text: d.skipped + ' already matched on-hand (left off the adjustment)' }),
             d.blocked.length ? el('li', { text: d.blocked.length + ' could not be adjusted and stayed on the sheet:' }) : null
         ]));

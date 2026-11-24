@@ -282,6 +282,7 @@ rest of the sheet still posts. Adjust those the normal way.
 | `SHARED_FIELDS` | `custrecord_bcl_*` | The record's field IDs, if you named them differently. |
 | `SHARED_COUNTED_AT` | `custrecord_bcl_counted_at` | Optional field on the shared record that holds when each line was last *counted* (see *Keep the latest*). The page works without it; `null` never looks for it. |
 | `SHARED_BATCH` | `100` | Items sent per request when posting the shared count. Every batch is added to the **same** Inventory Adjustment, and each line is marked posted in the same request. |
+| `FULL_COUNT_RECENT_DAYS` | `7` | Full year-end count: an item with no open count line still counts as counted if one of its lines was posted within this many days, so a second submit never resets what the first one posted. |
 | `SYNC_MAX_LINES` | `50` | Lines a device sends per save; a burst is sent in several saves. |
 | `MEMO_PREFIX` | `Physical count` | Default memo when the counter leaves it blank: `Physical count 2026-09-11 - Andrew Murray`. |
 | `SUBMIT_ROLE_IDS` | `[3]` | Internal ids of the roles allowed to post the adjustment. `3` is NetSuite's Administrator. Every other role counts, ticks open orders and exports, but sees no **Refresh on-hand** / **Clear sheet** / **Submit count** buttons, and the submit endpoint refuses them — a hidden button is not a permission. Find a role's id in the `id=` of its URL under Setup > Users/Roles > Manage Roles. `null` lets any role in the deployment's audience submit. |
@@ -299,8 +300,10 @@ disappears and account-wide on-hand is used.
 1. Open the link on whatever device is handy; pick the **location** once.
    The in-stock list loads on its own.
 2. Walk the list (or search to jump), key a count, **Add**. Repeat. Counts of
-   **0** are valid (they zero the item out). Items you never key a count for
-   are left exactly as they are — the tool never zeroes anything on its own. Switch to the **Sheet** tab any time to review or fix lines
+   **0** are valid (they zero the item out). In a **spot count**, items you
+   never key a count for are left exactly as they are. In a **full year-end
+   count** they are reset to 0 after the administrator reviews the list (see
+   *Spot count or full year-end count*). Switch to the **Sheet** tab any time to review or fix lines
    (`×` removes one, **Clear** removes all of yours — nothing is posted until
    Submit).
 3. Open the **Open orders** tab and walk the staging area, the decorator log
@@ -455,6 +458,65 @@ way — one sheet per device.
 
 Posted lines stay in NetSuite (Lists › Custom › BSG Count Line) linked to the
 adjustment, so who counted what is searchable later.
+
+## Spot count or full year-end count
+
+The administrator's Sheet tab has a switch above the list that decides what
+a submit covers. It always opens on **Spot count** and is never remembered,
+so a full count is chosen on purpose, every time.
+
+- **Spot count** — only the items counted change. Everything else at the
+  location is left exactly as it is. Use it for a cycle count, a recount of
+  one vendor, or fixing a handful of items mid-year.
+- **Full year-end count** — items counted or ticked post as counted, and
+  **every other item with stock on the books at the location is reset to 0**
+  in the same adjustment. In a wall-to-wall count, an item nobody found is
+  not in the building.
+
+"Not counted" and "not there" look identical to the system, so nothing is
+reset blind. Pressing **Submit full year-end count…** lists, fresh, every
+active item with a non-zero on-hand that has no count line, and the confirm
+shows:
+
+- how many items will be reset, with the units and their value at average
+  cost; **View** shows the list and **Export (CSV)** saves every row;
+- items that need inventory detail (serial, lot, bin): listed, **not**
+  reset — adjust those the normal way;
+- items with no open count that were counted and posted in the last
+  `FULL_COUNT_RECENT_DAYS` (7) days: left as posted.
+
+The post button stays disabled until the list has loaded whole and the
+administrator ticks **I have reviewed the list**. If a shelf, a back room or
+an outside location was skipped, its stock is on that list: cancel and count
+it first.
+
+What a full count does and does not do:
+
+- A reset line's memo reads `Not counted in full count; on hand 12; reset to
+  0`, so it can be told from a counted zero later. Negative on-hand is
+  brought up to 0 the same way.
+- Counted items post first and resets after, so a count that fails part-way
+  has recorded what was found before anything is written off.
+- It is safe to submit again. After a failed batch, or when part of the
+  count was posted earlier in the week, the items already posted have no
+  open line any more; the 7-day rule is what stops them being taken for
+  "never counted" and zeroed. The server checks every reset line again when
+  it arrives: an item someone counted after the list was reviewed makes the
+  submit stale (nothing posts, the sheet reloads), and one posted in the
+  last 7 days is refused with a reason.
+- **One location per submit.** Each location is its own full count.
+- **Inactive items are never touched**, and neither are items that are not
+  inventory items or assemblies.
+- An item that is on the sheet but has every sub-line left out stays as it
+  is — set its total by hand to 0 if that is what it should be.
+- If there are more items or count lines than can be listed whole (20,000
+  items in stock, 5,000 count lines), the full count refuses to post: a
+  partial reset would be worse than none.
+- It needs the shared count (the custom record). Without it there is only
+  the per-device spot count.
+- The adjustment is dated the day it is submitted. For it to land in the
+  closing year, submit on or before the last day of that year, with
+  shipping and receiving held from the count until the submit.
 
 ## Count-day rules (what moves inventory)
 
